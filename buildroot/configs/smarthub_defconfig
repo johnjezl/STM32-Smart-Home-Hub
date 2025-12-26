@@ -1,0 +1,55 @@
+# SmartHub Buildroot Configuration
+# For STM32MP157F-DK2 board
+#
+# This is a minimal defconfig for the SmartHub project.
+# Actual configuration will be expanded in Phase 1.
+#
+# Usage:
+#   cd buildroot
+#   make BR2_EXTERNAL=../smarthub/buildroot smarthub_defconfig
+#   make
+
+# Architecture
+BR2_arm=y
+BR2_cortex_a7=y
+BR2_ARM_FPU_NEON_VFPV4=y
+
+# Toolchain
+BR2_TOOLCHAIN_EXTERNAL=y
+BR2_TOOLCHAIN_EXTERNAL_ARM_ARM=y
+
+# System
+BR2_TARGET_GENERIC_HOSTNAME="smarthub"
+BR2_TARGET_GENERIC_ISSUE="SmartHub Home Automation System"
+BR2_SYSTEM_DHCP="eth0"
+BR2_ROOTFS_OVERLAY="$(BR2_EXTERNAL_SMARTHUB_PATH)/board/smarthub/overlay"
+
+# Kernel (use ST's kernel)
+# BR2_LINUX_KERNEL=y
+# BR2_LINUX_KERNEL_CUSTOM_GIT=y
+# BR2_LINUX_KERNEL_CUSTOM_REPO_URL="https://github.com/STMicroelectronics/linux.git"
+
+# Bootloader (use ST's U-Boot)
+# BR2_TARGET_UBOOT=y
+
+# Filesystem
+BR2_TARGET_ROOTFS_EXT2=y
+BR2_TARGET_ROOTFS_EXT2_4=y
+BR2_TARGET_ROOTFS_EXT2_SIZE="256M"
+
+# Packages - Core
+BR2_PACKAGE_BUSYBOX=y
+BR2_PACKAGE_DROPBEAR=y
+
+# Packages - Development
+BR2_PACKAGE_GDB=y
+BR2_PACKAGE_STRACE=y
+
+# Packages - SmartHub Dependencies (to be enabled)
+# BR2_PACKAGE_SQLITE=y
+# BR2_PACKAGE_MOSQUITTO=y
+# BR2_PACKAGE_WPA_SUPPLICANT=y
+
+# Post-build scripts
+BR2_ROOTFS_POST_BUILD_SCRIPT="$(BR2_EXTERNAL_SMARTHUB_PATH)/board/smarthub/post_build.sh"
+BR2_ROOTFS_POST_IMAGE_SCRIPT="$(BR2_EXTERNAL_SMARTHUB_PATH)/board/smarthub/post_image.sh"

@@ -1,0 +1,55 @@
+# Build directories
+build/
+out/
+*.o
+*.elf
+*.bin
+*.hex
+*.map
+*.d
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*~
+*.suo
+*.user
+
+# Buildroot
+buildroot/dl/
+buildroot/output/
+
+# Secrets
+*.pem
+*.key
+secrets/
+.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+
+# Web UI
+web-ui/node_modules/
+web-ui/.cache/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.temp
