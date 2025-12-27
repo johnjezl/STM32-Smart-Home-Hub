@@ -1,8 +1,10 @@
 # Phase 0: Development Environment Setup - Detailed TODO
 
 ## Overview
-**Duration**: 1 week  
+**Duration**: 1 week
 **Objective**: Establish development infrastructure, verify hardware functionality, and validate toolchain.
+
+> **Note**: This TODO was written for Linux development. Actual implementation was done on Windows with WSL2 for Linux-specific tools. See `PHASE_0_COMPLETED.md` for the actual steps taken.
 
 ---
 
@@ -140,9 +142,10 @@ sync
 ```
 
 ### 0.2.3 Initial Boot
-- [ ] Insert microSD card into board (slot on underside)
-- [ ] Connect USB-C power supply
-- [ ] Verify boot switches are set correctly (SW1: BOOT0=OFF, BOOT2=ON for SD boot)
+- [x] Insert microSD card into board (slot on underside)
+- [x] Connect USB-C power supply
+- [x] Verify boot switches are set correctly (SW1: **BOOT0=ON, BOOT2=ON** for SD boot)
+  - **Note**: Both switches should be ON (away from "BOOT" text) for SD card boot
 - [ ] Connect USB-C (ST-Link) to host for serial console
 - [ ] Open serial terminal:
 ```bash
@@ -397,20 +400,22 @@ git commit -m "Initial project structure"
 
 ## 0.6 Validation Checklist
 
-Before proceeding to Phase 1, verify:
+**PHASE 0 COMPLETED: 2025-12-26**
+
+See `PHASE_0_COMPLETED.md` for detailed completion notes.
 
 | Item | Status | Notes |
 |------|--------|-------|
-| Host toolchain installed | ☐ | arm-none-eabi-gcc works |
-| Board boots OpenSTLinux | ☐ | |
-| Serial console works | ☐ | 115200 baud |
-| Display shows Weston | ☐ | |
-| Touch input works | ☐ | |
-| Ethernet works | ☐ | Can SSH |
-| WiFi works | ☐ | Can SSH |
-| ST-Link detected | ☐ | |
-| M4 firmware test passes | ☐ | Can load via remoteproc |
-| Git repository created | ☐ | |
+| Host toolchain installed | ✅ | STM32CubeIDE on Windows (includes ARM toolchain) |
+| Board boots OpenSTLinux | ✅ | Custom SD image with GPT partition table |
+| Serial console works | ✅ | 115200 baud, COM8 / /dev/ttyS7 |
+| Display shows Weston | ✅ | 480x800 LCD working |
+| Touch input works | ✅ | |
+| Ethernet works | ✅ | end0 interface, DHCP, SSH accessible |
+| WiFi works | ✅ | wlan0 interface, manual config required |
+| ST-Link detected | ✅ | VCP working for serial console |
+| M4 firmware test passes | ✅ | remoteproc0 available, ready for firmware |
+| Git repository created | ✅ | github.com/johnjezl/STM32-Smart-Home-Hub |
 
 ---
 

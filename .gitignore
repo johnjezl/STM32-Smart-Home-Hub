@@ -53,3 +53,6 @@ venv/
 # Temporary files
 *.tmp
 *.temp
+
+# Claude Code
+.claude/
