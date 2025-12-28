@@ -14,7 +14,7 @@
 cd ~/projects/smarthub
 git clone https://github.com/buildroot/buildroot.git buildroot-src
 cd buildroot-src
-git checkout 2024.02.x  # Use LTS branch
+git checkout 2025.02.5  # Use LTS release
 ```
 
 ### 1.1.2 Clone STM32MP1 External Tree
@@ -22,16 +22,16 @@ git checkout 2024.02.x  # Use LTS branch
 cd ~/projects/smarthub
 git clone https://github.com/bootlin/buildroot-external-st.git
 cd buildroot-external-st
-git checkout st/2024.02.x  # Match Buildroot version
+git checkout st/2025.02.5  # Match Buildroot version
 ```
 
 ### 1.1.3 Initial Configuration
-- [ ] Set up external tree:
+- ✅ Set up external tree:
 ```bash
 cd ~/projects/smarthub/buildroot-src
-make BR2_EXTERNAL=../buildroot-external-st stm32mp157f_dk2_defconfig
+make BR2_EXTERNAL=../buildroot-external-st st_stm32mp157f_dk2_defconfig
 ```
-- [ ] Verify configuration:
+- ☐ Verify configuration:
 ```bash
 make menuconfig
 # Browse to see default settings - DO NOT change yet
@@ -39,7 +39,7 @@ make menuconfig
 ```
 
 ### 1.1.4 Directory Structure for Custom External Tree
-- [ ] Create project-specific external tree:
+- ☐ Create project-specific external tree:
 ```bash
 mkdir -p ~/projects/smarthub/buildroot
 cd ~/projects/smarthub/buildroot
@@ -71,8 +71,8 @@ EOF
 ## 1.2 Kernel Configuration
 
 ### 1.2.1 Base Kernel Config
-- [ ] Start with ST's proven configuration
-- [ ] Create kernel config fragment:
+- ☐ Start with ST's proven configuration
+- ☐ Create kernel config fragment:
 ```bash
 mkdir -p ~/projects/smarthub/buildroot/board/smarthub/stm32mp157f-dk2
 
@@ -148,7 +148,7 @@ EOF
 ```
 
 ### 1.2.2 Kernel Optimization
-- [ ] Create boot optimization fragment:
+- ☐ Create boot optimization fragment:
 ```bash
 cat > board/smarthub/stm32mp157f-dk2/linux-fastboot.fragment << 'EOF'
 # Faster boot
@@ -599,7 +599,27 @@ EOF
 
 ## 1.5 Build and Test
 
-### 1.5.1 Initial Build
+### 1.5.1 Initial Build (Stock ST Configuration)
+
+First, verify the toolchain works with the stock ST defconfig:
+
+```bash
+cd ~/projects/smarthub/buildroot-src
+
+# Use stock ST defconfig for initial testing
+make BR2_EXTERNAL=../buildroot-external-st st_stm32mp157f_dk2_defconfig
+
+# Build (takes 30-60 minutes first time)
+make -j$(nproc)
+
+# Output will be in output/images/
+ls output/images/
+```
+
+### 1.5.2 Custom SmartHub Build (After Custom External Tree Created)
+
+Once the custom external tree is set up (section 1.1.4 - 1.4):
+
 ```bash
 cd ~/projects/smarthub/buildroot-src
 
@@ -609,11 +629,8 @@ make BR2_EXTERNAL="../buildroot-external-st:../buildroot" smarthub_defconfig
 # Optional: Review/modify configuration
 make menuconfig
 
-# Build (takes 30-60 minutes first time)
+# Build
 make -j$(nproc)
-
-# Output will be in output/images/
-ls output/images/
 ```
 
 ### 1.5.2 Flash to SD Card
@@ -629,21 +646,21 @@ sync
 ```
 
 ### 1.5.3 First Boot Verification
-- [ ] Insert SD card and boot board
-- [ ] Connect serial console
-- [ ] Measure boot time (target: <10 seconds)
-- [ ] Verify login works
-- [ ] Check networking:
+- ☐ Insert SD card and boot board
+- ☐ Connect serial console
+- ☐ Measure boot time (target: <10 seconds)
+- ☐ Verify login works
+- ☐ Check networking:
 ```bash
 ip addr
 ping -c 3 google.com  # If internet available
 ```
-- [ ] Check Mosquitto running:
+- ☐ Check Mosquitto running:
 ```bash
 ps aux | grep mosquitto
 mosquitto_pub -h localhost -t test -m "hello"
 ```
-- [ ] Verify remoteproc available:
+- ☐ Verify remoteproc available:
 ```bash
 ls /sys/class/remoteproc/
 ```
@@ -669,18 +686,18 @@ dmesg | tail -10
 ## 1.6 Boot Optimization
 
 ### 1.6.1 Kernel Command Line
-- [ ] Add `quiet` to reduce boot messages
-- [ ] Add `loglevel=3` to suppress non-critical messages
-- [ ] Consider `rootwait` timeout adjustment
+- ☐ Add `quiet` to reduce boot messages
+- ☐ Add `loglevel=3` to suppress non-critical messages
+- ☐ Consider `rootwait` timeout adjustment
 
 ### 1.6.2 Init Script Optimization
-- [ ] Parallelize network startup
-- [ ] Defer non-critical services
-- [ ] Use background initialization where possible
+- ☐ Parallelize network startup
+- ☐ Defer non-critical services
+- ☐ Use background initialization where possible
 
 ### 1.6.3 Filesystem Optimization
-- [ ] Consider SquashFS + overlayfs for read-only root
-- [ ] Move logs to tmpfs
+- ☐ Consider SquashFS + overlayfs for read-only root
+- ☐ Move logs to tmpfs
 ```bash
 # Add to fstab
 tmpfs /var/log tmpfs defaults,noatime,nosuid,mode=0755,size=8m 0 0
@@ -697,9 +714,9 @@ BR2_PACKAGE_DROPBEAR=y
 ```
 
 ### 1.7.2 NFS Root (for Development)
-- [ ] Configure NFS server on host
-- [ ] Add NFS root kernel config
-- [ ] Create NFS boot configuration
+- ☐ Configure NFS server on host
+- ☐ Add NFS root kernel config
+- ☐ Create NFS boot configuration
 ```bash
 # U-Boot NFS boot command
 setenv nfsroot 192.168.1.100:/home/user/nfsroot

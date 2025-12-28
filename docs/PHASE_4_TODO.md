@@ -10,7 +10,7 @@
 ## 4.1 Hardware Setup
 
 ### 4.1.1 Acquire CC2652P Module
-- [ ] Purchase Zigbee coordinator module:
+- ☐ Purchase Zigbee coordinator module:
   - **Recommended**: SONOFF Zigbee 3.0 USB Dongle Plus (CC2652P)
   - **Alternative**: Electrolama zig-a-zig-ah! (zzh!)
   - **Alternative**: cod.m CC2652P2 module
@@ -34,8 +34,8 @@ python3 cc2538-bsl.py -p /dev/ttyUSB0 -evw CC2652P_coordinator_20230507.hex
 ```
 
 ### 4.1.3 Connect to STM32MP157F-DK2
-- [ ] Identify available UART on GPIO header
-- [ ] Connection (3.3V logic levels!):
+- ☐ Identify available UART on GPIO header
+- ☐ Connection (3.3V logic levels!):
   ```
   CC2652P      STM32MP1 (GPIO Header)
   -------      ----------------------
@@ -44,8 +44,8 @@ python3 cc2538-bsl.py -p /dev/ttyUSB0 -evw CC2652P_coordinator_20230507.hex
   TX     -->   UART7_RX (PA8, pin XX)
   RX     -->   UART7_TX (PA15, pin XX)
   ```
-- [ ] Enable UART in device tree if needed
-- [ ] Verify serial communication:
+- ☐ Enable UART in device tree if needed
+- ☐ Verify serial communication:
 ```bash
 # On the board
 stty -F /dev/ttySTM1 115200 raw -echo
@@ -695,21 +695,21 @@ private:
 ## 4.7 Testing
 
 ### 4.7.1 Test Devices
-- [ ] IKEA TRADFRI bulb (on/off, dimming, color temp)
-- [ ] Aqara temperature/humidity sensor
-- [ ] Aqara door/window sensor
-- [ ] Sonoff SNZB-02 temperature sensor
-- [ ] Smart plug/outlet
+- ☐ IKEA TRADFRI bulb (on/off, dimming, color temp)
+- ☐ Aqara temperature/humidity sensor
+- ☐ Aqara door/window sensor
+- ☐ Sonoff SNZB-02 temperature sensor
+- ☐ Smart plug/outlet
 
 ### 4.7.2 Test Scenarios
-- [ ] Coordinator initialization
-- [ ] Device pairing via permit join
-- [ ] Device state reading
-- [ ] Command sending (on/off/dim)
-- [ ] Attribute reporting (sensor data)
-- [ ] Device removal
-- [ ] Network persistence across restarts
-- [ ] Multiple device mesh network
+- ☐ Coordinator initialization
+- ☐ Device pairing via permit join
+- ☐ Device state reading
+- ☐ Command sending (on/off/dim)
+- ☐ Attribute reporting (sensor data)
+- ☐ Device removal
+- ☐ Network persistence across restarts
+- ☐ Multiple device mesh network
 
 ---
 

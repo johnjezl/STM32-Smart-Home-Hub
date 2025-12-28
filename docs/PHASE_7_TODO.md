@@ -519,10 +519,10 @@ For production: Full secure boot chain recommended
 ```
 
 ### 7.6.2 Evaluation Tasks
-- [ ] Study STM32MP1 secure boot documentation
-- [ ] Generate test keys (DO NOT fuse)
-- [ ] Practice signing workflow
-- [ ] Document production procedure
+- ☐ Study STM32MP1 secure boot documentation
+- ☐ Generate test keys (DO NOT fuse)
+- ☐ Practice signing workflow
+- ☐ Document production procedure
 
 ---
 
