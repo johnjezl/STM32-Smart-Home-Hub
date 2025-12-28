@@ -1,0 +1,45 @@
+# SmartHub Configuration
+# Default configuration file
+
+# Database settings
+database:
+  path: /var/lib/smarthub/smarthub.db
+
+# MQTT Broker connection
+mqtt:
+  broker: 127.0.0.1
+  port: 1883
+  client_id: smarthub
+  username: ""
+  password: ""
+
+# Web server settings
+web:
+  port: 443
+  http_port: 80
+  root: /opt/smarthub/www
+  tls:
+    cert: /etc/smarthub/cert.pem
+    key: /etc/smarthub/key.pem
+
+# Display settings
+display:
+  device: /dev/fb0
+  touch_device: /dev/input/event0
+  brightness: 100
+  screen_timeout: 60  # seconds, 0 to disable
+
+# M4 communication (RPMsg)
+rpmsg:
+  device: /dev/ttyRPMSG0
+
+# Zigbee settings (Phase 4)
+zigbee:
+  enabled: false
+  port: /dev/ttyUSB0
+  baud: 115200
+
+# Logging
+logging:
+  level: info  # debug, info, warning, error
+  file: /var/log/smarthub.log
