@@ -5,64 +5,108 @@
  * Runs on Cortex-A7 under Buildroot Linux
  */
 
-#include <cstdio>
-#include <cstdlib>
+#include <smarthub/core/Application.hpp>
+#include <smarthub/core/Logger.hpp>
+
 #include <csignal>
+#include <cstdlib>
+#include <cstring>
 
-// TODO: Include core modules
-// #include "core/logger.hpp"
-// #include "core/config.hpp"
-// #include "core/event_bus.hpp"
-// #include "database/database.hpp"
-// #include "devices/device_manager.hpp"
-// #include "ui/ui_manager.hpp"
-// #include "web/web_server.hpp"
-// #include "rpmsg/rpmsg_client.hpp"
+using namespace smarthub;
 
-namespace {
-    volatile bool g_running = true;
+// Global application pointer for signal handler
+static Application* g_app = nullptr;
 
-    void signal_handler(int signum) {
-        if (signum == SIGINT || signum == SIGTERM) {
-            g_running = false;
+/**
+ * Signal handler for graceful shutdown
+ */
+void signalHandler(int signum) {
+    if (signum == SIGINT || signum == SIGTERM) {
+        LOG_INFO("Received signal %d, initiating shutdown...", signum);
+        if (g_app) {
+            g_app->shutdown();
         }
     }
 }
 
+/**
+ * Print usage information
+ */
+void printUsage(const char* progName) {
+    std::printf("SmartHub v%s - Smart Home Hub Application\n\n", Application::version());
+    std::printf("Usage: %s [options]\n\n", progName);
+    std::printf("Options:\n");
+    std::printf("  -c, --config <path>  Path to configuration file\n");
+    std::printf("                       (default: /etc/smarthub/config.yaml)\n");
+    std::printf("  -v, --version        Print version and exit\n");
+    std::printf("  -h, --help           Print this help message\n");
+    std::printf("\n");
+}
+
+/**
+ * Main entry point
+ */
 int main(int argc, char* argv[]) {
-    (void)argc;
-    (void)argv;
+    // Default configuration path
+    std::string configPath = "/etc/smarthub/config.yaml";
 
-    std::printf("SmartHub v0.1.0 starting...\n");
-
-    // Setup signal handlers
-    std::signal(SIGINT, signal_handler);
-    std::signal(SIGTERM, signal_handler);
-
-    // TODO: Initialize subsystems
-    // 1. Load configuration
-    // 2. Initialize logging
-    // 3. Initialize database
-    // 4. Start event bus
-    // 5. Initialize device manager
-    // 6. Start LVGL UI
-    // 7. Start web server
-    // 8. Connect to M4 via RPMsg
-    // 9. Start MQTT broker connection
-
-    std::printf("SmartHub initialized. Press Ctrl+C to exit.\n");
-
-    // Main loop
-    while (g_running) {
-        // TODO: Process events
-        // - Handle UI updates (LVGL tick)
-        // - Process incoming messages
-        // - Check device states
+    // Parse command line arguments
+    for (int i = 1; i < argc; i++) {
+        if (std::strcmp(argv[i], "-c") == 0 || std::strcmp(argv[i], "--config") == 0) {
+            if (i + 1 < argc) {
+                configPath = argv[++i];
+            } else {
+                std::fprintf(stderr, "Error: -c/--config requires an argument\n");
+                return EXIT_FAILURE;
+            }
+        } else if (std::strcmp(argv[i], "-v") == 0 || std::strcmp(argv[i], "--version") == 0) {
+            std::printf("SmartHub v%s\n", Application::version());
+            return EXIT_SUCCESS;
+        } else if (std::strcmp(argv[i], "-h") == 0 || std::strcmp(argv[i], "--help") == 0) {
+            printUsage(argv[0]);
+            return EXIT_SUCCESS;
+        } else {
+            std::fprintf(stderr, "Unknown option: %s\n", argv[i]);
+            printUsage(argv[0]);
+            return EXIT_FAILURE;
+        }
     }
 
-    std::printf("SmartHub shutting down...\n");
+    // Initialize logging early (will be reconfigured after config load)
+    Logger::init(Logger::Level::Info, "");
 
-    // TODO: Cleanup subsystems
+    LOG_INFO("SmartHub v%s starting...", Application::version());
 
-    return EXIT_SUCCESS;
+    // Set up signal handlers
+    std::signal(SIGINT, signalHandler);
+    std::signal(SIGTERM, signalHandler);
+    std::signal(SIGPIPE, SIG_IGN); // Ignore broken pipe
+
+    // Create and run application
+    int exitCode = EXIT_SUCCESS;
+
+    try {
+        Application app(configPath);
+        g_app = &app;
+
+        if (!app.initialize()) {
+            LOG_ERROR("Failed to initialize application");
+            exitCode = EXIT_FAILURE;
+        } else {
+            // Run main loop (blocks until shutdown)
+            app.run();
+        }
+
+        g_app = nullptr;
+
+    } catch (const std::exception& e) {
+        LOG_ERROR("Fatal error: %s", e.what());
+        exitCode = EXIT_FAILURE;
+    } catch (...) {
+        LOG_ERROR("Fatal error: unknown exception");
+        exitCode = EXIT_FAILURE;
+    }
+
+    LOG_INFO("SmartHub shutdown complete");
+    return exitCode;
 }
