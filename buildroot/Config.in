@@ -1,0 +1,3 @@
+# SmartHub custom packages
+# Future custom packages would be sourced here:
+# source "$BR2_EXTERNAL_SMARTHUB_PATH/package/smarthub-app/Config.in"

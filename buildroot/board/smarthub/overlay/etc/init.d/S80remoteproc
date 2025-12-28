@@ -1,0 +1,46 @@
+#!/bin/sh
+#
+# Load M4 firmware via remoteproc
+#
+
+M4_FIRMWARE="smarthub_m4.elf"
+RPROC_PATH="/sys/class/remoteproc/remoteproc0"
+
+case "$1" in
+  start)
+    if [ -f "/lib/firmware/$M4_FIRMWARE" ]; then
+        echo "Loading M4 firmware: $M4_FIRMWARE"
+        echo "$M4_FIRMWARE" > $RPROC_PATH/firmware
+        echo start > $RPROC_PATH/state
+        if [ $? -eq 0 ]; then
+            echo "M4 firmware started"
+        else
+            echo "Failed to start M4 firmware"
+        fi
+    else
+        echo "M4 firmware not found: /lib/firmware/$M4_FIRMWARE"
+        echo "Skipping M4 initialization"
+    fi
+    ;;
+  stop)
+    echo "Stopping M4 firmware..."
+    echo stop > $RPROC_PATH/state 2>/dev/null
+    ;;
+  restart)
+    $0 stop
+    sleep 1
+    $0 start
+    ;;
+  status)
+    if [ -f $RPROC_PATH/state ]; then
+        echo "M4 state: $(cat $RPROC_PATH/state)"
+    else
+        echo "remoteproc not available"
+    fi
+    ;;
+  *)
+    echo "Usage: $0 {start|stop|restart|status}"
+    exit 1
+esac
+
+exit 0

@@ -1,0 +1,56 @@
+#!/bin/sh
+#
+# Start networking
+#
+
+case "$1" in
+  start)
+    echo "Starting network..."
+
+    # Bring up loopback
+    ip link set lo up
+
+    # Bring up ethernet
+    ip link set eth0 up
+
+    # Start DHCP on ethernet
+    if [ -x /usr/sbin/dhcpcd ]; then
+        dhcpcd -b eth0
+    elif [ -x /sbin/udhcpc ]; then
+        udhcpc -i eth0 -b -q
+    fi
+
+    # Start WiFi if configured
+    if [ -f /etc/wpa_supplicant/wpa_supplicant.conf ]; then
+        if grep -q "ssid=" /etc/wpa_supplicant/wpa_supplicant.conf; then
+            echo "Starting WiFi..."
+            ip link set wlan0 up
+            wpa_supplicant -B -i wlan0 -c /etc/wpa_supplicant/wpa_supplicant.conf
+            sleep 2
+            if [ -x /usr/sbin/dhcpcd ]; then
+                dhcpcd -b wlan0
+            elif [ -x /sbin/udhcpc ]; then
+                udhcpc -i wlan0 -b -q
+            fi
+        fi
+    fi
+    ;;
+  stop)
+    echo "Stopping network..."
+    killall wpa_supplicant 2>/dev/null
+    killall dhcpcd 2>/dev/null
+    killall udhcpc 2>/dev/null
+    ip link set wlan0 down 2>/dev/null
+    ip link set eth0 down
+    ;;
+  restart)
+    $0 stop
+    sleep 1
+    $0 start
+    ;;
+  *)
+    echo "Usage: $0 {start|stop|restart}"
+    exit 1
+esac
+
+exit 0
