@@ -38,4 +38,37 @@ To open an interactive serial console to the STM32MP157F-DK2:
 C:/cygwin64/bin/env.exe -i HOME=/tmp PATH=/usr/bin:/bin C:/cygwin64/bin/bash.exe --login -c "picocom -b 115200 /dev/ttyS7"
 ```
 
-Exit picocom with: `Ctrl+A` then `Ctrl+X`
+---
+
+### TODO File Formatting
+
+Use emoji markers for task status:
+
+| Status | Marker | Example |
+|--------|--------|---------|
+| Completed | ✅ | `- ✅ Task completed` |
+| Pending | ☐ | `- ☐ Task pending` |
+| Blocked | 🔗 | `- ☐🔗 Task — requires M4` |
+| Deferred | ⏸️ | `- ⏸️ Task — deferred to Phase 4` |
+
+**Definitions:**
+- **Pending** ☐ — Ready to work on now
+- **Blocked** 🔗 — Waiting on dependency within this phase (combine with ☐ or ⏸️)
+- **Deferred** ⏸️ — Postponed to a future phase (e.g., "deferred to Phase 5")
+
+**Correct:**
+```markdown
+- ✅ Task completed
+- ☐ Task pending
+- ☐🔗 Task — requires M4 (pending, has dependency)
+- ⏸️ Task — deferred to Phase 5
+- ⏸️🔗 Task — deferred, had dependency when deferred
+```
+
+**Incorrect:**
+```markdown
+- [x] Task completed  ← Don't use this
+- [ ] Task pending    ← Use ☐ instead
+- ✓ Task completed    ← Don't use plain check symbol
+- Deferred: Task      ← Use ⏸️ emoji instead
+```
