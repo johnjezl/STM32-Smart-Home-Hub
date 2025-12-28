@@ -31,7 +31,7 @@ git checkout st/2025.02.5  # Match Buildroot version
 cd ~/projects/smarthub/buildroot-src
 make BR2_EXTERNAL=../buildroot-external-st st_stm32mp157f_dk2_defconfig
 ```
-- ☐ Verify configuration:
+- ✅ Verify configuration: — *Used menuconfig to review and customize*
 ```bash
 make menuconfig
 # Browse to see default settings - DO NOT change yet
@@ -39,7 +39,7 @@ make menuconfig
 ```
 
 ### 1.1.4 Directory Structure for Custom External Tree
-- ☐ Create project-specific external tree:
+- ✅ Create project-specific external tree: — *Created in STM32-Smart-Home-Hub/buildroot/*
 ```bash
 mkdir -p ~/projects/smarthub/buildroot
 cd ~/projects/smarthub/buildroot
@@ -71,8 +71,8 @@ EOF
 ## 1.2 Kernel Configuration
 
 ### 1.2.1 Base Kernel Config
-- ☐ Start with ST's proven configuration
-- ☐ Create kernel config fragment:
+- ✅ Start with ST's proven configuration — *Using stock ST multi_v7 defconfig*
+- ⏸️ Create kernel config fragment: — *Deferred, using ST defaults*
 ```bash
 mkdir -p ~/projects/smarthub/buildroot/board/smarthub/stm32mp157f-dk2
 
@@ -148,7 +148,7 @@ EOF
 ```
 
 ### 1.2.2 Kernel Optimization
-- ☐ Create boot optimization fragment:
+- ⏸️ Create boot optimization fragment: — *Deferred to Phase 6 (optimization)*
 ```bash
 cat > board/smarthub/stm32mp157f-dk2/linux-fastboot.fragment << 'EOF'
 # Faster boot
@@ -646,21 +646,21 @@ sync
 ```
 
 ### 1.5.3 First Boot Verification
-- ☐ Insert SD card and boot board
-- ☐ Connect serial console
-- ☐ Measure boot time (target: <10 seconds)
-- ☐ Verify login works
-- ☐ Check networking:
+- ✅ Insert SD card and boot board
+- ✅ Connect serial console — */dev/ttyACM0 at 115200 baud*
+- ✅ Measure boot time (target: <10 seconds) — *Actual: ~8 seconds*
+- ✅ Verify login works — *Root login via serial, SSH with key auth*
+- ✅ Check networking: — *eth0: 192.168.4.102, wlan0: 192.168.4.99*
 ```bash
 ip addr
 ping -c 3 google.com  # If internet available
 ```
-- ☐ Check Mosquitto running:
+- ✅ Check Mosquitto running: — *Running on port 1883, pub/sub tested*
 ```bash
 ps aux | grep mosquitto
 mosquitto_pub -h localhost -t test -m "hello"
 ```
-- ☐ Verify remoteproc available:
+- ✅ Verify remoteproc available: — */sys/class/remoteproc/remoteproc0 present*
 ```bash
 ls /sys/class/remoteproc/
 ```
@@ -685,19 +685,21 @@ dmesg | tail -10
 
 ## 1.6 Boot Optimization
 
+> **Note:** Boot optimization deferred to Phase 6. Current boot time (~8s) meets target.
+
 ### 1.6.1 Kernel Command Line
-- ☐ Add `quiet` to reduce boot messages
-- ☐ Add `loglevel=3` to suppress non-critical messages
-- ☐ Consider `rootwait` timeout adjustment
+- ⏸️ Add `quiet` to reduce boot messages — *Deferred to Phase 6*
+- ⏸️ Add `loglevel=3` to suppress non-critical messages — *Deferred to Phase 6*
+- ⏸️ Consider `rootwait` timeout adjustment — *Deferred to Phase 6*
 
 ### 1.6.2 Init Script Optimization
-- ☐ Parallelize network startup
-- ☐ Defer non-critical services
-- ☐ Use background initialization where possible
+- ⏸️ Parallelize network startup — *Deferred to Phase 6*
+- ⏸️ Defer non-critical services — *Deferred to Phase 6*
+- ⏸️ Use background initialization where possible — *Deferred to Phase 6*
 
 ### 1.6.3 Filesystem Optimization
-- ☐ Consider SquashFS + overlayfs for read-only root
-- ☐ Move logs to tmpfs
+- ⏸️ Consider SquashFS + overlayfs for read-only root — *Deferred to Phase 6*
+- ⏸️ Move logs to tmpfs — *Deferred to Phase 6*
 ```bash
 # Add to fstab
 tmpfs /var/log tmpfs defaults,noatime,nosuid,mode=0755,size=8m 0 0
@@ -708,22 +710,18 @@ tmpfs /var/log tmpfs defaults,noatime,nosuid,mode=0755,size=8m 0 0
 ## 1.7 Development Conveniences
 
 ### 1.7.1 SSH Access
-```bash
-# Add to overlay/etc/init.d/S50sshd or enable dropbear in Buildroot
-BR2_PACKAGE_DROPBEAR=y
-```
+- ✅ Dropbear SSH enabled with key authentication — *Working via `ssh root@smarthub.local`*
 
 ### 1.7.2 NFS Root (for Development)
-- ☐ Configure NFS server on host
-- ☐ Add NFS root kernel config
-- ☐ Create NFS boot configuration
-```bash
-# U-Boot NFS boot command
-setenv nfsroot 192.168.1.100:/home/user/nfsroot
-setenv bootargs "root=/dev/nfs nfsroot=${nfsroot},tcp,v3 ip=dhcp"
-```
+- ⏸️ Configure NFS server on host — *Deferred, not needed for current workflow*
+- ⏸️ Add NFS root kernel config — *Deferred*
+- ⏸️ Create NFS boot configuration — *Deferred*
 
 ### 1.7.3 Build Convenience Script
+- ✅ Created `tools/build.sh` — *Wrapper script for Buildroot with external trees*
+- ✅ Created `tools/flash.sh` — *SD card flashing script*
+- ✅ Created `tools/stm32-power.py` — *Kasa smart plug control for remote power cycling*
+
 ```bash
 cat > ~/projects/smarthub/tools/build.sh << 'EOF'
 #!/bin/bash
@@ -743,17 +741,34 @@ Before proceeding to Phase 2, verify:
 
 | Item | Status | Notes |
 |------|--------|-------|
-| Buildroot builds successfully | ☐ | |
-| SD card image boots | ☐ | |
-| Boot time <10 seconds | ☐ | Actual: ___ seconds |
-| WiFi connects | ☐ | |
-| Ethernet works | ☐ | |
-| SSH access works | ☐ | |
-| Display shows console/splash | ☐ | |
-| Mosquitto running | ☐ | |
-| remoteproc available | ☐ | |
-| RAM usage <64 MB idle | ☐ | Actual: ___ MB |
-| Rootfs size <100 MB | ☐ | Actual: ___ MB |
+| Buildroot builds successfully | ✅ | SmartHub custom defconfig with ST external tree |
+| SD card image boots | ✅ | TF-A → OP-TEE → U-Boot → Linux 6.6.78 |
+| Boot time <10 seconds | ✅ | ~8 seconds to login prompt |
+| WiFi connects | ✅ | BCM43430/Murata 1DX, requires NVRAM symlink |
+| Ethernet works | ✅ | 1Gbps RTL8211F, DHCP via udhcpc/dhcpcd |
+| SSH access works | ✅ | Dropbear with key authentication |
+| Display shows console/splash | ⏸️ | Deferred — no fbcon/GUI in minimal build |
+| Mosquitto running | ✅ | MQTT broker on port 1883 |
+| remoteproc available | ✅ | /sys/class/remoteproc/remoteproc0 present |
+| RAM usage <64 MB idle | ✅ | Actual: **24.7 MB** |
+| Rootfs size <100 MB | ✅ | Actual: **48.7 MB** |
+
+### WiFi Configuration Notes
+
+The BCM43430 (Murata 1DX module) requires a board-specific NVRAM config file. The driver looks for:
+1. `brcm/brcmfmac43430-sdio.st,stm32mp157f-dk2.txt` (board-specific)
+2. `brcm/brcmfmac43430-sdio.txt` (generic fallback)
+
+**Solution:** Create symlink in post_build.sh:
+```bash
+ln -sf brcmfmac43430-sdio.MUR1DX.txt brcmfmac43430-sdio.st,stm32mp157f-dk2.txt
+```
+
+### Network Configuration
+
+- **Ethernet**: `eth0` via DHCP (udhcpc for quick boot, dhcpcd for full features)
+- **WiFi**: `wlan0` via wpa_supplicant + DHCP
+- **mDNS**: Avahi daemon advertises `smarthub.local`
 
 ---
 
