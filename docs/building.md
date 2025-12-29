@@ -368,6 +368,102 @@ Measured on AMD Ryzen 7 5800X (8 cores):
 
 ---
 
+## Cross-Compiling the SmartHub Application
+
+For rapid development, you can cross-compile just the SmartHub C++ application without rebuilding the entire Buildroot image.
+
+### Prerequisites
+
+Install the ARM cross-compiler:
+
+```bash
+sudo apt install gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf
+```
+
+Ensure Buildroot sysroot exists (from a previous full build):
+```
+~/projects/smarthub/buildroot-src/output/staging/
+```
+
+### Cross-Compilation
+
+```bash
+cd ~/projects/smarthub/STM32-Smart-Home-Hub/app
+
+# Create ARM build directory
+mkdir -p build-arm && cd build-arm
+
+# Configure with toolchain file
+cmake .. \
+    -DCMAKE_TOOLCHAIN_FILE=../cmake/arm-linux-gnueabihf.cmake \
+    -DCMAKE_BUILD_TYPE=Release
+
+# Build
+make -j$(nproc)
+
+# Verify ARM binary
+file smarthub
+# Should show: ELF 32-bit LSB pie executable, ARM, EABI5
+```
+
+### Deployment to Target
+
+```bash
+# Copy binary to board (use -O for legacy SCP if sftp not available)
+scp -O build-arm/smarthub root@192.168.4.99:/opt/smarthub/bin/
+
+# Or to /tmp for testing
+scp -O build-arm/smarthub root@192.168.4.99:/tmp/
+```
+
+### Testing on Target
+
+```bash
+# SSH to board
+ssh root@192.168.4.99
+
+# Test help
+/tmp/smarthub --help
+
+# Run application
+/tmp/smarthub
+
+# Check if running
+ps aux | grep smarthub
+netstat -tlnp | grep smarthub
+```
+
+### Optional Dependencies
+
+Some dependencies are optional and the application will work without them:
+
+| Library | Status | Fallback |
+|---------|--------|----------|
+| yaml-cpp | Optional | Config.cpp uses INI-style parser |
+| LVGL | Optional | UI disabled, web interface only |
+| nlohmann_json | Required | Bundled in third_party/ |
+
+If a library is found by pkg-config on the host but not in the sysroot, the build will automatically skip linking it.
+
+### Troubleshooting Cross-Compilation
+
+**nlohmann/json.hpp not found:**
+```bash
+# The header is bundled in third_party/
+ls app/third_party/nlohmann/json.hpp
+```
+
+**yaml-cpp linking fails:**
+The build system only links yaml-cpp if the library file is actually found in the sysroot. Config.cpp has a fallback INI parser.
+
+**Library not found at runtime:**
+```bash
+# Check library dependencies on target
+ssh root@<board-ip> "ldd /tmp/smarthub"
+```
+
+---
+
 ## References
 
 - [Buildroot Manual](https://buildroot.org/downloads/manual/manual.html)
@@ -377,3 +473,4 @@ Measured on AMD Ryzen 7 5800X (8 cores):
 ---
 
 *Created: 28 December 2025*
+*Updated: 29 December 2025 - Added cross-compilation section*
