@@ -62,6 +62,8 @@ app/tests/
 │   └── test_rpmsg.cpp          # RPMsg M4 communication tests
 ├── web/
 │   └── test_webserver.cpp      # WebServer REST API tests
+├── ui/
+│   └── test_ui.cpp             # UI manager DRM backend tests
 ├── mocks/
 │   ├── MockDevice.hpp          # Mock device implementations
 │   └── MockProtocolHandler.hpp # Mock protocol handler
@@ -88,6 +90,7 @@ Unit tests verify individual components in isolation:
 | MQTT | `protocols/test_mqtt.cpp` | MQTT client, subscribe/publish, callbacks |
 | ProtocolFactory | `protocols/test_protocol_factory.cpp` | Protocol registration, creation, mock handler |
 | RPMsg | `rpmsg/test_rpmsg.cpp` | M4 communication, message types, GPIO/PWM |
+| UI | `ui/test_ui.cpp` | UIManager DRM backend, graceful failure handling |
 
 ### Integration Tests
 
@@ -363,10 +366,52 @@ The Config tests include tests for the INI-style fallback parser, which is used 
 
 This ensures the application works correctly when cross-compiled for ARM targets where yaml-cpp may not be available in the Buildroot sysroot.
 
+## UI Testing
+
+The UI tests (`ui/test_ui.cpp`) verify the UIManager DRM backend:
+
+| Test | Description |
+|------|-------------|
+| Construction | UIManager can be constructed without crash |
+| InitialStateNotRunning | isRunning() returns false before init |
+| InitializeFailsWithInvalidDevice | Graceful failure with non-existent DRM device |
+| InitializeFailsWithInvalidPath | Graceful failure with invalid path |
+| DefaultDimensions | Default width/height are set correctly |
+| ShutdownWithoutInit | shutdown() is safe without initialization |
+| MultipleShutdownCalls | Multiple shutdown() calls are safe |
+| UpdateWithoutInit | update() is safe without initialization |
+| DestructorUninitialized | Destructor handles uninitialized state |
+| DestructorAfterFailedInit | Destructor handles failed initialization |
+| InitializeWithRealDRM | Hardware test (skipped if /dev/dri/card0 not available) |
+
+### Running UI Tests
+
+**On host (without LVGL/DRM):**
+```bash
+# Tests are skipped when LVGL not available
+./build/tests/test_ui
+# Output: [SKIPPED] UIManagerTest.LVGLNotAvailable
+```
+
+**On target hardware:**
+```bash
+# With /dev/dri/card0 accessible
+./test_ui
+```
+
+### Conditional Compilation
+
+The UI tests use conditional compilation:
+- When `SMARTHUB_ENABLE_LVGL` is defined: Full test suite runs
+- When LVGL not available: Single placeholder test that skips
+
+This allows the same test file to work in both native and cross-compiled environments.
+
 ## Future Enhancements
 
 - [x] Mock objects for external dependencies (MockDevice, MockProtocolHandler)
 - [x] INI fallback parser tests for cross-compilation scenarios
+- [x] UI/DRM backend tests with graceful skipping when hardware unavailable
 - [ ] Hardware-in-the-loop tests on target device
 - [ ] Performance benchmarks
 - [ ] Fuzz testing for network protocols

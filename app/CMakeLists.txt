@@ -73,6 +73,13 @@ else()
     set(SMARTHUB_ENABLE_LVGL ON)
 endif()
 
+# libdrm (required for LVGL DRM backend)
+pkg_check_modules(LIBDRM libdrm)
+if(SMARTHUB_ENABLE_LVGL AND NOT LIBDRM_FOUND)
+    message(STATUS "libdrm not found - UI will be disabled")
+    set(SMARTHUB_ENABLE_LVGL OFF)
+endif()
+
 # Include directories
 include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -102,6 +109,10 @@ endif()
 
 if(LVGL_FOUND)
     include_directories(${LVGL_INCLUDE_DIRS})
+endif()
+
+if(LIBDRM_FOUND)
+    include_directories(${LIBDRM_INCLUDE_DIRS})
 endif()
 
 if(NLOHMANN_JSON_FOUND)
@@ -218,6 +229,9 @@ endif()
 
 if(SMARTHUB_ENABLE_LVGL AND LVGL_FOUND)
     target_link_libraries(smarthub PRIVATE ${LVGL_LIBRARIES})
+    if(LIBDRM_FOUND)
+        target_link_libraries(smarthub PRIVATE ${LIBDRM_LIBRARIES})
+    endif()
 endif()
 
 # Dynamic loading for plugins (future)
@@ -243,4 +257,5 @@ message(STATUS "  Mosquitto: ${MOSQUITTO_FOUND}")
 message(STATUS "  YAML-CPP: ${yaml-cpp_FOUND} OR ${YAMLCPP_FOUND}")
 message(STATUS "  nlohmann_json: ${nlohmann_json_FOUND}")
 message(STATUS "  LVGL: ${SMARTHUB_ENABLE_LVGL}")
+message(STATUS "  libdrm: ${LIBDRM_FOUND}")
 message(STATUS "")

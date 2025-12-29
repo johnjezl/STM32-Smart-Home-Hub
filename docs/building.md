@@ -441,9 +441,40 @@ Some dependencies are optional and the application will work without them:
 |---------|--------|----------|
 | yaml-cpp | Optional | Config.cpp uses INI-style parser |
 | LVGL | Optional | UI disabled, web interface only |
+| libdrm | Optional | Required for LVGL UI |
 | nlohmann_json | Required | Bundled in third_party/ |
 
 If a library is found by pkg-config on the host but not in the sysroot, the build will automatically skip linking it.
+
+### LVGL and Display Support
+
+SmartHub includes a touchscreen UI using LVGL with a DRM (Direct Rendering Manager) backend.
+
+**Buildroot packages required for UI:**
+- `BR2_PACKAGE_LIBDRM=y` - Linux DRM library
+- `BR2_PACKAGE_LVGL=y` - LVGL graphics library
+
+**How it works:**
+- UIManager uses `/dev/dri/card0` for display output via DRM
+- Double buffering with page flipping (no screen tearing)
+- Touch input via `/dev/input/event0` (evdev)
+
+**Checking DRM on target:**
+```bash
+# List DRM devices
+ls -la /dev/dri/
+
+# Check connected displays
+cat /sys/class/drm/card0-*/status
+
+# Test DRM mode setting
+modetest -M stm
+```
+
+**If UI fails to initialize:**
+- Check `/dev/dri/card0` exists and is accessible
+- Ensure a display is connected (check `dmesg | grep drm`)
+- The application continues running without UI (web interface works)
 
 ### Troubleshooting Cross-Compilation
 
@@ -473,4 +504,4 @@ ssh root@<board-ip> "ldd /tmp/smarthub"
 ---
 
 *Created: 28 December 2025*
-*Updated: 29 December 2025 - Added cross-compilation section*
+*Updated: 29 December 2025 - Added cross-compilation section, LVGL/DRM documentation*

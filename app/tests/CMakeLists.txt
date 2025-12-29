@@ -150,6 +150,23 @@ if(GTEST_AVAILABLE)
     target_link_libraries(test_rpmsg PRIVATE smarthub_lib GTest::gtest GTest::gtest_main)
     add_test(NAME RPMsg COMMAND test_rpmsg)
 
+    # UI tests (conditional on LVGL availability)
+    if(SMARTHUB_ENABLE_LVGL)
+        add_executable(test_ui ui/test_ui.cpp ${CMAKE_SOURCE_DIR}/src/ui/UIManager.cpp)
+        target_link_libraries(test_ui PRIVATE smarthub_lib GTest::gtest GTest::gtest_main)
+        target_link_libraries(test_ui PRIVATE ${LVGL_LIBRARIES})
+        if(LIBDRM_FOUND)
+            target_link_libraries(test_ui PRIVATE ${LIBDRM_LIBRARIES})
+        endif()
+        target_compile_definitions(test_ui PRIVATE SMARTHUB_ENABLE_LVGL=1)
+        add_test(NAME UI COMMAND test_ui)
+    else()
+        # Stub test when LVGL not available
+        add_executable(test_ui ui/test_ui.cpp)
+        target_link_libraries(test_ui PRIVATE smarthub_lib GTest::gtest GTest::gtest_main)
+        add_test(NAME UI COMMAND test_ui)
+    endif()
+
     # ==== Integration Tests ====
 
     add_executable(test_integration integration/test_integration.cpp)
@@ -158,7 +175,7 @@ if(GTEST_AVAILABLE)
 
     # ==== All-in-one test runner ====
 
-    add_executable(smarthub_tests
+    set(ALL_TEST_SOURCES
         main.cpp
         core/test_logger.cpp
         core/test_config.cpp
@@ -172,8 +189,22 @@ if(GTEST_AVAILABLE)
         protocols/test_protocol_factory.cpp
         rpmsg/test_rpmsg.cpp
         integration/test_integration.cpp
+        ui/test_ui.cpp
     )
+
+    add_executable(smarthub_tests ${ALL_TEST_SOURCES})
     target_link_libraries(smarthub_tests PRIVATE smarthub_lib GTest::gtest)
+
+    # Add UI dependencies if LVGL is available
+    if(SMARTHUB_ENABLE_LVGL)
+        target_sources(smarthub_tests PRIVATE ${CMAKE_SOURCE_DIR}/src/ui/UIManager.cpp)
+        target_link_libraries(smarthub_tests PRIVATE ${LVGL_LIBRARIES})
+        if(LIBDRM_FOUND)
+            target_link_libraries(smarthub_tests PRIVATE ${LIBDRM_LIBRARIES})
+        endif()
+        target_compile_definitions(smarthub_tests PRIVATE SMARTHUB_ENABLE_LVGL=1)
+    endif()
+
     add_test(NAME AllTests COMMAND smarthub_tests)
 
     # ==== Code Coverage ====

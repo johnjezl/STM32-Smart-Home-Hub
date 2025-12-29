@@ -1392,8 +1392,8 @@ Before proceeding to Phase 3, verify:
 | Project compiles natively | ✅ | 11 test suites, 100+ tests passing |
 | Project cross-compiles | ✅ | Via CI/CD (GitHub Actions) |
 | Application starts on board | ✅ | Tested 2025-12-29: All services init, web server on :443 |
-| LVGL displays on screen | ⏸️ | Deferred - LVGL not in Buildroot sysroot |
-| Touch input works | ⏸️ | Deferred - requires LVGL UI |
+| LVGL displays on screen | ✅ | DRM backend with double buffering |
+| Touch input works | ✅ | evdev input driver integrated |
 | Web server responds on HTTP | ✅ | Mongoose server, 15 REST API tests |
 | REST API returns device list | ✅ | /api/devices, /api/system/status work |
 | MQTT client tested | ✅ | 13 unit tests, live broker tests available |
