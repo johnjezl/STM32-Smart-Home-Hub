@@ -53,6 +53,11 @@ if(GTEST_AVAILABLE)
         ${CMAKE_SOURCE_DIR}/src/devices/types/MotionSensor.cpp
         ${CMAKE_SOURCE_DIR}/src/protocols/ProtocolFactory.cpp
         ${CMAKE_SOURCE_DIR}/src/protocols/mqtt/MqttClient.cpp
+        ${CMAKE_SOURCE_DIR}/src/protocols/zigbee/ZnpFrame.cpp
+        ${CMAKE_SOURCE_DIR}/src/protocols/zigbee/ZnpTransport.cpp
+        ${CMAKE_SOURCE_DIR}/src/protocols/zigbee/ZigbeeCoordinator.cpp
+        ${CMAKE_SOURCE_DIR}/src/protocols/zigbee/ZigbeeHandler.cpp
+        ${CMAKE_SOURCE_DIR}/src/protocols/zigbee/ZigbeeDeviceDatabase.cpp
         ${CMAKE_SOURCE_DIR}/src/rpmsg/RpmsgClient.cpp
         ${CMAKE_SOURCE_DIR}/src/web/WebServer.cpp
     )
@@ -145,6 +150,11 @@ if(GTEST_AVAILABLE)
     target_link_libraries(test_protocol_factory PRIVATE smarthub_lib GTest::gtest GTest::gtest_main)
     add_test(NAME ProtocolFactory COMMAND test_protocol_factory)
 
+    # Zigbee tests
+    add_executable(test_zigbee protocols/test_zigbee.cpp)
+    target_link_libraries(test_zigbee PRIVATE smarthub_lib GTest::gtest GTest::gtest_main)
+    add_test(NAME Zigbee COMMAND test_zigbee)
+
     # RPMsg tests
     add_executable(test_rpmsg rpmsg/test_rpmsg.cpp)
     target_link_libraries(test_rpmsg PRIVATE smarthub_lib GTest::gtest GTest::gtest_main)
@@ -187,6 +197,7 @@ if(GTEST_AVAILABLE)
         web/test_webserver.cpp
         protocols/test_mqtt.cpp
         protocols/test_protocol_factory.cpp
+        protocols/test_zigbee.cpp
         rpmsg/test_rpmsg.cpp
         integration/test_integration.cpp
         ui/test_ui.cpp
