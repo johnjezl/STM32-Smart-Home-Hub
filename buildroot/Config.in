@@ -1,3 +1,10 @@
 # SmartHub custom packages
-# Future custom packages would be sourced here:
+
+menu "SmartHub packages"
+
+source "$BR2_EXTERNAL_SMARTHUB_PATH/package/lvgl/Config.in"
+
+# Future custom packages:
 # source "$BR2_EXTERNAL_SMARTHUB_PATH/package/smarthub-app/Config.in"
+
+endmenu
