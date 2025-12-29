@@ -138,6 +138,8 @@ See [docs/building.md](docs/building.md) for detailed instructions.
 - [Buildroot](docs/buildroot.md) - Linux image configuration
 - [Networking](docs/networking.md) - WiFi, Ethernet, mDNS setup
 - [REST API](docs/api.md) - Web server REST API reference
+- [MQTT Client](docs/mqtt.md) - MQTT protocol integration
+- [RPMsg/M4](docs/rpmsg.md) - Cortex-M4 communication
 - [Testing](docs/testing.md) - Testing infrastructure guide
 - [Lab Operations](docs/lab-operations.md) - Hardware interaction guide
 
