@@ -2,7 +2,7 @@
 
 High-level architecture documentation for the Smart Home Hub system.
 
-**Status:** Phase 1 complete (December 2025)
+**Status:** Phase 3 complete (December 2025)
 
 ---
 
@@ -266,13 +266,139 @@ SmartHub advertises itself via mDNS:
 
 ---
 
+## Application Architecture (Phase 2-3)
+
+The SmartHub C++ application is structured in layers:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           SmartHub Application                               │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│   ┌─────────────────────────────────────────────────────────────────────┐   │
+│   │                        Web/API Layer                                 │   │
+│   │  ┌──────────────────┐  ┌──────────────────────────────────────┐    │   │
+│   │  │   WebServer      │  │           REST API                   │    │   │
+│   │  │   (Mongoose)     │  │  /api/devices, /api/system/status    │    │   │
+│   │  └──────────────────┘  └──────────────────────────────────────┘    │   │
+│   └─────────────────────────────────────────────────────────────────────┘   │
+│                                    │                                         │
+│   ┌─────────────────────────────────────────────────────────────────────┐   │
+│   │                      Device Layer (Phase 3)                          │   │
+│   │  ┌──────────────────┐  ┌──────────────┐  ┌────────────────────┐    │   │
+│   │  │  DeviceManager   │  │ Device Types │  │  DeviceTypeRegistry│    │   │
+│   │  │                  │  │ Switch/Dimmer│  │                    │    │   │
+│   │  │                  │  │ ColorLight   │  │                    │    │   │
+│   │  │                  │  │ Sensors      │  │                    │    │   │
+│   │  └──────────────────┘  └──────────────┘  └────────────────────┘    │   │
+│   │          │                                                          │   │
+│   │  ┌───────▼──────────────────────────────────────────────────────┐   │   │
+│   │  │                   Protocol Handlers                           │   │   │
+│   │  │  ┌────────────┐  ┌──────────────┐  ┌────────────────────┐   │   │   │
+│   │  │  │   MQTT     │  │  ProtocolFactory│ │ IProtocolHandler  │   │   │   │
+│   │  │  │  Handler   │  │               │  │    Interface      │   │   │   │
+│   │  │  └────────────┘  └──────────────┘  └────────────────────┘   │   │   │
+│   │  └──────────────────────────────────────────────────────────────┘   │   │
+│   └─────────────────────────────────────────────────────────────────────┘   │
+│                                    │                                         │
+│   ┌─────────────────────────────────────────────────────────────────────┐   │
+│   │                      Core Layer (Phase 2)                            │   │
+│   │  ┌────────────┐  ┌────────────┐  ┌────────────┐  ┌────────────┐    │   │
+│   │  │  EventBus  │  │   Logger   │  │   Config   │  │  Database  │    │   │
+│   │  │  (pub/sub) │  │            │  │   (YAML)   │  │  (SQLite)  │    │   │
+│   │  └────────────┘  └────────────┘  └────────────┘  └────────────┘    │   │
+│   └─────────────────────────────────────────────────────────────────────┘   │
+│                                    │                                         │
+│   ┌─────────────────────────────────────────────────────────────────────┐   │
+│   │                   Communication Layer                                │   │
+│   │  ┌────────────────────────┐  ┌────────────────────────────────┐    │   │
+│   │  │      MQTT Client       │  │        RPMsg Client            │    │   │
+│   │  │   (libmosquitto)       │  │      (A7 ↔ M4 comm)            │    │   │
+│   │  └────────────────────────┘  └────────────────────────────────┘    │   │
+│   └─────────────────────────────────────────────────────────────────────┘   │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Core Components (Phase 2)
+
+| Component | Description | Source |
+|-----------|-------------|--------|
+| EventBus | Publish/subscribe event system | `src/core/EventBus.cpp` |
+| Logger | Leveled logging (debug→error) | `src/core/Logger.cpp` |
+| Config | YAML configuration loading | `src/core/Config.cpp` |
+| Database | SQLite persistence layer | `src/database/Database.cpp` |
+| MqttClient | MQTT communication | `src/protocols/mqtt/MqttClient.cpp` |
+| RpmsgClient | M4 coprocessor communication | `src/rpmsg/RpmsgClient.cpp` |
+| WebServer | HTTP REST API | `src/web/WebServer.cpp` |
+
+### Device Layer (Phase 3)
+
+| Component | Description | Source |
+|-----------|-------------|--------|
+| IDevice | Device interface | `include/smarthub/devices/IDevice.hpp` |
+| Device | Base device class | `src/devices/Device.cpp` |
+| SwitchDevice | On/off switch | `src/devices/types/SwitchDevice.cpp` |
+| DimmerDevice | Dimmable light | `src/devices/types/DimmerDevice.cpp` |
+| ColorLightDevice | Color-capable light | `src/devices/types/ColorLightDevice.cpp` |
+| TemperatureSensor | Temperature sensor | `src/devices/types/TemperatureSensor.cpp` |
+| MotionSensor | Motion sensor | `src/devices/types/MotionSensor.cpp` |
+| DeviceManager | Device lifecycle management | `src/devices/DeviceManager.cpp` |
+| DeviceTypeRegistry | Device factory | `src/devices/DeviceTypeRegistry.cpp` |
+| Room | Room organization | `src/devices/Room.cpp` |
+| DeviceGroup | Group multiple devices | `src/devices/DeviceGroup.cpp` |
+
+### Protocol Layer (Phase 3)
+
+| Component | Description | Source |
+|-----------|-------------|--------|
+| IProtocolHandler | Protocol interface | `include/smarthub/protocols/IProtocolHandler.hpp` |
+| ProtocolFactory | Protocol creation | `src/protocols/ProtocolFactory.cpp` |
+
+### Data Flow
+
+```
+                    External Device (Zigbee/MQTT)
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    Protocol Handler (MQTT)                       │
+│  - Receives messages from zigbee2mqtt                           │
+│  - Parses device state                                          │
+│  - Calls DeviceManager callbacks                                │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+              ┌───────────────┼───────────────┐
+              ▼               ▼               ▼
+     Device Discovered   State Changed   Availability Changed
+              │               │               │
+              ▼               ▼               ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                       DeviceManager                              │
+│  - Adds/updates devices                                         │
+│  - Persists to database                                         │
+│  - Publishes events to EventBus                                 │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+              ┌───────────────┼───────────────┐
+              ▼               ▼               ▼
+          EventBus        Database         WebServer
+              │               │               │
+              ▼               ▼               ▼
+         Subscribers      Persistence     REST API
+```
+
+---
+
 ## References
 
 - [STM32MP157F-DK2 Wiki](https://wiki.st.com/stm32mpu/wiki/STM32MP157F-DK2)
 - [Buildroot Manual](https://buildroot.org/downloads/manual/manual.html)
 - [OpenAMP Documentation](https://github.com/OpenAMP/open-amp)
+- [Device Abstraction Layer](devices.md)
+- [Protocol Handlers](protocols.md)
 
 ---
 
 *Created: 28 December 2025*
-*Phase: 1 (Buildroot Base System)*
+*Updated: 29 December 2025 (Phase 3)*
