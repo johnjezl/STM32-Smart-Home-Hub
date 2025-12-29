@@ -20,8 +20,8 @@ A custom smart home hub built on the STM32MP157F-DK2 development board featuring
 |-------|------|--------|
 | 0 | Development Environment Setup | ✅ Complete |
 | 1 | Buildroot Base System | ✅ Complete |
-| 2 | Core Application Framework | 🔄 In Progress |
-| 3 | Device Integration Framework | ⏳ Planned |
+| 2 | Core Application Framework | ✅ Complete |
+| 3 | Device Integration Framework | 🔄 In Progress |
 | 4 | Zigbee Integration | ⏳ Planned |
 | 5 | WiFi Device Integration | ⏳ Planned |
 | 6 | M4 Bare-Metal Firmware | ⏳ Planned |
