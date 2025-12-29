@@ -54,8 +54,10 @@ app/tests/
 ├── devices/
 │   ├── test_device.cpp     # Device unit tests
 │   └── test_device_manager.cpp  # DeviceManager unit tests
-├── protocols/              # Protocol tests (future)
-├── rpmsg/                  # RPMsg tests (future)
+├── protocols/
+│   └── test_mqtt.cpp       # MQTT client tests
+├── rpmsg/
+│   └── test_rpmsg.cpp      # RPMsg M4 communication tests
 ├── web/
 │   └── test_webserver.cpp  # WebServer REST API tests
 ├── mocks/                  # Mock objects (future)
@@ -78,6 +80,8 @@ Unit tests verify individual components in isolation:
 | Device | `devices/test_device.cpp` | Device properties, state, events |
 | DeviceManager | `devices/test_device_manager.cpp` | Add/remove, queries, events |
 | WebServer | `web/test_webserver.cpp` | HTTP server, REST API, concurrent requests |
+| MQTT | `protocols/test_mqtt.cpp` | MQTT client, subscribe/publish, callbacks |
+| RPMsg | `rpmsg/test_rpmsg.cpp` | M4 communication, message types, GPIO/PWM |
 
 ### Integration Tests
 
