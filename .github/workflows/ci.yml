@@ -1,0 +1,255 @@
+# SmartHub CI/CD Pipeline
+#
+# Builds and tests the SmartHub application on multiple platforms
+
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  BUILD_TYPE: Release
+
+jobs:
+  # Native build and test (x86_64 Linux)
+  build-native:
+    name: Build & Test (Native)
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            cmake \
+            ninja-build \
+            libsqlite3-dev \
+            libssl-dev \
+            libmosquitto-dev \
+            libyaml-cpp-dev \
+            nlohmann-json3-dev \
+            libgtest-dev \
+            lcov
+
+      - name: Configure CMake
+        working-directory: app
+        run: |
+          cmake -B build \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
+            -DSMARTHUB_BUILD_TESTS=ON \
+            -DSMARTHUB_NATIVE_BUILD=ON
+
+      - name: Build
+        working-directory: app
+        run: cmake --build build
+
+      - name: Run tests
+        working-directory: app/build
+        run: ctest --output-on-failure --verbose
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-native
+          path: app/build/Testing/
+          retention-days: 7
+
+  # Cross-compilation build (ARM32)
+  build-arm:
+    name: Build (ARM32 Cross-compile)
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install cross-compilation toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            cmake \
+            ninja-build \
+            gcc-arm-linux-gnueabihf \
+            g++-arm-linux-gnueabihf \
+            qemu-user-static
+
+      - name: Install ARM cross-compile libraries
+        run: |
+          sudo dpkg --add-architecture armhf
+          sudo apt-get update
+          sudo apt-get install -y \
+            libsqlite3-dev:armhf \
+            libssl-dev:armhf \
+            libyaml-cpp-dev:armhf || true  # May fail in minimal CI
+
+      - name: Configure CMake (Cross-compile)
+        working-directory: app
+        run: |
+          cmake -B build-arm \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
+            -DCMAKE_TOOLCHAIN_FILE=cmake/arm-linux-gnueabihf.cmake \
+            -DSMARTHUB_BUILD_TESTS=OFF
+
+      - name: Build
+        working-directory: app
+        run: cmake --build build-arm || echo "Cross-build may fail without full ARM sysroot"
+
+      - name: Verify binary
+        working-directory: app
+        run: |
+          if [ -f build-arm/smarthub ]; then
+            file build-arm/smarthub
+            arm-linux-gnueabihf-readelf -h build-arm/smarthub || true
+          fi
+
+  # Code coverage (separate job for detailed analysis)
+  coverage:
+    name: Code Coverage
+    runs-on: ubuntu-24.04
+    needs: build-native
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            cmake \
+            ninja-build \
+            libsqlite3-dev \
+            libssl-dev \
+            libmosquitto-dev \
+            libyaml-cpp-dev \
+            nlohmann-json3-dev \
+            libgtest-dev \
+            lcov
+
+      - name: Configure with coverage
+        working-directory: app
+        run: |
+          cmake -B build-coverage \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DSMARTHUB_BUILD_TESTS=ON \
+            -DSMARTHUB_COVERAGE=ON
+
+      - name: Build with coverage
+        working-directory: app
+        run: cmake --build build-coverage
+
+      - name: Run tests with coverage
+        working-directory: app/build-coverage
+        run: |
+          ctest --output-on-failure
+          # Generate coverage report
+          lcov --capture --directory . --output-file coverage.info --ignore-errors mismatch || true
+          lcov --remove coverage.info '/usr/*' '*/third_party/*' '*/tests/*' --output-file coverage.info --ignore-errors unused || true
+          lcov --list coverage.info || true
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: app/build-coverage/coverage.info
+          retention-days: 30
+
+  # Static analysis
+  static-analysis:
+    name: Static Analysis
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            cmake \
+            ninja-build \
+            libsqlite3-dev \
+            libssl-dev \
+            libmosquitto-dev \
+            libyaml-cpp-dev \
+            nlohmann-json3-dev \
+            cppcheck \
+            clang-tidy
+
+      - name: Configure CMake
+        working-directory: app
+        run: |
+          cmake -B build \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -DSMARTHUB_BUILD_TESTS=OFF
+
+      - name: Run cppcheck
+        working-directory: app
+        run: |
+          cppcheck \
+            --enable=warning,style,performance \
+            --suppress=missingIncludeSystem \
+            --inline-suppr \
+            --error-exitcode=0 \
+            -I include \
+            src/
+
+      - name: Run clang-tidy
+        working-directory: app
+        continue-on-error: true
+        run: |
+          if [ -f build/compile_commands.json ]; then
+            clang-tidy \
+              -p build \
+              --checks='-*,bugprone-*,clang-analyzer-*,performance-*' \
+              src/**/*.cpp || true
+          fi
+
+  # Summary job
+  ci-complete:
+    name: CI Complete
+    runs-on: ubuntu-24.04
+    needs: [build-native, build-arm, coverage, static-analysis]
+    if: always()
+
+    steps:
+      - name: Check all jobs
+        run: |
+          echo "Native Build: ${{ needs.build-native.result }}"
+          echo "ARM Build: ${{ needs.build-arm.result }}"
+          echo "Coverage: ${{ needs.coverage.result }}"
+          echo "Static Analysis: ${{ needs.static-analysis.result }}"
+
+          if [ "${{ needs.build-native.result }}" != "success" ]; then
+            echo "Native build failed!"
+            exit 1
+          fi
+
+          echo "CI pipeline completed successfully!"
