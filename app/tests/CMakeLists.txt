@@ -127,6 +127,10 @@ if(GTEST_AVAILABLE)
     target_link_libraries(test_device_manager PRIVATE smarthub_lib GTest::gtest GTest::gtest_main)
     add_test(NAME DeviceManager COMMAND test_device_manager)
 
+    add_executable(test_organization devices/test_organization.cpp)
+    target_link_libraries(test_organization PRIVATE smarthub_lib GTest::gtest GTest::gtest_main)
+    add_test(NAME Organization COMMAND test_organization)
+
     # Web tests
     add_executable(test_webserver web/test_webserver.cpp)
     target_link_libraries(test_webserver PRIVATE smarthub_lib GTest::gtest GTest::gtest_main)
@@ -136,6 +140,10 @@ if(GTEST_AVAILABLE)
     add_executable(test_mqtt protocols/test_mqtt.cpp)
     target_link_libraries(test_mqtt PRIVATE smarthub_lib GTest::gtest GTest::gtest_main)
     add_test(NAME MQTT COMMAND test_mqtt)
+
+    add_executable(test_protocol_factory protocols/test_protocol_factory.cpp)
+    target_link_libraries(test_protocol_factory PRIVATE smarthub_lib GTest::gtest GTest::gtest_main)
+    add_test(NAME ProtocolFactory COMMAND test_protocol_factory)
 
     # RPMsg tests
     add_executable(test_rpmsg rpmsg/test_rpmsg.cpp)
@@ -158,8 +166,10 @@ if(GTEST_AVAILABLE)
         database/test_database.cpp
         devices/test_device.cpp
         devices/test_device_manager.cpp
+        devices/test_organization.cpp
         web/test_webserver.cpp
         protocols/test_mqtt.cpp
+        protocols/test_protocol_factory.cpp
         rpmsg/test_rpmsg.cpp
         integration/test_integration.cpp
     )

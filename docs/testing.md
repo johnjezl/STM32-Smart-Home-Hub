@@ -43,26 +43,30 @@ ctest -R "EventBus" --verbose
 
 ```
 app/tests/
-├── CMakeLists.txt          # Test build configuration
-├── main.cpp                # Main test runner entry point
+├── CMakeLists.txt              # Test build configuration
+├── main.cpp                    # Main test runner entry point
 ├── core/
-│   ├── test_logger.cpp     # Logger unit tests
-│   ├── test_config.cpp     # Config unit tests
-│   └── test_eventbus.cpp   # EventBus unit tests
+│   ├── test_logger.cpp         # Logger unit tests
+│   ├── test_config.cpp         # Config unit tests
+│   └── test_eventbus.cpp       # EventBus unit tests
 ├── database/
-│   └── test_database.cpp   # Database unit tests
+│   └── test_database.cpp       # Database unit tests
 ├── devices/
-│   ├── test_device.cpp     # Device unit tests
-│   └── test_device_manager.cpp  # DeviceManager unit tests
+│   ├── test_device.cpp         # Device and device types unit tests
+│   ├── test_device_manager.cpp # DeviceManager unit tests
+│   └── test_organization.cpp   # Room and DeviceGroup tests
 ├── protocols/
-│   └── test_mqtt.cpp       # MQTT client tests
+│   ├── test_mqtt.cpp           # MQTT client tests
+│   └── test_protocol_factory.cpp # ProtocolFactory and handler tests
 ├── rpmsg/
-│   └── test_rpmsg.cpp      # RPMsg M4 communication tests
+│   └── test_rpmsg.cpp          # RPMsg M4 communication tests
 ├── web/
-│   └── test_webserver.cpp  # WebServer REST API tests
-├── mocks/                  # Mock objects (future)
+│   └── test_webserver.cpp      # WebServer REST API tests
+├── mocks/
+│   ├── MockDevice.hpp          # Mock device implementations
+│   └── MockProtocolHandler.hpp # Mock protocol handler
 └── integration/
-    └── test_integration.cpp  # Integration tests
+    └── test_integration.cpp    # Integration tests
 ```
 
 ## Test Categories
@@ -77,10 +81,12 @@ Unit tests verify individual components in isolation:
 | Config | `core/test_config.cpp` | YAML loading, default values, getters |
 | EventBus | `core/test_eventbus.cpp` | Pub/sub, async events, unsubscribe |
 | Database | `database/test_database.cpp` | SQLite operations, schema, transactions |
-| Device | `devices/test_device.cpp` | Device properties, state, events |
-| DeviceManager | `devices/test_device_manager.cpp` | Add/remove, queries, events |
+| Device | `devices/test_device.cpp` | Device types (Switch, Dimmer, ColorLight, Sensors), state, callbacks |
+| DeviceManager | `devices/test_device_manager.cpp` | Add/remove, queries by type/room/protocol |
+| Organization | `devices/test_organization.cpp` | Room and DeviceGroup management |
 | WebServer | `web/test_webserver.cpp` | HTTP server, REST API, concurrent requests |
 | MQTT | `protocols/test_mqtt.cpp` | MQTT client, subscribe/publish, callbacks |
+| ProtocolFactory | `protocols/test_protocol_factory.cpp` | Protocol registration, creation, mock handler |
 | RPMsg | `rpmsg/test_rpmsg.cpp` | M4 communication, message types, GPIO/PWM |
 
 ### Integration Tests
@@ -286,10 +292,67 @@ The `smarthub_lib` static library contains all testable code (excluding main.cpp
 
 Each test file is self-contained and can run independently. Integration tests use temporary files/databases that are cleaned up automatically.
 
+## Mock Objects
+
+Phase 3 introduced mock implementations for testing:
+
+### MockDevice
+
+Located in `tests/mocks/MockDevice.hpp`:
+
+```cpp
+#include "mocks/MockDevice.hpp"
+
+MockDevice device("mock1", "Mock Device", DeviceType::Switch);
+
+// Track state changes
+device.setState("on", true);
+EXPECT_EQ(device.setStateCalls, 1);
+EXPECT_EQ(device.lastProperty, "on");
+
+// MockDimmerDevice for brightness testing
+MockDimmerDevice dimmer("dim1", "Mock Dimmer");
+
+// MockSensorDevice for sensor testing
+MockSensorDevice sensor("sensor1", "Mock Sensor");
+sensor.setTemperature(22.5);
+```
+
+### MockProtocolHandler
+
+Located in `tests/mocks/MockProtocolHandler.hpp`:
+
+```cpp
+#include "mocks/MockProtocolHandler.hpp"
+
+EventBus eventBus;
+MockProtocolHandler handler(eventBus, {});
+
+// Lifecycle testing
+EXPECT_TRUE(handler.initialize());
+EXPECT_TRUE(handler.isConnected());
+
+// Simulate device discovery
+auto device = std::make_shared<MockDevice>();
+handler.simulateDeviceDiscovered(device);
+
+// Simulate state changes
+handler.simulateStateChange("device1", "on", true);
+
+// Verify commands
+handler.sendCommand("addr", "set", {{"brightness", 50}});
+EXPECT_EQ(handler.lastCommand, "set");
+EXPECT_EQ(handler.commandCount, 1);
+
+// Register mock protocol for factory tests
+registerMockProtocol();
+```
+
 ## Future Enhancements
 
-- [ ] Mock objects for external dependencies (MQTT, filesystem)
+- [x] Mock objects for external dependencies (MockDevice, MockProtocolHandler)
 - [ ] Hardware-in-the-loop tests on target device
 - [ ] Performance benchmarks
 - [ ] Fuzz testing for network protocols
 - [ ] Memory leak detection with AddressSanitizer
+- [ ] Mock MQTT broker for protocol testing
