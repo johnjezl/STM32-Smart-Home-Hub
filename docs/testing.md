@@ -78,7 +78,7 @@ Unit tests verify individual components in isolation:
 | Test Suite | File | Description |
 |------------|------|-------------|
 | Logger | `core/test_logger.cpp` | Logging levels, file output, formatting |
-| Config | `core/test_config.cpp` | YAML loading, default values, getters |
+| Config | `core/test_config.cpp` | YAML loading, INI fallback parser, default values, getters |
 | EventBus | `core/test_eventbus.cpp` | Pub/sub, async events, unsubscribe |
 | Database | `database/test_database.cpp` | SQLite operations, schema, transactions |
 | Device | `devices/test_device.cpp` | Device types (Switch, Dimmer, ColorLight, Sensors), state, callbacks |
@@ -348,9 +348,25 @@ EXPECT_EQ(handler.commandCount, 1);
 registerMockProtocol();
 ```
 
+## Optional Dependency Testing
+
+The Config tests include tests for the INI-style fallback parser, which is used when yaml-cpp is not available (e.g., during cross-compilation without yaml-cpp in the sysroot):
+
+| Test | Description |
+|------|-------------|
+| ConfigIniTest.LoadIniFormat | INI-style config file loads correctly |
+| ConfigIniTest.IniDatabasePath | Database path parsed from INI format |
+| ConfigIniTest.IniWithQuotedValues | Quoted strings parsed correctly |
+| ConfigIniTest.IniWithColonSeparator | YAML-style colon separator works |
+| ConfigIniTest.IniEmptyFile | Empty config uses defaults |
+| ConfigIniTest.IniWithWhitespace | Whitespace trimmed correctly |
+
+This ensures the application works correctly when cross-compiled for ARM targets where yaml-cpp may not be available in the Buildroot sysroot.
+
 ## Future Enhancements
 
 - [x] Mock objects for external dependencies (MockDevice, MockProtocolHandler)
+- [x] INI fallback parser tests for cross-compilation scenarios
 - [ ] Hardware-in-the-loop tests on target device
 - [ ] Performance benchmarks
 - [ ] Fuzz testing for network protocols

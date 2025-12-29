@@ -104,6 +104,10 @@ if(LVGL_FOUND)
     include_directories(${LVGL_INCLUDE_DIRS})
 endif()
 
+if(NLOHMANN_JSON_FOUND)
+    include_directories(${NLOHMANN_JSON_INCLUDE_DIRS})
+endif()
+
 # Source files - Core
 set(CORE_SOURCES
     src/core/Logger.cpp
@@ -200,9 +204,11 @@ if(MOSQUITTO_FOUND)
     target_link_libraries(smarthub PRIVATE ${MOSQUITTO_LIBRARIES})
 endif()
 
+# yaml-cpp is optional - Config.cpp has fallback INI parser
 if(yaml-cpp_FOUND)
     target_link_libraries(smarthub PRIVATE yaml-cpp)
-elseif(YAMLCPP_FOUND)
+elseif(YAMLCPP_FOUND AND pkgcfg_lib_YAMLCPP_yaml-cpp)
+    # Only link if the library was actually found (not just pkg-config metadata)
     target_link_libraries(smarthub PRIVATE ${YAMLCPP_LIBRARIES})
 endif()
 

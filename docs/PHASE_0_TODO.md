@@ -316,7 +316,7 @@ ls /sys/class/gpio/
 # ADC
 ls /sys/bus/iio/devices/
 ```
-- ⏸️ Document which interfaces map to which headers (Arduino, RPi) — *deferred to Phase 1*
+- ✅ Document which interfaces map to which headers (Arduino, RPi) — *See docs/hardware_interfaces.md*
 - ✅ Test I2C bus scan: — *Devices found at 0x28, 0x33, 0x38, 0x39, 0x4a, 0x60*
 ```bash
 i2cdetect -y 1  # Try different bus numbers
