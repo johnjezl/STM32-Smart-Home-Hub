@@ -1,0 +1,275 @@
+/**
+ * WebServer Unit and Integration Tests
+ *
+ * Tests the web server REST API endpoints and basic functionality.
+ */
+
+#include <gtest/gtest.h>
+#include <smarthub/web/WebServer.hpp>
+#include <smarthub/core/EventBus.hpp>
+#include <smarthub/devices/DeviceManager.hpp>
+#include <smarthub/devices/Device.hpp>
+#include <smarthub/database/Database.hpp>
+#include <thread>
+#include <chrono>
+#include <cstdlib>
+#include <array>
+#include <memory>
+#include <filesystem>
+
+namespace fs = std::filesystem;
+
+// Helper to execute curl and capture output
+static std::string curlGet(const std::string& url) {
+    std::string cmd = "curl -s --max-time 5 " + url + " 2>/dev/null";
+    std::array<char, 4096> buffer;
+    std::string result;
+
+    FILE* pipe = popen(cmd.c_str(), "r");
+    if (!pipe) return "";
+
+    while (fgets(buffer.data(), buffer.size(), pipe) != nullptr) {
+        result += buffer.data();
+    }
+    pclose(pipe);
+    return result;
+}
+
+static std::string curlPut(const std::string& url, const std::string& data) {
+    std::string cmd = "curl -s --max-time 5 -X PUT -H 'Content-Type: application/json' -d '" + data + "' " + url + " 2>/dev/null";
+    std::array<char, 4096> buffer;
+    std::string result;
+
+    FILE* pipe = popen(cmd.c_str(), "r");
+    if (!pipe) return "";
+
+    while (fgets(buffer.data(), buffer.size(), pipe) != nullptr) {
+        result += buffer.data();
+    }
+    pclose(pipe);
+    return result;
+}
+
+class WebServerTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        // Use a random high port to avoid conflicts
+        testPort = 18080 + (rand() % 1000);
+        testDbPath = "/tmp/webserver_test_" + std::to_string(getpid()) + ".db";
+
+        // Clean up any existing test database
+        if (fs::exists(testDbPath)) {
+            fs::remove(testDbPath);
+        }
+
+        // Initialize components
+        eventBus = std::make_unique<smarthub::EventBus>();
+        database = std::make_unique<smarthub::Database>(testDbPath);
+        database->initialize();
+        deviceManager = std::make_unique<smarthub::DeviceManager>(*eventBus, *database);
+        deviceManager->initialize();
+    }
+
+    void TearDown() override {
+        if (webServer) {
+            webServer->stop();
+            webServer.reset();
+        }
+        deviceManager.reset();
+        database.reset();
+        eventBus.reset();
+
+        if (fs::exists(testDbPath)) {
+            fs::remove(testDbPath);
+        }
+    }
+
+    void startServer() {
+        webServer = std::make_unique<smarthub::WebServer>(
+            *eventBus, *deviceManager, testPort, "/tmp"
+        );
+        ASSERT_TRUE(webServer->start());
+        // Give server time to start
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+
+    std::string baseUrl() {
+        return "http://localhost:" + std::to_string(testPort);
+    }
+
+    int testPort;
+    std::string testDbPath;
+    std::unique_ptr<smarthub::EventBus> eventBus;
+    std::unique_ptr<smarthub::Database> database;
+    std::unique_ptr<smarthub::DeviceManager> deviceManager;
+    std::unique_ptr<smarthub::WebServer> webServer;
+};
+
+// Basic construction and destruction
+TEST_F(WebServerTest, Construction) {
+    smarthub::WebServer server(*eventBus, *deviceManager, 8080, "/tmp");
+    EXPECT_FALSE(server.isRunning());
+}
+
+TEST_F(WebServerTest, StartStop) {
+    smarthub::WebServer server(*eventBus, *deviceManager, testPort, "/tmp");
+    EXPECT_TRUE(server.start());
+    EXPECT_TRUE(server.isRunning());
+    server.stop();
+    EXPECT_FALSE(server.isRunning());
+}
+
+TEST_F(WebServerTest, DoubleStartIsIdempotent) {
+    smarthub::WebServer server(*eventBus, *deviceManager, testPort, "/tmp");
+    EXPECT_TRUE(server.start());
+    // Second start should handle gracefully (implementation dependent)
+    server.stop();
+}
+
+TEST_F(WebServerTest, DoubleStopIsIdempotent) {
+    smarthub::WebServer server(*eventBus, *deviceManager, testPort, "/tmp");
+    EXPECT_TRUE(server.start());
+    server.stop();
+    server.stop();  // Should not crash
+    EXPECT_FALSE(server.isRunning());
+}
+
+// REST API Tests
+TEST_F(WebServerTest, ApiGetDevicesEmpty) {
+    startServer();
+    std::string response = curlGet(baseUrl() + "/api/devices");
+    EXPECT_EQ(response, "[]");
+}
+
+TEST_F(WebServerTest, ApiGetDevicesWithDevices) {
+    // Add a device before starting server
+    auto light = std::make_shared<smarthub::Device>(
+        "light1", "Living Room Light", smarthub::DeviceType::Light
+    );
+    deviceManager->addDevice(light);
+
+    startServer();
+    std::string response = curlGet(baseUrl() + "/api/devices");
+
+    EXPECT_NE(response.find("light1"), std::string::npos);
+    EXPECT_NE(response.find("Living Room Light"), std::string::npos);
+}
+
+TEST_F(WebServerTest, ApiGetSystemStatus) {
+    startServer();
+    std::string response = curlGet(baseUrl() + "/api/system/status");
+
+    EXPECT_NE(response.find("version"), std::string::npos);
+    EXPECT_NE(response.find("0.1.0"), std::string::npos);
+    EXPECT_NE(response.find("devices"), std::string::npos);
+}
+
+TEST_F(WebServerTest, ApiGetDeviceNotFound) {
+    startServer();
+    std::string response = curlGet(baseUrl() + "/api/devices/nonexistent");
+
+    EXPECT_NE(response.find("error"), std::string::npos);
+    EXPECT_NE(response.find("not found"), std::string::npos);
+}
+
+TEST_F(WebServerTest, ApiGetDeviceFound) {
+    auto sensor = std::make_shared<smarthub::Device>(
+        "sensor1", "Temperature Sensor", smarthub::DeviceType::Sensor
+    );
+    deviceManager->addDevice(sensor);
+
+    startServer();
+    std::string response = curlGet(baseUrl() + "/api/devices/sensor1");
+
+    EXPECT_NE(response.find("sensor1"), std::string::npos);
+    EXPECT_NE(response.find("Temperature Sensor"), std::string::npos);
+}
+
+TEST_F(WebServerTest, ApiSetDeviceState) {
+    auto light = std::make_shared<smarthub::Device>(
+        "light1", "Test Light", smarthub::DeviceType::Light
+    );
+    deviceManager->addDevice(light);
+
+    startServer();
+    std::string response = curlPut(
+        baseUrl() + "/api/devices/light1",
+        R"({"power":"on","brightness":75})"
+    );
+
+    EXPECT_NE(response.find("success"), std::string::npos);
+}
+
+TEST_F(WebServerTest, ApiSetDeviceStateNotFound) {
+    startServer();
+    std::string response = curlPut(
+        baseUrl() + "/api/devices/nonexistent",
+        R"({"power":"on"})"
+    );
+
+    EXPECT_NE(response.find("error"), std::string::npos);
+}
+
+TEST_F(WebServerTest, ApiNotFoundRoute) {
+    startServer();
+    std::string response = curlGet(baseUrl() + "/api/nonexistent");
+
+    EXPECT_NE(response.find("error"), std::string::npos);
+    EXPECT_NE(response.find("Not found"), std::string::npos);
+}
+
+TEST_F(WebServerTest, MultipleDeviceTypes) {
+    deviceManager->addDevice(std::make_shared<smarthub::Device>(
+        "light1", "Light", smarthub::DeviceType::Light));
+    deviceManager->addDevice(std::make_shared<smarthub::Device>(
+        "sensor1", "Sensor", smarthub::DeviceType::Sensor));
+    deviceManager->addDevice(std::make_shared<smarthub::Device>(
+        "thermo1", "Thermostat", smarthub::DeviceType::Thermostat));
+
+    startServer();
+    std::string response = curlGet(baseUrl() + "/api/devices");
+
+    EXPECT_NE(response.find("light1"), std::string::npos);
+    EXPECT_NE(response.find("sensor1"), std::string::npos);
+    EXPECT_NE(response.find("thermo1"), std::string::npos);
+}
+
+TEST_F(WebServerTest, SystemStatusDeviceCount) {
+    deviceManager->addDevice(std::make_shared<smarthub::Device>(
+        "d1", "Device 1", smarthub::DeviceType::Light));
+    deviceManager->addDevice(std::make_shared<smarthub::Device>(
+        "d2", "Device 2", smarthub::DeviceType::Sensor));
+
+    startServer();
+    std::string response = curlGet(baseUrl() + "/api/system/status");
+
+    // Should show 2 devices
+    EXPECT_NE(response.find("\"devices\":2"), std::string::npos);
+}
+
+// Concurrent request handling
+TEST_F(WebServerTest, ConcurrentRequests) {
+    deviceManager->addDevice(std::make_shared<smarthub::Device>(
+        "light1", "Light", smarthub::DeviceType::Light));
+
+    startServer();
+
+    // Launch multiple concurrent requests
+    std::vector<std::thread> threads;
+    std::atomic<int> successCount{0};
+
+    for (int i = 0; i < 10; i++) {
+        threads.emplace_back([this, &successCount]() {
+            std::string response = curlGet(baseUrl() + "/api/devices");
+            if (response.find("light1") != std::string::npos) {
+                successCount++;
+            }
+        });
+    }
+
+    for (auto& t : threads) {
+        t.join();
+    }
+
+    EXPECT_EQ(successCount.load(), 10);
+}

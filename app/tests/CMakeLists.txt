@@ -118,6 +118,11 @@ if(GTEST_AVAILABLE)
     target_link_libraries(test_device_manager PRIVATE smarthub_lib GTest::gtest GTest::gtest_main)
     add_test(NAME DeviceManager COMMAND test_device_manager)
 
+    # Web tests
+    add_executable(test_webserver web/test_webserver.cpp)
+    target_link_libraries(test_webserver PRIVATE smarthub_lib GTest::gtest GTest::gtest_main)
+    add_test(NAME WebServer COMMAND test_webserver)
+
     # ==== Integration Tests ====
 
     add_executable(test_integration integration/test_integration.cpp)
@@ -134,6 +139,7 @@ if(GTEST_AVAILABLE)
         database/test_database.cpp
         devices/test_device.cpp
         devices/test_device_manager.cpp
+        web/test_webserver.cpp
         integration/test_integration.cpp
     )
     target_link_libraries(smarthub_tests PRIVATE smarthub_lib GTest::gtest)

@@ -56,7 +56,8 @@ app/tests/
 │   └── test_device_manager.cpp  # DeviceManager unit tests
 ├── protocols/              # Protocol tests (future)
 ├── rpmsg/                  # RPMsg tests (future)
-├── web/                    # Web server tests (future)
+├── web/
+│   └── test_webserver.cpp  # WebServer REST API tests
 ├── mocks/                  # Mock objects (future)
 └── integration/
     └── test_integration.cpp  # Integration tests
@@ -76,6 +77,7 @@ Unit tests verify individual components in isolation:
 | Database | `database/test_database.cpp` | SQLite operations, schema, transactions |
 | Device | `devices/test_device.cpp` | Device properties, state, events |
 | DeviceManager | `devices/test_device_manager.cpp` | Add/remove, queries, events |
+| WebServer | `web/test_webserver.cpp` | HTTP server, REST API, concurrent requests |
 
 ### Integration Tests
 
