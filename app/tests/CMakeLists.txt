@@ -43,6 +43,15 @@ if(GTEST_AVAILABLE)
         ${CMAKE_SOURCE_DIR}/src/database/Database.cpp
         ${CMAKE_SOURCE_DIR}/src/devices/Device.cpp
         ${CMAKE_SOURCE_DIR}/src/devices/DeviceManager.cpp
+        ${CMAKE_SOURCE_DIR}/src/devices/DeviceTypeRegistry.cpp
+        ${CMAKE_SOURCE_DIR}/src/devices/Room.cpp
+        ${CMAKE_SOURCE_DIR}/src/devices/DeviceGroup.cpp
+        ${CMAKE_SOURCE_DIR}/src/devices/types/SwitchDevice.cpp
+        ${CMAKE_SOURCE_DIR}/src/devices/types/DimmerDevice.cpp
+        ${CMAKE_SOURCE_DIR}/src/devices/types/ColorLightDevice.cpp
+        ${CMAKE_SOURCE_DIR}/src/devices/types/TemperatureSensor.cpp
+        ${CMAKE_SOURCE_DIR}/src/devices/types/MotionSensor.cpp
+        ${CMAKE_SOURCE_DIR}/src/protocols/ProtocolFactory.cpp
         ${CMAKE_SOURCE_DIR}/src/protocols/mqtt/MqttClient.cpp
         ${CMAKE_SOURCE_DIR}/src/rpmsg/RpmsgClient.cpp
         ${CMAKE_SOURCE_DIR}/src/web/WebServer.cpp

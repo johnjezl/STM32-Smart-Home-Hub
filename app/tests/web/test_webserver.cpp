@@ -174,7 +174,7 @@ TEST_F(WebServerTest, ApiGetDeviceNotFound) {
 
 TEST_F(WebServerTest, ApiGetDeviceFound) {
     auto sensor = std::make_shared<smarthub::Device>(
-        "sensor1", "Temperature Sensor", smarthub::DeviceType::Sensor
+        "sensor1", "Temperature Sensor", smarthub::DeviceType::TemperatureSensor
     );
     deviceManager->addDevice(sensor);
 
@@ -222,7 +222,7 @@ TEST_F(WebServerTest, MultipleDeviceTypes) {
     deviceManager->addDevice(std::make_shared<smarthub::Device>(
         "light1", "Light", smarthub::DeviceType::Light));
     deviceManager->addDevice(std::make_shared<smarthub::Device>(
-        "sensor1", "Sensor", smarthub::DeviceType::Sensor));
+        "sensor1", "Sensor", smarthub::DeviceType::TemperatureSensor));
     deviceManager->addDevice(std::make_shared<smarthub::Device>(
         "thermo1", "Thermostat", smarthub::DeviceType::Thermostat));
 
@@ -238,7 +238,7 @@ TEST_F(WebServerTest, SystemStatusDeviceCount) {
     deviceManager->addDevice(std::make_shared<smarthub::Device>(
         "d1", "Device 1", smarthub::DeviceType::Light));
     deviceManager->addDevice(std::make_shared<smarthub::Device>(
-        "d2", "Device 2", smarthub::DeviceType::Sensor));
+        "d2", "Device 2", smarthub::DeviceType::Switch));
 
     startServer();
     std::string response = curlGet(baseUrl() + "/api/system/status");

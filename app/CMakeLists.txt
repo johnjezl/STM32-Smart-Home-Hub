@@ -119,12 +119,21 @@ set(DATABASE_SOURCES
 
 # Source files - Devices
 set(DEVICES_SOURCES
-    src/devices/DeviceManager.cpp
     src/devices/Device.cpp
+    src/devices/DeviceManager.cpp
+    src/devices/DeviceTypeRegistry.cpp
+    src/devices/Room.cpp
+    src/devices/DeviceGroup.cpp
+    src/devices/types/SwitchDevice.cpp
+    src/devices/types/DimmerDevice.cpp
+    src/devices/types/ColorLightDevice.cpp
+    src/devices/types/TemperatureSensor.cpp
+    src/devices/types/MotionSensor.cpp
 )
 
 # Source files - Protocols
 set(PROTOCOLS_SOURCES
+    src/protocols/ProtocolFactory.cpp
     src/protocols/mqtt/MqttClient.cpp
 )
 

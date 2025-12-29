@@ -150,8 +150,8 @@ void WebServer::apiGetDevices(struct mg_connection* c) {
         json += "{";
         json += "\"id\":\"" + device->id() + "\",";
         json += "\"name\":\"" + device->name() + "\",";
-        json += "\"type\":\"" + Device::typeToString(device->type()) + "\",";
-        json += "\"online\":" + std::string(device->isOnline() ? "true" : "false");
+        json += "\"type\":\"" + device->typeString() + "\",";
+        json += "\"online\":" + std::string(device->isAvailable() ? "true" : "false");
         json += "}";
     }
 
@@ -169,9 +169,9 @@ void WebServer::apiGetDevice(struct mg_connection* c, const std::string& id) {
     std::string json = "{";
     json += "\"id\":\"" + device->id() + "\",";
     json += "\"name\":\"" + device->name() + "\",";
-    json += "\"type\":\"" + Device::typeToString(device->type()) + "\",";
+    json += "\"type\":\"" + device->typeString() + "\",";
     json += "\"room\":\"" + device->room() + "\",";
-    json += "\"online\":" + std::string(device->isOnline() ? "true" : "false");
+    json += "\"online\":" + std::string(device->isAvailable() ? "true" : "false");
     json += "}";
 
     sendJson(c, 200, json);

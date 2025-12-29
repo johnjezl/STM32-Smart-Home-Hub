@@ -10,6 +10,8 @@
 #include <smarthub/database/Database.hpp>
 #include <smarthub/devices/Device.hpp>
 #include <smarthub/devices/DeviceManager.hpp>
+#include <smarthub/devices/types/TemperatureSensor.hpp>
+#include <nlohmann/json.hpp>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -148,21 +150,21 @@ TEST_F(IntegrationTest, MultipleDeviceTypesCoexist) {
     manager.addDevice(std::make_shared<smarthub::Device>(
         "light1", "Light", smarthub::DeviceType::Light
     ));
-    manager.addDevice(std::make_shared<smarthub::Device>(
-        "sensor1", "Sensor", smarthub::DeviceType::Sensor
+    manager.addDevice(std::make_shared<smarthub::TemperatureSensor>(
+        "sensor1", "Temperature Sensor"
     ));
     manager.addDevice(std::make_shared<smarthub::Device>(
         "thermo1", "Thermostat", smarthub::DeviceType::Thermostat
     ));
     manager.addDevice(std::make_shared<smarthub::Device>(
-        "lock1", "Lock", smarthub::DeviceType::Lock
+        "switch1", "Switch", smarthub::DeviceType::Switch
     ));
 
     EXPECT_EQ(manager.deviceCount(), 4u);
-    EXPECT_EQ(manager.getDevicesByType(static_cast<int>(smarthub::DeviceType::Light)).size(), 1u);
-    EXPECT_EQ(manager.getDevicesByType(static_cast<int>(smarthub::DeviceType::Sensor)).size(), 1u);
-    EXPECT_EQ(manager.getDevicesByType(static_cast<int>(smarthub::DeviceType::Thermostat)).size(), 1u);
-    EXPECT_EQ(manager.getDevicesByType(static_cast<int>(smarthub::DeviceType::Lock)).size(), 1u);
+    EXPECT_EQ(manager.getDevicesByType(smarthub::DeviceType::Light).size(), 1u);
+    EXPECT_EQ(manager.getDevicesByType(smarthub::DeviceType::TemperatureSensor).size(), 1u);
+    EXPECT_EQ(manager.getDevicesByType(smarthub::DeviceType::Thermostat).size(), 1u);
+    EXPECT_EQ(manager.getDevicesByType(smarthub::DeviceType::Switch).size(), 1u);
 }
 
 TEST_F(IntegrationTest, SensorHistoryLogging) {
@@ -220,20 +222,20 @@ TEST_F(IntegrationTest, ConfigToComponentWiring) {
 TEST_F(IntegrationTest, DeviceStateCallback) {
     smarthub::Device device("light1", "Light", smarthub::DeviceType::Light);
 
-    std::vector<std::pair<std::string, std::any>> stateChanges;
+    std::vector<std::string> changedProperties;
 
-    device.setStateCallback([&](const std::string& property, const std::any& value) {
-        stateChanges.emplace_back(property, value);
+    device.setStateCallback([&](const std::string& property, const nlohmann::json& /*value*/) {
+        changedProperties.push_back(property);
     });
 
-    device.setState("power", std::string("on"));
+    device.setState("power", "on");
     device.setState("brightness", 75);
-    device.setState("power", std::string("off"));
+    device.setState("power", "off");
 
-    EXPECT_EQ(stateChanges.size(), 3u);
-    EXPECT_EQ(stateChanges[0].first, "power");
-    EXPECT_EQ(stateChanges[1].first, "brightness");
-    EXPECT_EQ(stateChanges[2].first, "power");
+    EXPECT_EQ(changedProperties.size(), 3u);
+    EXPECT_EQ(changedProperties[0], "power");
+    EXPECT_EQ(changedProperties[1], "brightness");
+    EXPECT_EQ(changedProperties[2], "power");
 }
 
 TEST_F(IntegrationTest, EventBusDeviceStateEvents) {
