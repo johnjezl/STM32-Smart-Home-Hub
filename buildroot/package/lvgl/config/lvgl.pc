@@ -1,0 +1,10 @@
+prefix=/usr
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: lvgl
+Description: Light and Versatile Graphics Library
+Version: 8.3.11
+Libs: -L${libdir} -llvgl
+Cflags: -I${includedir} -I${includedir}/lvgl

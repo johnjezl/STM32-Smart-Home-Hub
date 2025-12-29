@@ -1,0 +1,6 @@
+# sha256 hash of lvgl source tarball from GitHub
+# For v8.3.11
+sha256  83b7325a4b78cbb19a39f3ac75346c8086926d7faeab5ff2d825c20da0bbdb46  lvgl-8.3.11.tar.gz
+
+# For v9.2.2 (has assembly issues on Cortex-A)
+# sha256  129b4e00e06639fa79d7e8a6cab3c1ecce2445b1a246652ccd34f22e7b17ad6f  lvgl-9.2.2.tar.gz

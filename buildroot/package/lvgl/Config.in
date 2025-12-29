@@ -1,0 +1,58 @@
+config BR2_PACKAGE_LVGL
+	bool "lvgl"
+	depends on BR2_TOOLCHAIN_HAS_THREADS
+	select BR2_PACKAGE_LIBDRM if BR2_PACKAGE_LVGL_DRM
+	help
+	  Light and Versatile Graphics Library (LVGL) is a free and
+	  open-source graphics library providing everything you need
+	  to create embedded GUI with easy-to-use graphical elements.
+
+	  https://lvgl.io/
+
+if BR2_PACKAGE_LVGL
+
+config BR2_PACKAGE_LVGL_VERSION
+	string "LVGL version"
+	default "9.2.2"
+	help
+	  Version of LVGL to download and build.
+
+choice
+	prompt "Display driver"
+	default BR2_PACKAGE_LVGL_FBDEV
+
+config BR2_PACKAGE_LVGL_FBDEV
+	bool "Linux framebuffer (fbdev)"
+	help
+	  Use the Linux framebuffer device (/dev/fb0) for display.
+	  This is the simplest option for embedded Linux systems.
+
+config BR2_PACKAGE_LVGL_DRM
+	bool "DRM/KMS"
+	select BR2_PACKAGE_LIBDRM
+	help
+	  Use the Linux DRM/KMS subsystem for display.
+	  More modern than fbdev, supports hardware acceleration.
+
+config BR2_PACKAGE_LVGL_SDL
+	bool "SDL2 (for simulation)"
+	select BR2_PACKAGE_SDL2
+	help
+	  Use SDL2 for display. Useful for desktop simulation.
+
+endchoice
+
+config BR2_PACKAGE_LVGL_EVDEV
+	bool "Enable evdev input driver"
+	default y
+	help
+	  Enable the evdev input driver for touchscreen/mouse support.
+
+config BR2_PACKAGE_LVGL_LIBINPUT
+	bool "Enable libinput driver"
+	select BR2_PACKAGE_LIBINPUT
+	help
+	  Enable libinput for input device handling.
+	  More feature-rich than evdev but larger footprint.
+
+endif # BR2_PACKAGE_LVGL
