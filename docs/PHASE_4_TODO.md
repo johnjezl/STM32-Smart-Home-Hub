@@ -1,9 +1,25 @@
 # Phase 4: Zigbee Integration - Detailed TODO
 
 ## Overview
-**Duration**: 2-3 weeks  
-**Objective**: Enable control and monitoring of Zigbee devices via CC2652P coordinator.  
+**Duration**: 2-3 weeks
+**Objective**: Enable control and monitoring of Zigbee devices via CC2652P coordinator.
 **Prerequisites**: Phase 3 complete (device framework)
+
+---
+
+## Software Implementation Status
+
+### Completed (Without Hardware)
+
+| Component | Status | Files |
+|-----------|--------|-------|
+| ZNP Frame Parser | ✅ | `include/smarthub/protocols/zigbee/ZnpFrame.hpp`, `src/protocols/zigbee/ZnpFrame.cpp` |
+| ZCL Constants | ✅ | `include/smarthub/protocols/zigbee/ZclConstants.hpp` |
+| ZNP Transport | ✅ | `include/smarthub/protocols/zigbee/ZnpTransport.hpp`, `src/protocols/zigbee/ZnpTransport.cpp` |
+| Zigbee Coordinator | ✅ | `include/smarthub/protocols/zigbee/ZigbeeCoordinator.hpp`, `src/protocols/zigbee/ZigbeeCoordinator.cpp` |
+| Zigbee Handler | ✅ | `include/smarthub/protocols/zigbee/ZigbeeHandler.hpp`, `src/protocols/zigbee/ZigbeeHandler.cpp` |
+| Device Database | ✅ | `include/smarthub/protocols/zigbee/ZigbeeDeviceDatabase.hpp`, `src/protocols/zigbee/ZigbeeDeviceDatabase.cpp` |
+| Comprehensive Tests | ✅ | `tests/protocols/test_zigbee.cpp` (42 test cases) |
 
 ---
 
@@ -55,7 +71,7 @@ echo -ne '\xfe\x00\x00\x00\xff' > /dev/ttySTM1  # Z-Stack reset command
 
 ---
 
-## 4.2 Z-Stack ZNP Protocol Implementation
+## 4.2 Z-Stack ZNP Protocol Implementation ✅
 
 ### 4.2.1 ZNP Protocol Overview
 ```
@@ -67,649 +83,154 @@ Frame Format:
 | 0xFE | 1 byte | 1    | 1      | N bytes | 1   |
 +------+--------+------+--------+---------+-----+
 
-Cmd0: Command Type
-  - 0x20-0x2F: SREQ (Synchronous Request)
-  - 0x40-0x4F: AREQ (Asynchronous Request)  
-  - 0x60-0x6F: SRSP (Synchronous Response)
+Cmd0: Type (bits 7-5) | Subsystem (bits 4-0)
+  - POLL: 0x00
+  - SREQ: 0x20 (Synchronous Request)
+  - AREQ: 0x40 (Asynchronous Request/Indication)
+  - SRSP: 0x60 (Synchronous Response)
 
-Cmd1: Command ID (subsystem + command)
+Subsystems:
   - SYS: 0x01
   - AF: 0x04
   - ZDO: 0x05
-  - SAPI: 0x06
   - UTIL: 0x07
   - APP_CNF: 0x0F
 ```
 
-### 4.2.2 ZNP Frame Classes
-```cpp
-// app/include/smarthub/protocols/zigbee/ZnpFrame.hpp
-#pragma once
+### 4.2.2 ZNP Frame Classes ✅
+**Files**: `ZnpFrame.hpp`, `ZnpFrame.cpp`
 
-#include <cstdint>
-#include <vector>
-#include <optional>
+Features implemented:
+- Frame construction with type, subsystem, command
+- Payload building (appendByte, appendWord, appendDWord, appendQWord)
+- Frame serialization with FCS calculation
+- Frame parsing with validation
+- Frame finding in byte stream
+- Debug toString() method
 
-namespace smarthub::zigbee {
+### 4.2.3 ZNP Serial Transport ✅
+**Files**: `ZnpTransport.hpp`, `ZnpTransport.cpp`
 
-// Command types
-enum class ZnpType : uint8_t {
-    POLL = 0x00,
-    SREQ = 0x20,
-    AREQ = 0x40,
-    SRSP = 0x60
-};
-
-// Subsystems
-enum class ZnpSubsystem : uint8_t {
-    RPC_ERROR = 0x00,
-    SYS = 0x01,
-    MAC = 0x02,
-    NWK = 0x03,
-    AF = 0x04,
-    ZDO = 0x05,
-    SAPI = 0x06,
-    UTIL = 0x07,
-    DEBUG = 0x08,
-    APP = 0x09,
-    APP_CNF = 0x0F,
-    GREENPOWER = 0x15
-};
-
-// Common commands
-namespace cmd {
-    // SYS commands
-    constexpr uint8_t SYS_RESET_REQ = 0x00;
-    constexpr uint8_t SYS_PING = 0x01;
-    constexpr uint8_t SYS_VERSION = 0x02;
-    constexpr uint8_t SYS_OSAL_NV_READ = 0x08;
-    constexpr uint8_t SYS_OSAL_NV_WRITE = 0x09;
-    
-    // AF commands
-    constexpr uint8_t AF_REGISTER = 0x00;
-    constexpr uint8_t AF_DATA_REQUEST = 0x01;
-    constexpr uint8_t AF_INCOMING_MSG = 0x81;
-    
-    // ZDO commands
-    constexpr uint8_t ZDO_STARTUP_FROM_APP = 0x40;
-    constexpr uint8_t ZDO_STATE_CHANGE_IND = 0xC0;
-    constexpr uint8_t ZDO_END_DEVICE_ANNCE_IND = 0xC1;
-    constexpr uint8_t ZDO_LEAVE_IND = 0xC9;
-    constexpr uint8_t ZDO_PERMIT_JOIN_IND = 0xCB;
-    
-    // UTIL commands
-    constexpr uint8_t UTIL_GET_DEVICE_INFO = 0x00;
-    constexpr uint8_t UTIL_LED_CONTROL = 0x0E;
-    
-    // APP_CNF commands
-    constexpr uint8_t APP_CNF_BDB_START_COMMISSIONING = 0x05;
-}
-
-class ZnpFrame {
-public:
-    static constexpr uint8_t SOF = 0xFE;
-    
-    ZnpFrame() = default;
-    ZnpFrame(ZnpType type, ZnpSubsystem subsystem, uint8_t command);
-    ZnpFrame(ZnpType type, ZnpSubsystem subsystem, uint8_t command, 
-             const std::vector<uint8_t>& payload);
-    
-    // Build frame
-    ZnpFrame& setPayload(const std::vector<uint8_t>& payload);
-    ZnpFrame& appendByte(uint8_t b);
-    ZnpFrame& appendWord(uint16_t w);  // Little-endian
-    ZnpFrame& appendDWord(uint32_t d);
-    ZnpFrame& appendBytes(const uint8_t* data, size_t len);
-    
-    // Serialize to bytes
-    std::vector<uint8_t> serialize() const;
-    
-    // Parse from bytes
-    static std::optional<ZnpFrame> parse(const uint8_t* data, size_t len);
-    
-    // Accessors
-    ZnpType type() const { return m_type; }
-    ZnpSubsystem subsystem() const { return m_subsystem; }
-    uint8_t command() const { return m_command; }
-    const std::vector<uint8_t>& payload() const { return m_payload; }
-    
-    // Helpers
-    uint8_t cmd0() const;
-    uint8_t cmd1() const;
-    bool isResponse() const { return m_type == ZnpType::SRSP; }
-    bool isIndication() const { return m_type == ZnpType::AREQ; }
-    
-private:
-    static uint8_t calculateFCS(const uint8_t* data, size_t len);
-    
-    ZnpType m_type = ZnpType::SREQ;
-    ZnpSubsystem m_subsystem = ZnpSubsystem::SYS;
-    uint8_t m_command = 0;
-    std::vector<uint8_t> m_payload;
-};
-
-} // namespace smarthub::zigbee
-```
-
-### 4.2.3 ZNP Serial Transport
-```cpp
-// app/include/smarthub/protocols/zigbee/ZnpTransport.hpp
-#pragma once
-
-#include "ZnpFrame.hpp"
-#include <string>
-#include <functional>
-#include <thread>
-#include <mutex>
-#include <condition_variable>
-#include <queue>
-#include <atomic>
-
-namespace smarthub::zigbee {
-
-using FrameCallback = std::function<void(const ZnpFrame&)>;
-
-class ZnpTransport {
-public:
-    explicit ZnpTransport(const std::string& port, int baud = 115200);
-    ~ZnpTransport();
-    
-    bool open();
-    void close();
-    bool isOpen() const { return m_fd >= 0; }
-    
-    // Send frame and wait for response (synchronous)
-    std::optional<ZnpFrame> request(const ZnpFrame& frame, int timeoutMs = 5000);
-    
-    // Send frame without waiting (asynchronous)
-    bool send(const ZnpFrame& frame);
-    
-    // Set callback for async indications (AREQ)
-    void setIndicationCallback(FrameCallback callback);
-    
-private:
-    void readerThread();
-    void processReceivedData();
-    
-    std::string m_port;
-    int m_baud;
-    int m_fd = -1;
-    
-    std::thread m_readerThread;
-    std::atomic<bool> m_running{false};
-    
-    // For synchronous request/response
-    std::mutex m_responseMutex;
-    std::condition_variable m_responseCv;
-    std::optional<ZnpFrame> m_pendingResponse;
-    uint8_t m_expectedCmd0 = 0;
-    uint8_t m_expectedCmd1 = 0;
-    
-    // Receive buffer
-    std::vector<uint8_t> m_rxBuffer;
-    std::mutex m_rxMutex;
-    
-    FrameCallback m_indicationCallback;
-};
-
-} // namespace smarthub::zigbee
-```
+Features implemented:
+- ISerialPort interface for dependency injection (testability)
+- PosixSerialPort implementation (8N1, no flow control)
+- Reader thread for async frame reception
+- Synchronous request/response with timeout
+- Async indication callback registration
 
 ---
 
-## 4.3 Zigbee Coordinator Controller
+## 4.3 Zigbee Coordinator Controller ✅
 
-### 4.3.1 Coordinator Class
-```cpp
-// app/include/smarthub/protocols/zigbee/ZigbeeCoordinator.hpp
-#pragma once
+**Files**: `ZigbeeCoordinator.hpp`, `ZigbeeCoordinator.cpp`
 
-#include "ZnpTransport.hpp"
-#include <map>
-#include <functional>
-
-namespace smarthub::zigbee {
-
-struct DeviceInfo {
-    uint16_t networkAddress;
-    uint64_t ieeeAddress;
-    uint8_t deviceType;  // 0=Coordinator, 1=Router, 2=EndDevice
-    std::string manufacturer;
-    std::string model;
-    uint8_t endpoints[32];
-    uint8_t endpointCount;
-};
-
-struct ClusterAttribute {
-    uint16_t id;
-    uint8_t dataType;
-    std::vector<uint8_t> value;
-};
-
-class ZigbeeCoordinator {
-public:
-    using DeviceJoinedCallback = std::function<void(const DeviceInfo&)>;
-    using DeviceLeftCallback = std::function<void(uint64_t ieeeAddr)>;
-    using AttributeReportCallback = std::function<void(uint16_t nwkAddr, uint8_t endpoint,
-                                                        uint16_t cluster, const ClusterAttribute&)>;
-    
-    explicit ZigbeeCoordinator(const std::string& port);
-    ~ZigbeeCoordinator();
-    
-    // Initialization
-    bool initialize();
-    void shutdown();
-    
-    // Network operations
-    bool startNetwork();
-    bool permitJoin(uint8_t duration = 60);  // 0=disable, 255=permanent
-    bool getNetworkInfo();
-    
-    // Device operations
-    bool readAttribute(uint16_t nwkAddr, uint8_t endpoint, uint16_t cluster, uint16_t attrId);
-    bool writeAttribute(uint16_t nwkAddr, uint8_t endpoint, uint16_t cluster,
-                        uint16_t attrId, uint8_t dataType, const std::vector<uint8_t>& value);
-    bool sendCommand(uint16_t nwkAddr, uint8_t endpoint, uint16_t cluster,
-                     uint8_t command, const std::vector<uint8_t>& payload = {});
-    
-    // Callbacks
-    void setDeviceJoinedCallback(DeviceJoinedCallback cb) { m_deviceJoinedCb = cb; }
-    void setDeviceLeftCallback(DeviceLeftCallback cb) { m_deviceLeftCb = cb; }
-    void setAttributeReportCallback(AttributeReportCallback cb) { m_attrReportCb = cb; }
-    
-    // Status
-    bool isNetworkUp() const { return m_networkUp; }
-    uint16_t panId() const { return m_panId; }
-    uint8_t channel() const { return m_channel; }
-    uint64_t ieeeAddress() const { return m_ieeeAddr; }
-    
-private:
-    void handleIndication(const ZnpFrame& frame);
-    void handleDeviceAnnounce(const ZnpFrame& frame);
-    void handleIncomingMessage(const ZnpFrame& frame);
-    void handleStateChange(const ZnpFrame& frame);
-    
-    void requestDeviceInfo(uint16_t nwkAddr);
-    void configureReporting(uint16_t nwkAddr, uint8_t endpoint, uint16_t cluster);
-    
-    ZnpTransport m_transport;
-    
-    bool m_networkUp = false;
-    uint16_t m_panId = 0;
-    uint8_t m_channel = 0;
-    uint64_t m_ieeeAddr = 0;
-    
-    std::map<uint64_t, DeviceInfo> m_devices;
-    
-    DeviceJoinedCallback m_deviceJoinedCb;
-    DeviceLeftCallback m_deviceLeftCb;
-    AttributeReportCallback m_attrReportCb;
-};
-
-} // namespace smarthub::zigbee
-```
+Features implemented:
+- Network initialization and startup
+- Permit join control
+- Device tracking (network address, IEEE address, endpoints, clusters)
+- ZCL attribute reading/writing
+- ZCL command sending
+- Callbacks for device announce, device leave, attribute reports, commands
+- Convenience methods: setOnOff, setLevel, setColorTemp, setHueSat
+- Configure reporting for automatic state updates
 
 ---
 
-## 4.4 Zigbee Cluster Library (ZCL) Support
+## 4.4 Zigbee Cluster Library (ZCL) Support ✅
 
-### 4.4.1 ZCL Constants
-```cpp
-// app/include/smarthub/protocols/zigbee/ZclConstants.hpp
-#pragma once
+**File**: `ZclConstants.hpp`
 
-#include <cstdint>
-
-namespace smarthub::zigbee::zcl {
-
-// Cluster IDs
-namespace cluster {
-    constexpr uint16_t BASIC = 0x0000;
-    constexpr uint16_t POWER_CONFIG = 0x0001;
-    constexpr uint16_t IDENTIFY = 0x0003;
-    constexpr uint16_t GROUPS = 0x0004;
-    constexpr uint16_t SCENES = 0x0005;
-    constexpr uint16_t ON_OFF = 0x0006;
-    constexpr uint16_t LEVEL_CONTROL = 0x0008;
-    constexpr uint16_t COLOR_CONTROL = 0x0300;
-    constexpr uint16_t ILLUMINANCE = 0x0400;
-    constexpr uint16_t TEMPERATURE = 0x0402;
-    constexpr uint16_t HUMIDITY = 0x0405;
-    constexpr uint16_t OCCUPANCY = 0x0406;
-    constexpr uint16_t IAS_ZONE = 0x0500;
-    constexpr uint16_t ELECTRICAL = 0x0B04;
-    constexpr uint16_t METERING = 0x0702;
-}
-
-// Basic cluster attributes
-namespace attr::basic {
-    constexpr uint16_t ZCL_VERSION = 0x0000;
-    constexpr uint16_t APP_VERSION = 0x0001;
-    constexpr uint16_t MANUFACTURER = 0x0004;
-    constexpr uint16_t MODEL = 0x0005;
-    constexpr uint16_t SW_BUILD = 0x4000;
-}
-
-// Power configuration attributes
-namespace attr::power {
-    constexpr uint16_t BATTERY_VOLTAGE = 0x0020;
-    constexpr uint16_t BATTERY_PERCENT = 0x0021;
-}
-
-// On/Off cluster attributes
-namespace attr::onoff {
-    constexpr uint16_t ON_OFF = 0x0000;
-}
-
-// Level control attributes
-namespace attr::level {
-    constexpr uint16_t CURRENT_LEVEL = 0x0000;
-}
-
-// Color control attributes
-namespace attr::color {
-    constexpr uint16_t CURRENT_HUE = 0x0000;
-    constexpr uint16_t CURRENT_SAT = 0x0001;
-    constexpr uint16_t COLOR_TEMP = 0x0007;
-    constexpr uint16_t COLOR_MODE = 0x0008;
-}
-
-// Temperature measurement
-namespace attr::temperature {
-    constexpr uint16_t MEASURED_VALUE = 0x0000;  // In 0.01°C
-}
-
-// Humidity measurement
-namespace attr::humidity {
-    constexpr uint16_t MEASURED_VALUE = 0x0000;  // In 0.01%
-}
-
-// On/Off commands
-namespace cmd::onoff {
-    constexpr uint8_t OFF = 0x00;
-    constexpr uint8_t ON = 0x01;
-    constexpr uint8_t TOGGLE = 0x02;
-}
-
-// Level control commands
-namespace cmd::level {
-    constexpr uint8_t MOVE_TO_LEVEL = 0x00;
-    constexpr uint8_t MOVE = 0x01;
-    constexpr uint8_t STEP = 0x02;
-    constexpr uint8_t STOP = 0x03;
-    constexpr uint8_t MOVE_TO_LEVEL_WITH_ONOFF = 0x04;
-}
-
-// Color control commands
-namespace cmd::color {
-    constexpr uint8_t MOVE_TO_HUE = 0x00;
-    constexpr uint8_t MOVE_TO_SAT = 0x03;
-    constexpr uint8_t MOVE_TO_HUE_SAT = 0x06;
-    constexpr uint8_t MOVE_TO_COLOR_TEMP = 0x0A;
-}
-
-// Data types
-namespace datatype {
-    constexpr uint8_t BOOLEAN = 0x10;
-    constexpr uint8_t UINT8 = 0x20;
-    constexpr uint8_t UINT16 = 0x21;
-    constexpr uint8_t UINT32 = 0x23;
-    constexpr uint8_t INT8 = 0x28;
-    constexpr uint8_t INT16 = 0x29;
-    constexpr uint8_t ENUM8 = 0x30;
-    constexpr uint8_t STRING = 0x42;
-    constexpr uint8_t IEEE_ADDR = 0xF0;
-}
-
-} // namespace smarthub::zigbee::zcl
-```
+Clusters supported:
+- Basic (0x0000): Manufacturer, model identification
+- Power Configuration (0x0001): Battery voltage/percent
+- On/Off (0x0006): On, off, toggle commands
+- Level Control (0x0008): Brightness control
+- Color Control (0x0300): Hue, saturation, color temperature
+- Temperature Measurement (0x0402): Temperature readings
+- Relative Humidity (0x0405): Humidity readings
+- Occupancy Sensing (0x0406): Motion detection
+- IAS Zone (0x0500): Security sensors
+- Electrical Measurement (0x0B04): Power monitoring
+- Metering (0x0702): Energy measurement
 
 ---
 
-## 4.5 Zigbee Protocol Handler
+## 4.5 Zigbee Protocol Handler ✅
 
-### 4.5.1 Protocol Handler Implementation
-```cpp
-// app/include/smarthub/protocols/zigbee/ZigbeeHandler.hpp
-#pragma once
+**Files**: `ZigbeeHandler.hpp`, `ZigbeeHandler.cpp`
 
-#include <smarthub/protocols/IProtocolHandler.hpp>
-#include "ZigbeeCoordinator.hpp"
-#include "ZigbeeDeviceDatabase.hpp"
+Implements IProtocolHandler interface:
+- `initialize()`: Start coordinator and network
+- `shutdown()`: Clean shutdown
+- `startDiscovery()`: Enable permit join
+- `stopDiscovery()`: Disable permit join
+- `sendCommand()`: Route commands to devices
+- `getStatus()`: Return protocol status JSON
+- `getKnownDeviceAddresses()`: List paired devices
 
-namespace smarthub::zigbee {
+Device type inference from clusters:
+- On/Off + Level + Color → ColorLight
+- On/Off + Level → Dimmer
+- On/Off only → Switch
+- Temperature → TemperatureSensor
+- IAS Zone / Occupancy → MotionSensor
 
-class ZigbeeHandler : public IProtocolHandler {
-public:
-    ZigbeeHandler(EventBus& eventBus, const nlohmann::json& config);
-    ~ZigbeeHandler() override;
-    
-    // IProtocolHandler interface
-    std::string name() const override { return "zigbee"; }
-    std::string version() const override { return "1.0.0"; }
-    
-    bool initialize() override;
-    void shutdown() override;
-    void poll() override;
-    
-    bool supportsDiscovery() const override { return true; }
-    void startDiscovery() override;
-    void stopDiscovery() override;
-    bool isDiscovering() const override { return m_discovering; }
-    
-    bool sendCommand(const std::string& deviceAddress, const std::string& command,
-                     const nlohmann::json& params) override;
-    
-    void setDeviceDiscoveredCallback(DeviceDiscoveredCallback cb) override { m_discoveredCb = cb; }
-    void setDeviceStateCallback(DeviceStateCallback cb) override { m_stateCb = cb; }
-    
-    bool isConnected() const override { return m_coordinator && m_coordinator->isNetworkUp(); }
-    nlohmann::json getStatus() const override;
-    
-private:
-    void onDeviceJoined(const DeviceInfo& info);
-    void onDeviceLeft(uint64_t ieeeAddr);
-    void onAttributeReport(uint16_t nwkAddr, uint8_t endpoint, uint16_t cluster,
-                           const ClusterAttribute& attr);
-    
-    DevicePtr createDevice(const DeviceInfo& info);
-    void processClusterAttribute(const std::string& deviceId, uint16_t cluster,
-                                  const ClusterAttribute& attr);
-    
-    // Command handlers by device type
-    bool handleSwitchCommand(const DeviceInfo& info, const std::string& cmd,
-                              const nlohmann::json& params);
-    bool handleDimmerCommand(const DeviceInfo& info, const std::string& cmd,
-                              const nlohmann::json& params);
-    bool handleColorLightCommand(const DeviceInfo& info, const std::string& cmd,
-                                  const nlohmann::json& params);
-    
-    EventBus& m_eventBus;
-    nlohmann::json m_config;
-    
-    std::unique_ptr<ZigbeeCoordinator> m_coordinator;
-    ZigbeeDeviceDatabase m_deviceDb;
-    
-    bool m_discovering = false;
-    
-    DeviceDiscoveredCallback m_discoveredCb;
-    DeviceStateCallback m_stateCb;
-    
-    // Map IEEE address to device ID
-    std::map<uint64_t, std::string> m_ieeeToDeviceId;
-};
+### 4.5.1 Device Database ✅
 
-// Auto-register with factory
-REGISTER_PROTOCOL("zigbee", ZigbeeHandler);
+**Files**: `ZigbeeDeviceDatabase.hpp`, `ZigbeeDeviceDatabase.cpp`
 
-} // namespace smarthub::zigbee
-```
-
-### 4.5.2 Device Database
-```cpp
-// app/include/smarthub/protocols/zigbee/ZigbeeDeviceDatabase.hpp
-#pragma once
-
-#include <string>
-#include <vector>
-#include <optional>
-#include <nlohmann/json.hpp>
-
-namespace smarthub::zigbee {
-
-struct DeviceDefinition {
-    std::string manufacturer;
-    std::string model;
-    std::string description;
-    DeviceType deviceType;
-    std::vector<DeviceCapability> capabilities;
-    nlohmann::json quirks;  // Device-specific behavior adjustments
-};
-
-class ZigbeeDeviceDatabase {
-public:
-    ZigbeeDeviceDatabase();
-    
-    // Load definitions from JSON file
-    bool loadFromFile(const std::string& path);
-    
-    // Lookup device
-    std::optional<DeviceDefinition> findDevice(const std::string& manufacturer,
-                                                const std::string& model) const;
-    
-    // Get all known manufacturers
-    std::vector<std::string> manufacturers() const;
-    
-private:
-    std::vector<DeviceDefinition> m_definitions;
-};
-
-} // namespace smarthub::zigbee
-```
-
-### 4.5.3 Device Definition Example (JSON)
-```json
-// app/assets/zigbee_devices.json
-{
-  "devices": [
-    {
-      "manufacturer": "IKEA of Sweden",
-      "models": ["TRADFRI bulb E26 WS opal 980lm", "TRADFRI bulb E27 WS opal 1000lm"],
-      "description": "IKEA TRADFRI LED bulb (white spectrum)",
-      "type": "ColorLight",
-      "capabilities": ["OnOff", "Brightness", "ColorTemperature"],
-      "quirks": {
-        "colorTempRange": [250, 454]
-      }
-    },
-    {
-      "manufacturer": "LUMI",
-      "models": ["lumi.sensor_ht", "lumi.weather"],
-      "description": "Aqara Temperature & Humidity Sensor",
-      "type": "TemperatureSensor",
-      "capabilities": ["Temperature", "Humidity", "Battery"],
-      "quirks": {
-        "requiresRejoin": true
-      }
-    },
-    {
-      "manufacturer": "LUMI",
-      "models": ["lumi.sensor_motion.aq2"],
-      "description": "Aqara Motion Sensor",
-      "type": "MotionSensor",
-      "capabilities": ["Motion", "Illuminance", "Battery"],
-      "quirks": {
-        "occupancyTimeout": 90
-      }
-    },
-    {
-      "manufacturer": "Philips",
-      "models": ["LWB010", "LWB014"],
-      "description": "Philips Hue White",
-      "type": "Dimmer",
-      "capabilities": ["OnOff", "Brightness"]
-    },
-    {
-      "manufacturer": "_TZ3000_",
-      "models": ["TS0001", "TS0011"],
-      "description": "Tuya Smart Switch",
-      "type": "Switch",
-      "capabilities": ["OnOff"],
-      "quirks": {
-        "tuyaSpecific": true
-      }
-    }
-  ]
-}
-```
+Features:
+- Load device definitions from JSON
+- Lookup by manufacturer/model (case-insensitive)
+- Device type mapping
+- Quirks support for device-specific workarounds
 
 ---
 
 ## 4.6 Pairing Mode UI
 
 ### 4.6.1 Pairing Screen
-```cpp
-// app/include/smarthub/ui/screens/PairingScreen.hpp
-#pragma once
-
-#include <smarthub/ui/Screen.hpp>
-#include <lvgl.h>
-
-namespace smarthub::ui {
-
-class PairingScreen : public Screen {
-public:
-    PairingScreen(UIManager& uiManager);
-    ~PairingScreen() override;
-    
-    void onCreate() override;
-    void onShow() override;
-    void onHide() override;
-    
-    // Update discovered device list
-    void addDiscoveredDevice(const std::string& name, const std::string& type);
-    void clearDevices();
-    
-private:
-    void startPairing();
-    void stopPairing();
-    void onDeviceSelected(int index);
-    
-    lv_obj_t* m_container = nullptr;
-    lv_obj_t* m_titleLabel = nullptr;
-    lv_obj_t* m_statusLabel = nullptr;
-    lv_obj_t* m_spinner = nullptr;
-    lv_obj_t* m_deviceList = nullptr;
-    lv_obj_t* m_startButton = nullptr;
-    lv_obj_t* m_cancelButton = nullptr;
-    
-    bool m_pairing = false;
-    std::vector<std::pair<std::string, std::string>> m_discoveredDevices;
-};
-
-} // namespace smarthub::ui
-```
+- ⏸️ Deferred to Phase 6 (UI implementation phase)
 
 ---
 
 ## 4.7 Testing
 
-### 4.7.1 Test Devices
-- ☐ IKEA TRADFRI bulb (on/off, dimming, color temp)
-- ☐ Aqara temperature/humidity sensor
-- ☐ Aqara door/window sensor
-- ☐ Sonoff SNZB-02 temperature sensor
-- ☐ Smart plug/outlet
+### 4.7.1 Unit Tests ✅ (42 test cases)
 
-### 4.7.2 Test Scenarios
-- ☐ Coordinator initialization
+| Test Suite | Tests | Status |
+|------------|-------|--------|
+| ZnpFrameTest | 9 | ✅ |
+| ZnpTransportTest | 4 | ✅ |
+| ZclConstantsTest | 4 | ✅ |
+| ZigbeeDeviceDatabaseTest | 8 | ✅ |
+| ZigbeeCoordinatorTest | 3 | ✅ |
+| ZigbeeHandlerTest | 3 | ✅ |
+| ZclAttributeValueTest | 6 | ✅ |
+| ZigbeeDeviceInfoTest | 2 | ✅ |
+| ZigbeeIntegrationTest | 2 | ✅ |
+| ZigbeeProtocolTest | 1 | ✅ |
+
+Mock serial port enables testing without hardware:
+- `MockSerialPort` class in test file
+- Simulates open, close, read, write operations
+- Queue-based read data injection
+
+### 4.7.2 Hardware Integration Tests (Pending CC2652P)
+- ☐ Coordinator initialization with real hardware
 - ☐ Device pairing via permit join
 - ☐ Device state reading
 - ☐ Command sending (on/off/dim)
 - ☐ Attribute reporting (sensor data)
 - ☐ Device removal
 - ☐ Network persistence across restarts
-- ☐ Multiple device mesh network
+
+### 4.7.3 Test Devices (Pending)
+- ☐ IKEA TRADFRI bulb (on/off, dimming, color temp)
+- ☐ Aqara temperature/humidity sensor
+- ☐ Aqara door/window sensor
+- ☐ Sonoff SNZB-02 temperature sensor
+- ☐ Smart plug/outlet
 
 ---
 
@@ -717,28 +238,62 @@ private:
 
 | Item | Status | Notes |
 |------|--------|-------|
-| CC2652P flashed with Z-Stack | ☐ | |
-| UART communication verified | ☐ | |
-| ZNP frame parsing works | ☐ | |
-| Coordinator starts network | ☐ | |
-| Permit join enables pairing | ☐ | |
-| Light bulb pairs and controls | ☐ | |
-| Sensor pairs and reports | ☐ | |
-| State persists across restarts | ☐ | |
-| UI shows device status | ☐ | |
-| Command latency <200ms | ☐ | |
+| ZNP frame parsing works | ✅ | 9 tests passing |
+| ZNP transport abstraction | ✅ | ISerialPort interface for testability |
+| ZCL constants defined | ✅ | All major clusters |
+| Zigbee coordinator logic | ✅ | Network and device management |
+| IProtocolHandler implemented | ✅ | Full interface compliance |
+| Device database works | ✅ | JSON loading, lookup, quirks |
+| Comprehensive unit tests | ✅ | 42 test cases |
+| CC2652P flashed with Z-Stack | ☐ | Waiting for hardware |
+| UART communication verified | ☐ | Waiting for hardware |
+| Coordinator starts network | ☐ | Waiting for hardware |
+| Permit join enables pairing | ☐ | Waiting for hardware |
+| Light bulb pairs and controls | ☐ | Waiting for hardware |
+| Sensor pairs and reports | ☐ | Waiting for hardware |
+| State persists across restarts | ☐ | Waiting for hardware |
+| UI shows device status | ⏸️ | Deferred to Phase 6 |
+| Command latency <200ms | ☐ | Waiting for hardware |
 
 ---
 
 ## Time Estimates
 
-| Task | Estimated Time |
-|------|----------------|
-| 4.1 Hardware Setup | 2-4 hours |
-| 4.2 ZNP Protocol | 8-12 hours |
-| 4.3 Coordinator Controller | 8-10 hours |
-| 4.4 ZCL Support | 6-8 hours |
-| 4.5 Protocol Handler | 8-10 hours |
-| 4.6 Pairing UI | 4-6 hours |
-| 4.7-4.8 Testing & Validation | 6-8 hours |
-| **Total** | **42-58 hours** |
+| Task | Estimated | Actual | Status |
+|------|-----------|--------|--------|
+| 4.2 ZNP Protocol | 8-12 hours | ~6 hours | ✅ COMPLETE |
+| 4.3 Coordinator Controller | 8-10 hours | ~6 hours | ✅ COMPLETE |
+| 4.4 ZCL Support | 6-8 hours | ~3 hours | ✅ COMPLETE |
+| 4.5 Protocol Handler | 8-10 hours | ~4 hours | ✅ COMPLETE |
+| 4.7 Unit Testing | 4-6 hours | ~2 hours | ✅ COMPLETE |
+| 4.1 Hardware Setup | 2-4 hours | - | ☐ PENDING |
+| 4.6 Pairing UI | 4-6 hours | - | ⏸️ DEFERRED |
+| 4.7-4.8 Hardware Testing | 6-8 hours | - | ☐ PENDING |
+| **Software Total** | **34-46 hours** | **~21 hours** | ✅ COMPLETE |
+| **Hardware Total** | **8-12 hours** | - | ☐ PENDING |
+
+---
+
+## Files Created
+
+### Headers (6 files)
+- `include/smarthub/protocols/zigbee/ZnpFrame.hpp`
+- `include/smarthub/protocols/zigbee/ZclConstants.hpp`
+- `include/smarthub/protocols/zigbee/ZnpTransport.hpp`
+- `include/smarthub/protocols/zigbee/ZigbeeCoordinator.hpp`
+- `include/smarthub/protocols/zigbee/ZigbeeHandler.hpp`
+- `include/smarthub/protocols/zigbee/ZigbeeDeviceDatabase.hpp`
+
+### Sources (5 files)
+- `src/protocols/zigbee/ZnpFrame.cpp`
+- `src/protocols/zigbee/ZnpTransport.cpp`
+- `src/protocols/zigbee/ZigbeeCoordinator.cpp`
+- `src/protocols/zigbee/ZigbeeHandler.cpp`
+- `src/protocols/zigbee/ZigbeeDeviceDatabase.cpp`
+
+### Tests (1 file)
+- `tests/protocols/test_zigbee.cpp` (42 test cases)
+
+### Modified
+- `app/CMakeLists.txt` - Added Zigbee sources
+- `app/tests/CMakeLists.txt` - Added Zigbee tests

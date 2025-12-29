@@ -150,6 +150,11 @@ set(DEVICES_SOURCES
 set(PROTOCOLS_SOURCES
     src/protocols/ProtocolFactory.cpp
     src/protocols/mqtt/MqttClient.cpp
+    src/protocols/zigbee/ZnpFrame.cpp
+    src/protocols/zigbee/ZnpTransport.cpp
+    src/protocols/zigbee/ZigbeeCoordinator.cpp
+    src/protocols/zigbee/ZigbeeHandler.cpp
+    src/protocols/zigbee/ZigbeeDeviceDatabase.cpp
 )
 
 # Source files - RPMsg

@@ -57,7 +57,8 @@ app/tests/
 │   └── test_organization.cpp   # Room and DeviceGroup tests
 ├── protocols/
 │   ├── test_mqtt.cpp           # MQTT client tests
-│   └── test_protocol_factory.cpp # ProtocolFactory and handler tests
+│   ├── test_protocol_factory.cpp # ProtocolFactory and handler tests
+│   └── test_zigbee.cpp         # Zigbee protocol tests (42 cases)
 ├── rpmsg/
 │   └── test_rpmsg.cpp          # RPMsg M4 communication tests
 ├── web/
@@ -89,6 +90,7 @@ Unit tests verify individual components in isolation:
 | WebServer | `web/test_webserver.cpp` | HTTP server, REST API, concurrent requests |
 | MQTT | `protocols/test_mqtt.cpp` | MQTT client, subscribe/publish, callbacks |
 | ProtocolFactory | `protocols/test_protocol_factory.cpp` | Protocol registration, creation, mock handler |
+| Zigbee | `protocols/test_zigbee.cpp` | ZNP frames, transport, coordinator, handler, database |
 | RPMsg | `rpmsg/test_rpmsg.cpp` | M4 communication, message types, GPIO/PWM |
 | UI | `ui/test_ui.cpp` | UIManager DRM backend, graceful failure handling |
 
@@ -365,6 +367,64 @@ The Config tests include tests for the INI-style fallback parser, which is used 
 | ConfigIniTest.IniWithWhitespace | Whitespace trimmed correctly |
 
 This ensures the application works correctly when cross-compiled for ARM targets where yaml-cpp may not be available in the Buildroot sysroot.
+
+## Zigbee Testing
+
+The Zigbee tests (`protocols/test_zigbee.cpp`) provide comprehensive coverage of the Zigbee protocol stack without requiring hardware:
+
+| Test Suite | Tests | Description |
+|------------|-------|-------------|
+| ZnpFrameTest | 9 | Frame building, serialization, parsing, FCS validation |
+| ZnpTransportTest | 4 | Serial port abstraction, open/close, send |
+| ZclConstantsTest | 4 | Data type sizes, cluster/attribute constants |
+| ZigbeeDeviceDatabaseTest | 8 | JSON loading, lookup, device type parsing |
+| ZigbeeCoordinatorTest | 3 | Initial state, device lookup |
+| ZigbeeHandlerTest | 3 | Configuration, status, callbacks |
+| ZclAttributeValueTest | 6 | Type conversions (bool, uint, int, string) |
+| ZigbeeDeviceInfoTest | 2 | Default values, cluster storage |
+| ZigbeeIntegrationTest | 2 | Frame roundtrip, database with quirks |
+| ZigbeeProtocolTest | 1 | Handler creation |
+
+### Mock Serial Port
+
+The tests use a `MockSerialPort` class that implements `ISerialPort`:
+
+```cpp
+class MockSerialPort : public ISerialPort {
+public:
+    bool open(const std::string& port, int baud) override;
+    ssize_t write(const uint8_t* data, size_t len) override;
+    ssize_t read(uint8_t* buf, size_t max, int timeout) override;
+
+    // Test helpers
+    void queueReadData(const std::vector<uint8_t>& data);
+    std::vector<uint8_t> getWrittenData();
+    void setOpenSuccess(bool success);
+};
+```
+
+This enables testing the full protocol stack without a CC2652P coordinator:
+
+```cpp
+auto mockSerial = std::make_unique<MockSerialPort>();
+mockSerial->queueReadData({0xFE, 0x00, 0x61, 0x01, 0x60});  // SRSP
+
+auto transport = std::make_unique<ZnpTransport>(std::move(mockSerial), "/dev/ttyUSB0", 115200);
+transport->open();
+
+ZnpFrame frame(ZnpType::SREQ, ZnpSubsystem::SYS, cmd::sys::PING);
+auto response = transport->request(frame);
+EXPECT_TRUE(response.has_value());
+```
+
+### Running Zigbee Tests
+
+```bash
+cd app/build-test
+cmake .. -DSMARTHUB_BUILD_TESTS=ON -DSMARTHUB_NATIVE_BUILD=ON
+make test_zigbee
+./tests/test_zigbee
+```
 
 ## UI Testing
 

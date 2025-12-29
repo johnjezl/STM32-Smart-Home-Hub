@@ -15,8 +15,8 @@ DeviceManager
     |
     +-- IProtocolHandler implementations
            |
-           +-- MqttProtocolHandler (Phase 4)
-           +-- ZigbeeProtocolHandler (future)
+           +-- ZigbeeHandler (Phase 4) - CC2652P/Z-Stack coordinator
+           +-- MqttProtocolHandler (future)
            +-- HttpProtocolHandler (future)
            +-- MockProtocolHandler (testing)
 ```
@@ -409,9 +409,57 @@ bool initialize() override {
 }
 ```
 
+## Available Protocol Handlers
+
+### ZigbeeHandler
+
+The Zigbee protocol handler communicates with a CC2652P coordinator via the Z-Stack ZNP protocol.
+
+```cpp
+#include <smarthub/protocols/zigbee/ZigbeeHandler.hpp>
+
+EventBus eventBus;
+nlohmann::json config = {
+    {"port", "/dev/ttyUSB0"},
+    {"baudRate", 115200},
+    {"deviceDatabase", "/etc/smarthub/zigbee_devices.json"}
+};
+
+auto handler = std::make_unique<ZigbeeHandler>(eventBus, config);
+handler->initialize();
+handler->startDiscovery();  // Enable permit join
+```
+
+Features:
+- Automatic device type inference from ZCL clusters
+- Device database for manufacturer/model lookup
+- Attribute reporting configuration
+- Commands: on/off, brightness, color temperature, hue/saturation
+
+See [Zigbee Protocol](zigbee.md) for detailed documentation.
+
+### MockProtocolHandler
+
+For unit testing, use the MockProtocolHandler:
+
+```cpp
+#include "mocks/MockProtocolHandler.hpp"
+
+MockProtocolHandler handler(eventBus, {});
+handler.initialize();
+
+// Simulate device discovery
+auto device = std::make_shared<Device>("dev1", "Device 1", DeviceType::Switch);
+handler.simulateDeviceDiscovered(device);
+
+// Simulate state change
+handler.simulateStateChange("dev1", "on", true);
+```
+
 ## See Also
 
 - [Device Abstraction Layer](devices.md) - Device types and management
+- [Zigbee Protocol](zigbee.md) - Zigbee-specific documentation
 - [MQTT Protocol](mqtt.md) - MQTT-specific documentation
 - [Architecture](architecture.md) - System architecture
 - [Testing](testing.md) - Testing guide
