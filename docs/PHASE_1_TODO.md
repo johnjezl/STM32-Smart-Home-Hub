@@ -747,7 +747,7 @@ Before proceeding to Phase 2, verify:
 | WiFi connects | ✅ | BCM43430/Murata 1DX, requires NVRAM symlink |
 | Ethernet works | ✅ | 1Gbps RTL8211F, DHCP via udhcpc/dhcpcd |
 | SSH access works | ✅ | Dropbear with key authentication |
-| Display shows console/splash | ⏸️ | Deferred — no fbcon/GUI in minimal build |
+| Boot splash screen | ⏸️ | Deferred to Phase 6 — will use DRM splash, not fbcon |
 | Mosquitto running | ✅ | MQTT broker on port 1883 |
 | remoteproc available | ✅ | /sys/class/remoteproc/remoteproc0 present |
 | RAM usage <64 MB idle | ✅ | Actual: **24.7 MB** |
