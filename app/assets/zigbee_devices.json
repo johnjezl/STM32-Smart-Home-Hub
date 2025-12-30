@@ -1,0 +1,143 @@
+{
+  "version": "1.0.0",
+  "devices": [
+    {
+      "manufacturer": "IKEA of Sweden",
+      "model": "TRADFRI bulb E27 WS opal 1000lm",
+      "displayName": "IKEA TRADFRI Bulb (White Spectrum)",
+      "deviceType": "color_light",
+      "quirks": {
+        "colorTempRange": [250, 454]
+      }
+    },
+    {
+      "manufacturer": "IKEA of Sweden",
+      "model": "TRADFRI bulb E26 opal 1000lm",
+      "displayName": "IKEA TRADFRI Bulb (Dimmable)",
+      "deviceType": "dimmer"
+    },
+    {
+      "manufacturer": "IKEA of Sweden",
+      "model": "TRADFRI control outlet",
+      "displayName": "IKEA TRADFRI Outlet",
+      "deviceType": "switch"
+    },
+    {
+      "manufacturer": "LUMI",
+      "model": "lumi.weather",
+      "displayName": "Aqara Temperature & Humidity Sensor",
+      "deviceType": "temperature_sensor",
+      "quirks": {
+        "requiresRejoin": true
+      }
+    },
+    {
+      "manufacturer": "LUMI",
+      "model": "lumi.sensor_ht",
+      "displayName": "Aqara Temperature Sensor",
+      "deviceType": "temperature_sensor"
+    },
+    {
+      "manufacturer": "LUMI",
+      "model": "lumi.sensor_motion.aq2",
+      "displayName": "Aqara Motion Sensor",
+      "deviceType": "motion_sensor",
+      "quirks": {
+        "occupancyTimeout": 90
+      }
+    },
+    {
+      "manufacturer": "LUMI",
+      "model": "lumi.sensor_magnet.aq2",
+      "displayName": "Aqara Door/Window Sensor",
+      "deviceType": "motion_sensor"
+    },
+    {
+      "manufacturer": "LUMI",
+      "model": "lumi.plug.maeu01",
+      "displayName": "Aqara Smart Plug",
+      "deviceType": "switch"
+    },
+    {
+      "manufacturer": "Philips",
+      "model": "LWB010",
+      "displayName": "Philips Hue White",
+      "deviceType": "dimmer"
+    },
+    {
+      "manufacturer": "Philips",
+      "model": "LWB014",
+      "displayName": "Philips Hue White",
+      "deviceType": "dimmer"
+    },
+    {
+      "manufacturer": "Philips",
+      "model": "LCT015",
+      "displayName": "Philips Hue Color",
+      "deviceType": "color_light"
+    },
+    {
+      "manufacturer": "SONOFF",
+      "model": "SNZB-02",
+      "displayName": "SONOFF Temperature Sensor",
+      "deviceType": "temperature_sensor"
+    },
+    {
+      "manufacturer": "SONOFF",
+      "model": "SNZB-03",
+      "displayName": "SONOFF Motion Sensor",
+      "deviceType": "motion_sensor"
+    },
+    {
+      "manufacturer": "SONOFF",
+      "model": "SNZB-04",
+      "displayName": "SONOFF Contact Sensor",
+      "deviceType": "motion_sensor"
+    },
+    {
+      "manufacturer": "SONOFF",
+      "model": "SNZB-01",
+      "displayName": "SONOFF Button",
+      "deviceType": "switch"
+    },
+    {
+      "manufacturer": "_TZ3000_",
+      "model": "TS0001",
+      "displayName": "Tuya Smart Switch (1 Gang)",
+      "deviceType": "switch",
+      "quirks": {
+        "tuyaSpecific": true
+      }
+    },
+    {
+      "manufacturer": "_TZ3000_",
+      "model": "TS0002",
+      "displayName": "Tuya Smart Switch (2 Gang)",
+      "deviceType": "switch",
+      "quirks": {
+        "tuyaSpecific": true
+      }
+    },
+    {
+      "manufacturer": "_TZ3000_",
+      "model": "TS011F",
+      "displayName": "Tuya Smart Plug",
+      "deviceType": "switch",
+      "quirks": {
+        "tuyaSpecific": true
+      }
+    },
+    {
+      "manufacturer": "eWeLink",
+      "model": "SA-003-Zigbee",
+      "displayName": "eWeLink Smart Plug",
+      "deviceType": "switch"
+    },
+    {
+      "manufacturer": "OSRAM",
+      "model": "Classic A60 W clear - LIGHTIFY",
+      "displayName": "OSRAM LIGHTIFY Bulb",
+      "deviceType": "dimmer"
+    }
+  ]
+}
