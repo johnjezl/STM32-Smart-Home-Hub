@@ -225,7 +225,7 @@ cat /sys/kernel/debug/remoteproc/remoteproc0/trace0
 
 ### Unit Tests (Host-Side)
 
-The M4 firmware includes 115 unit tests that run on x86 with mocked hardware:
+The M4 firmware includes 123 unit tests that run on x86 with mocked hardware:
 
 ```bash
 cd m4-firmware/tests
@@ -236,11 +236,12 @@ ctest --output-on-failure
 ```
 
 Test suites:
-- **MessageTypesTest** (25 tests): Message structure, enum values, wire format
 - **RpmsgProtocolTest** (20 tests): Message building, parsing, roundtrip
+- **VirtioVringTest** (8 tests): VirtIO vring structure, offsets, transfers
 - **SHT31CalculationsTest** (28 tests): CRC-8, temperature/humidity conversions
 - **I2CTransactionsTest** (21 tests): Mock I2C probe, read, write operations
 - **SensorManagerTest** (21 tests): Polling logic, timing, sensor presence
+- **MessageTypesTest** (25 tests): Message structure, enum values, wire format
 
 ### Ping Test
 
@@ -354,6 +355,117 @@ devmem 0x100400A8 32
 2. Check sensor power supply
 3. Use I2C probe to scan for devices
 4. Note: I2C requires peripheral clocks enabled via RCC
+
+## A7-Side Communication API
+
+### Standard Method: RpmsgClient
+
+When `/dev/ttyRPMSG0` is available (requires working IPCC), use the RpmsgClient class:
+
+```cpp
+#include <smarthub/rpmsg/RpmsgClient.hpp>
+#include <smarthub/core/EventBus.hpp>
+
+EventBus eventBus;
+RpmsgClient m4(eventBus, "/dev/ttyRPMSG0");
+
+// Initialize connection
+if (!m4.initialize()) {
+    // M4 not available
+}
+
+// Send commands
+m4.requestSensorData(0);           // Request sensor 0
+m4.setGpio(5, true);               // Set GPIO5 high
+m4.setPwm(0, 512);                 // 50% duty on PWM0
+m4.ping();                         // Heartbeat
+
+// Receive data (call from main loop)
+m4.poll();
+
+// Or use callback
+m4.setMessageCallback([](const std::vector<uint8_t>& data) {
+    // Handle message
+    auto type = static_cast<RpmsgMessageType>(data[0]);
+    if (type == RpmsgMessageType::SensorData) {
+        // Parse sensor reading
+    }
+});
+```
+
+**Header:** `app/include/smarthub/rpmsg/RpmsgClient.hpp`
+**Implementation:** `app/src/rpmsg/RpmsgClient.cpp`
+
+### Alpha Workaround: VirtIO Polling
+
+When IPCC is blocked by TrustZone (current situation), use the rpmsg_poll tool:
+
+```cpp
+#include <cstdio>
+#include <string>
+
+// Option 1: Read from subprocess
+FILE* pipe = popen("rpmsg_poll --once", "r");
+char line[256];
+while (fgets(line, sizeof(line), pipe)) {
+    // Parse: "RPMsg: src=0x0001 dst=0x0400 len=8"
+    //        "  Data: <payload>"
+}
+pclose(pipe);
+
+// Option 2: Background polling with pipe
+FILE* pipe = popen("rpmsg_poll --interval 100", "r");
+// Set non-blocking and poll in main loop
+int fd = fileno(pipe);
+fcntl(fd, F_SETFL, O_NONBLOCK);
+```
+
+**Tool:** `tools/rpmsg_poll/rpmsg_poll`
+**Documentation:** `tools/rpmsg_poll/README.md`
+
+### Message Format
+
+All messages between A7 and M4 use this format:
+
+```
+Byte  Content
+0     Message type (RpmsgMessageType)
+1     Payload length
+2-N   Payload data
+```
+
+| Type | Value | Direction | Description |
+|------|-------|-----------|-------------|
+| Ping | 0x00 | A7→M4 | Heartbeat request |
+| Pong | 0x01 | M4→A7 | Heartbeat response |
+| SensorData | 0x10 | M4→A7 | Sensor reading |
+| GpioCommand | 0x20 | A7→M4 | Set GPIO state |
+| GpioState | 0x21 | M4→A7 | GPIO state report |
+| AdcRequest | 0x30 | A7→M4 | Request ADC reading |
+| AdcResponse | 0x31 | M4→A7 | ADC value |
+| PwmCommand | 0x40 | A7→M4 | Set PWM duty |
+| Config | 0x50 | A7→M4 | Configuration |
+| Error | 0xFF | M4→A7 | Error report |
+
+### EventBus Integration
+
+RpmsgClient publishes sensor data to the EventBus:
+
+```cpp
+// Sensor data event
+struct SensorDataEvent {
+    std::string sensorId;
+    double value;
+    // ... additional fields
+};
+
+// Subscribe to sensor updates
+eventBus.subscribe<SensorDataEvent>([](const SensorDataEvent& e) {
+    LOG_INFO("Sensor %s: %.2f", e.sensorId.c_str(), e.value);
+});
+```
+
+---
 
 ## Source Files
 
