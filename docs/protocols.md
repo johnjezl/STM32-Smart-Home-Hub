@@ -16,8 +16,7 @@ DeviceManager
     +-- IProtocolHandler implementations
            |
            +-- ZigbeeHandler (Phase 4) - CC2652P/Z-Stack coordinator
-           +-- MqttProtocolHandler (future)
-           +-- HttpProtocolHandler (future)
+           +-- WifiHandler (Phase 5) - MQTT/Shelly/Tuya devices
            +-- MockProtocolHandler (testing)
 ```
 
@@ -438,6 +437,38 @@ Features:
 
 See [Zigbee Protocol](zigbee.md) for detailed documentation.
 
+### WifiHandler
+
+The WiFi protocol handler provides unified support for WiFi-based smart devices:
+
+```cpp
+#include <smarthub/protocols/wifi/WifiHandler.hpp>
+
+EventBus eventBus;
+nlohmann::json config = {
+    {"mqtt", {
+        {"broker", "localhost"},
+        {"port", 1883}
+    }}
+};
+
+auto handler = std::make_unique<WifiHandler>(eventBus, config);
+handler->initialize();
+handler->startDiscovery();
+```
+
+Supported device types:
+- **MQTT Devices** (Tasmota, ESPHome) - via Home Assistant MQTT Discovery
+- **Shelly Devices** - Gen1 REST API and Gen2 JSON-RPC
+- **Tuya Devices** - Local protocol over TCP port 6668
+
+Commands:
+- `on`/`off`/`toggle` - Power control
+- `brightness` - Dimmer level (0-100)
+- `colorTemp` - Color temperature in mireds
+
+See [WiFi Protocol](wifi.md) for detailed documentation.
+
 ### MockProtocolHandler
 
 For unit testing, use the MockProtocolHandler:
@@ -460,6 +491,7 @@ handler.simulateStateChange("dev1", "on", true);
 
 - [Device Abstraction Layer](devices.md) - Device types and management
 - [Zigbee Protocol](zigbee.md) - Zigbee-specific documentation
+- [WiFi Protocol](wifi.md) - WiFi devices (MQTT/Shelly/Tuya)
 - [MQTT Protocol](mqtt.md) - MQTT-specific documentation
 - [Architecture](architecture.md) - System architecture
 - [Testing](testing.md) - Testing guide
