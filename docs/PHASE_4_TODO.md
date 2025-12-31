@@ -26,47 +26,59 @@
 ## 4.1 Hardware Setup
 
 ### 4.1.1 Acquire CC2652P Module
-- ☐ Purchase Zigbee coordinator module:
-  - **Recommended**: SONOFF Zigbee 3.0 USB Dongle Plus (CC2652P)
-  - **Alternative**: Electrolama zig-a-zig-ah! (zzh!)
-  - **Alternative**: cod.m CC2652P2 module
+- ✅ Purchased Zigbee 3.0 USB Dongle (Amazon B0FCYLX8FT)
+  - TI CC2652P + CP2102N (USB-serial)
+  - +20dBm TX power with external antenna
+  - Pre-loaded with Z-Stack 3.x.0 ZNP firmware
+  - See `docs/cc2652p-integration.md` for full specs
 
-### 4.1.2 Flash Coordinator Firmware
+### 4.1.2 Flash Coordinator Firmware (if needed)
+The USB dongle comes pre-flashed with Z-Stack 3.x.0 ZNP firmware.
+
+If firmware update is needed:
 ```bash
 # Install cc2538-bsl flasher
 pip3 install pyserial intelhex
-
 git clone https://github.com/JelmerT/cc2538-bsl.git
-cd cc2538-bsl
 
-# Download Z-Stack coordinator firmware
-# Get from: https://github.com/Koenkk/Z-Stack-firmware/tree/master/coordinator/Z-Stack_3.x.0/bin
-wget https://github.com/Koenkk/Z-Stack-firmware/raw/master/coordinator/Z-Stack_3.x.0/bin/CC2652P_coordinator_20230507.zip
-unzip CC2652P_coordinator_20230507.zip
+# Download latest firmware from:
+# https://github.com/Koenkk/Z-Stack-firmware/tree/master/coordinator/Z-Stack_3.x.0/bin
 
-# Put device in bootloader mode (hold boot button while plugging in)
-# Flash firmware
-python3 cc2538-bsl.py -p /dev/ttyUSB0 -evw CC2652P_coordinator_20230507.hex
+# Put device in bootloader mode (hold BOOT button while plugging in)
+python3 cc2538-bsl.py -p /dev/ttyUSB0 -evw CC2652P_coordinator_YYYYMMDD.hex
 ```
 
 ### 4.1.3 Connect to STM32MP157F-DK2
-- ☐ Identify available UART on GPIO header
-- ☐ Connection (3.3V logic levels!):
-  ```
-  CC2652P      STM32MP1 (GPIO Header)
-  -------      ----------------------
-  VCC    -->   3.3V
-  GND    -->   GND
-  TX     -->   UART7_RX (PA8, pin XX)
-  RX     -->   UART7_TX (PA15, pin XX)
-  ```
-- ☐ Enable UART in device tree if needed
-- ☐ Verify serial communication:
+
+**USB Dongle Approach (Current Hardware):**
+- ☐ Enable cp210x kernel driver (CONFIG_USB_SERIAL_CP210X=m)
+  - Config fragment: `buildroot/board/smarthub/linux-usb-serial.config`
+- ☐ Plug USB dongle into STM32MP157F-DK2 USB-A port
+- ☐ Verify device appears as `/dev/ttyUSB0`
+
+**Alternative: Bare CC2652P Module via UART:**
+If using a bare module instead of USB dongle:
+```
+CC2652P      STM32MP1 (GPIO Header)
+-------      ----------------------
+VCC    -->   3.3V
+GND    -->   GND
+TX     -->   UART7_RX (PA8)
+RX     -->   UART7_TX (PA15)
+```
+Enable UART7 in device tree if using this approach.
+
+### 4.1.4 Verify Serial Communication
 ```bash
-# On the board
-stty -F /dev/ttySTM1 115200 raw -echo
-cat /dev/ttySTM1 &
-echo -ne '\xfe\x00\x00\x00\xff' > /dev/ttySTM1  # Z-Stack reset command
+# Check USB detection
+dmesg | grep cp210x
+# Expected: "cp210x converter now attached to ttyUSB0"
+
+# List device
+ls -la /dev/ttyUSB0
+
+# Test communication (send SYS_PING)
+# SmartHub app will do this automatically on startup
 ```
 
 ---
@@ -245,8 +257,9 @@ Mock serial port enables testing without hardware:
 | IProtocolHandler implemented | ✅ | Full interface compliance |
 | Device database works | ✅ | JSON loading, lookup, quirks |
 | Comprehensive unit tests | ✅ | 42 test cases |
-| CC2652P flashed with Z-Stack | ☐ | Waiting for hardware |
-| UART communication verified | ☐ | Waiting for hardware |
+| CC2652P flashed with Z-Stack | ✅ | Pre-flashed USB dongle |
+| Kernel cp210x driver enabled | ✅ | linux-usb-serial.config |
+| USB serial communication | ☐ | Pending kernel rebuild |
 | Coordinator starts network | ☐ | Waiting for hardware |
 | Permit join enables pairing | ☐ | Waiting for hardware |
 | Light bulb pairs and controls | ☐ | Waiting for hardware |
