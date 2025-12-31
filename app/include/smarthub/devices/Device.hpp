@@ -49,6 +49,8 @@ public:
     // IDevice - Protocol
     std::string protocol() const override { return m_protocol; }
     std::string protocolAddress() const override { return m_protocolAddress; }
+    void setProtocol(const std::string& protocol) { m_protocol = protocol; }
+    void setAddress(const std::string& address) { m_protocolAddress = address; }
 
     // IDevice - Location
     std::string room() const override;

@@ -155,6 +155,11 @@ set(PROTOCOLS_SOURCES
     src/protocols/zigbee/ZigbeeCoordinator.cpp
     src/protocols/zigbee/ZigbeeHandler.cpp
     src/protocols/zigbee/ZigbeeDeviceDatabase.cpp
+    src/protocols/http/HttpClient.cpp
+    src/protocols/wifi/MqttDiscovery.cpp
+    src/protocols/wifi/ShellyDevice.cpp
+    src/protocols/wifi/TuyaDevice.cpp
+    src/protocols/wifi/WifiHandler.cpp
 )
 
 # Source files - RPMsg

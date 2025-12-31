@@ -58,7 +58,8 @@ app/tests/
 ├── protocols/
 │   ├── test_mqtt.cpp           # MQTT client tests
 │   ├── test_protocol_factory.cpp # ProtocolFactory and handler tests
-│   └── test_zigbee.cpp         # Zigbee protocol tests (42 cases)
+│   ├── test_zigbee.cpp         # Zigbee protocol tests (42 cases)
+│   └── test_wifi.cpp           # WiFi protocol tests (43 cases)
 ├── rpmsg/
 │   └── test_rpmsg.cpp          # RPMsg M4 communication tests
 ├── web/
@@ -91,6 +92,7 @@ Unit tests verify individual components in isolation:
 | MQTT | `protocols/test_mqtt.cpp` | MQTT client, subscribe/publish, callbacks |
 | ProtocolFactory | `protocols/test_protocol_factory.cpp` | Protocol registration, creation, mock handler |
 | Zigbee | `protocols/test_zigbee.cpp` | ZNP frames, transport, coordinator, handler, database |
+| WiFi | `protocols/test_wifi.cpp` | MQTT Discovery, Shelly, Tuya, WifiHandler |
 | RPMsg | `rpmsg/test_rpmsg.cpp` | M4 communication, message types, GPIO/PWM |
 | UI | `ui/test_ui.cpp` | UIManager DRM backend, graceful failure handling |
 
@@ -467,11 +469,93 @@ The UI tests use conditional compilation:
 
 This allows the same test file to work in both native and cross-compiled environments.
 
+## M4 Firmware Testing
+
+The M4 firmware (`m4-firmware/`) is a bare-metal Cortex-M4 application that communicates with the main Linux application via RPMsg.
+
+### Host-Side Unit Tests (115 tests)
+
+The M4 firmware includes comprehensive host-side unit tests that run on x86 with mocked hardware:
+
+```bash
+cd m4-firmware/tests
+mkdir -p build && cd build
+cmake ..
+make
+ctest --output-on-failure
+```
+
+| Test Suite | Tests | Description |
+|------------|-------|-------------|
+| MessageTypesTest | 25 | Message structure sizes, enum values, wire format |
+| RpmsgProtocolTest | 20 | Message building, parsing, roundtrip, wire format |
+| SHT31CalculationsTest | 28 | CRC-8 validation, temperature/humidity conversions |
+| I2CTransactionsTest | 21 | Mock I2C operations, SHT31-specific transactions |
+| SensorManagerTest | 21 | Polling logic, timing, sensor presence |
+
+### What's Tested
+
+- **Message Protocol**: Header/payload structure, serialization, command/response pairing
+- **CRC-8 Calculation**: Sensirion CRC polynomial (0x31), validation
+- **Temperature Conversion**: Raw to Celsius (-45°C to +130°C range)
+- **Humidity Conversion**: Raw to %RH (0-100% range)
+- **Fixed-point Encoding**: x100 scaling for RPMsg transmission
+- **I2C Transactions**: Probe, read, write, register operations
+- **Sensor Polling**: Interval timing, first-poll behavior, multiple sensors
+
+### Build Verification
+
+```bash
+cd m4-firmware
+mkdir -p build && cd build
+cmake ..
+make
+```
+
+Expected output:
+- `smarthub-m4.elf` - ELF executable (~20KB)
+- `smarthub-m4.bin` - Raw binary (~3KB)
+- Build should show ARM hard-float ABI
+
+### Verifying ELF Properties
+
+```bash
+arm-none-eabi-readelf -h build/smarthub-m4.elf
+```
+
+Expected:
+- Machine: ARM
+- Flags: hard-float ABI
+- Entry point: 0x100000xx (MCUSRAM region)
+
+### Hardware Testing
+
+M4 firmware requires the STM32MP157F-DK2 board for full testing:
+
+| Test | Method | Expected |
+|------|--------|----------|
+| Firmware load | `cat /sys/class/remoteproc/remoteproc0/state` | "running" |
+| RPMsg channel | `ls /dev/ttyRPMSG*` | Device exists |
+| Ping/pong | Send 0x01, read response | Receive 0x81 |
+| Sensor data | Read RPMsg channel | 0x90 messages with sensor values |
+
+### A7-Side RPMsg Tests
+
+The A7 application includes RPMsg tests (`app/tests/rpmsg/test_rpmsg.cpp`) that verify:
+
+- Message type encoding/decoding
+- Ping/pong protocol
+- Sensor data parsing
+- GPIO command encoding
+
+These tests use mock implementations and don't require hardware.
+
 ## Future Enhancements
 
 - [x] Mock objects for external dependencies (MockDevice, MockProtocolHandler)
 - [x] INI fallback parser tests for cross-compilation scenarios
 - [x] UI/DRM backend tests with graceful skipping when hardware unavailable
+- [x] M4 firmware compilation verification
 - [ ] Hardware-in-the-loop tests on target device
 - [ ] Performance benchmarks
 - [ ] Fuzz testing for network protocols

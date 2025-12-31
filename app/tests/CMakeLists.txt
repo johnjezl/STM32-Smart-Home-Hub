@@ -58,6 +58,11 @@ if(GTEST_AVAILABLE)
         ${CMAKE_SOURCE_DIR}/src/protocols/zigbee/ZigbeeCoordinator.cpp
         ${CMAKE_SOURCE_DIR}/src/protocols/zigbee/ZigbeeHandler.cpp
         ${CMAKE_SOURCE_DIR}/src/protocols/zigbee/ZigbeeDeviceDatabase.cpp
+        ${CMAKE_SOURCE_DIR}/src/protocols/http/HttpClient.cpp
+        ${CMAKE_SOURCE_DIR}/src/protocols/wifi/MqttDiscovery.cpp
+        ${CMAKE_SOURCE_DIR}/src/protocols/wifi/ShellyDevice.cpp
+        ${CMAKE_SOURCE_DIR}/src/protocols/wifi/TuyaDevice.cpp
+        ${CMAKE_SOURCE_DIR}/src/protocols/wifi/WifiHandler.cpp
         ${CMAKE_SOURCE_DIR}/src/rpmsg/RpmsgClient.cpp
         ${CMAKE_SOURCE_DIR}/src/web/WebServer.cpp
     )
@@ -155,6 +160,11 @@ if(GTEST_AVAILABLE)
     target_link_libraries(test_zigbee PRIVATE smarthub_lib GTest::gtest GTest::gtest_main)
     add_test(NAME Zigbee COMMAND test_zigbee)
 
+    # WiFi Protocol tests
+    add_executable(test_wifi protocols/test_wifi.cpp)
+    target_link_libraries(test_wifi PRIVATE smarthub_lib GTest::gtest GTest::gtest_main)
+    add_test(NAME WiFi COMMAND test_wifi)
+
     # RPMsg tests
     add_executable(test_rpmsg rpmsg/test_rpmsg.cpp)
     target_link_libraries(test_rpmsg PRIVATE smarthub_lib GTest::gtest GTest::gtest_main)
@@ -198,6 +208,7 @@ if(GTEST_AVAILABLE)
         protocols/test_mqtt.cpp
         protocols/test_protocol_factory.cpp
         protocols/test_zigbee.cpp
+        protocols/test_wifi.cpp
         rpmsg/test_rpmsg.cpp
         integration/test_integration.cpp
         ui/test_ui.cpp
