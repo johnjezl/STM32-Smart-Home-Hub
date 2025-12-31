@@ -1,0 +1,32 @@
+From: SmartHub <smarthub@local>
+Subject: [PATCH] arm: dts: stm32mp15: Add STM32IMAGE binman section to SCMI dtsi
+
+The stm32mp15-scmi-u-boot.dtsi used by DK boards was missing the
+binman section for generating u-boot.stm32. Add it to support
+STM32IMAGE boot format.
+
+Signed-off-by: SmartHub <smarthub@local>
+---
+ arch/arm/dts/stm32mp15-scmi-u-boot.dtsi | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+
+diff --git a/arch/arm/dts/stm32mp15-scmi-u-boot.dtsi b/arch/arm/dts/stm32mp15-scmi-u-boot.dtsi
+--- a/arch/arm/dts/stm32mp15-scmi-u-boot.dtsi
++++ b/arch/arm/dts/stm32mp15-scmi-u-boot.dtsi
+@@ -170,3 +170,16 @@
+ &uart8{
+ 	resets = <&rcc UART8_R>;
+ };
++
++#if defined(CONFIG_STM32MP15X_STM32IMAGE)
++&binman {
++	u-boot-stm32 {
++		filename = "u-boot.stm32";
++		mkimage {
++			args = "-T stm32image -a 0xc0100000 -e 0xc0100000";
++			u-boot {
++			};
++		};
++	};
++};
++#endif
