@@ -21,8 +21,8 @@ MEMORY
     /* M4 SRAM - main code and data memory */
     MCUSRAM (xrw) : ORIGIN = 0x10000000, LENGTH = 256K
 
-    /* Shared memory for OpenAMP/RPMsg (allocated by Linux) */
-    /* VRING (rw) : ORIGIN = 0x10040000, LENGTH = 64K */
+    /* Resource table area (matches DT mcu-rsc-table@10048000) */
+    MCU_RSC_TABLE (rw) : ORIGIN = 0x10048000, LENGTH = 4K
 }
 
 /* Stack and heap sizes */
@@ -31,13 +31,22 @@ _Min_Stack_Size = 0x1000;  /* 4KB stack */
 
 SECTIONS
 {
-    /* Vector table - must be at start of memory */
+    /* Vector table - MUST be in RETRAM at 0x00000000 for M4 boot */
+    /* On STM32MP1, M4 always fetches reset vector from 0x00000000 */
     .isr_vector :
     {
         . = ALIGN(4);
         KEEP(*(.isr_vector))
         . = ALIGN(4);
-    } >MCUSRAM
+    } >RETRAM
+
+    /* OpenAMP resource table - placed at DT-expected address 0x10048000 */
+    .resource_table :
+    {
+        . = ALIGN(4);
+        KEEP(*(.resource_table))
+        . = ALIGN(4);
+    } >MCU_RSC_TABLE
 
     /* Program code */
     .text :
