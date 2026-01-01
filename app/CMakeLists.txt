@@ -171,6 +171,11 @@ set(RPMSG_SOURCES
     src/rpmsg/RpmsgClient.cpp
 )
 
+# Source files - Network
+set(NETWORK_SOURCES
+    src/network/NetworkManager.cpp
+)
+
 # Source files - Security
 set(SECURITY_SOURCES
     src/security/CertManager.cpp
@@ -209,6 +214,7 @@ if(SMARTHUB_ENABLE_LVGL)
         src/ui/screens/LightControlScreen.cpp
         src/ui/screens/SensorListScreen.cpp
         src/ui/screens/SensorHistoryScreen.cpp
+        src/ui/screens/WifiSetupScreen.cpp
     )
 else()
     set(UI_SOURCES "")
@@ -221,6 +227,7 @@ set(SOURCES
     ${DATABASE_SOURCES}
     ${DEVICES_SOURCES}
     ${PROTOCOLS_SOURCES}
+    ${NETWORK_SOURCES}
     ${SECURITY_SOURCES}
     ${RPMSG_SOURCES}
     ${WEB_SOURCES}

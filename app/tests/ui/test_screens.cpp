@@ -1,8 +1,8 @@
 /**
- * Screen Unit Tests (Phase 8.C + 8.D)
+ * Screen Unit Tests (Phase 8.C + 8.D + 8.E)
  *
  * Tests for DeviceListScreen, LightControlScreen, SensorListScreen,
- * and SensorHistoryScreen.
+ * SensorHistoryScreen, and WifiSetupScreen.
  * LVGL-specific rendering tested on hardware; these tests focus on
  * screen registration, navigation, and data handling.
  */
@@ -16,11 +16,13 @@
 #include <smarthub/ui/screens/LightControlScreen.hpp>
 #include <smarthub/ui/screens/SensorListScreen.hpp>
 #include <smarthub/ui/screens/SensorHistoryScreen.hpp>
+#include <smarthub/ui/screens/WifiSetupScreen.hpp>
 #include <smarthub/ui/ScreenManager.hpp>
 #include <smarthub/ui/ThemeManager.hpp>
 #include <smarthub/ui/UIManager.hpp>
 #include <smarthub/devices/DeviceManager.hpp>
 #include <smarthub/devices/Device.hpp>
+#include <smarthub/network/NetworkManager.hpp>
 #include <smarthub/core/EventBus.hpp>
 #include <smarthub/database/Database.hpp>
 
@@ -50,6 +52,7 @@ protected:
         deviceManager = std::make_unique<DeviceManager>(*eventBus, *database);
         deviceManager->initialize();
         themeManager = std::make_unique<ThemeManager>();
+        networkManager = std::make_unique<network::NetworkManager>();
         uiManager = std::make_unique<UIManager>(*eventBus, *deviceManager);
 
         // Note: We don't initialize UIManager (no display in CI)
@@ -59,6 +62,7 @@ protected:
     void TearDown() override {
         screenManager.reset();
         uiManager.reset();
+        networkManager.reset();
         themeManager.reset();
         deviceManager.reset();
         database.reset();
@@ -74,6 +78,7 @@ protected:
     std::unique_ptr<Database> database;
     std::unique_ptr<DeviceManager> deviceManager;
     std::unique_ptr<ThemeManager> themeManager;
+    std::unique_ptr<network::NetworkManager> networkManager;
     std::unique_ptr<UIManager> uiManager;
     std::unique_ptr<ScreenManager> screenManager;
 };
@@ -658,6 +663,160 @@ TEST_F(ScreenTest, MultipleScreenUpdates) {
             screenManager->update(50);  // 50ms * 100 = 5000ms
         });
     }
+}
+
+// ============================================================================
+// WifiSetupScreen Tests (Phase 8.E)
+// ============================================================================
+
+TEST_F(ScreenTest, WifiSetupScreenRegistration) {
+    screenManager = std::make_unique<ScreenManager>(*uiManager);
+
+    auto wifiSetup = std::make_unique<WifiSetupScreen>(
+        *screenManager, *themeManager, *networkManager);
+
+    EXPECT_EQ(wifiSetup->name(), "wifi_setup");
+
+    screenManager->registerScreen("wifi_setup", std::move(wifiSetup));
+    EXPECT_TRUE(screenManager->hasScreen("wifi_setup"));
+}
+
+TEST_F(ScreenTest, WifiSetupScreenNavigation) {
+    screenManager = std::make_unique<ScreenManager>(*uiManager);
+
+    auto dashboard = std::make_unique<DashboardScreen>(
+        *screenManager, *themeManager, *deviceManager);
+    auto wifiSetup = std::make_unique<WifiSetupScreen>(
+        *screenManager, *themeManager, *networkManager);
+    auto* wifiSetupPtr = wifiSetup.get();
+
+    screenManager->registerScreen("dashboard", std::move(dashboard));
+    screenManager->registerScreen("wifi_setup", std::move(wifiSetup));
+    screenManager->setHomeScreen("dashboard");
+
+    // Navigate from dashboard to WiFi setup
+    screenManager->showScreen("dashboard");
+    screenManager->showScreen("wifi_setup");
+
+    EXPECT_EQ(screenManager->currentScreen(), wifiSetupPtr);
+    EXPECT_EQ(screenManager->stackDepth(), 1);
+
+    // Navigate back
+    screenManager->goBack();
+    EXPECT_EQ(screenManager->stackDepth(), 0);
+}
+
+TEST_F(ScreenTest, WifiSetupScreenUpdate) {
+    screenManager = std::make_unique<ScreenManager>(*uiManager);
+
+    auto wifiSetup = std::make_unique<WifiSetupScreen>(
+        *screenManager, *themeManager, *networkManager);
+
+    screenManager->registerScreen("wifi_setup", std::move(wifiSetup));
+    screenManager->showScreen("wifi_setup");
+
+    // Multiple updates shouldn't crash
+    for (int i = 0; i < 10; i++) {
+        ASSERT_NO_THROW({
+            screenManager->update(1000);
+        });
+    }
+}
+
+TEST_F(ScreenTest, WifiSetupScreenFromSettings) {
+    screenManager = std::make_unique<ScreenManager>(*uiManager);
+
+    auto dashboard = std::make_unique<DashboardScreen>(
+        *screenManager, *themeManager, *deviceManager);
+    auto sensorList = std::make_unique<SensorListScreen>(
+        *screenManager, *themeManager, *deviceManager);
+    auto wifiSetup = std::make_unique<WifiSetupScreen>(
+        *screenManager, *themeManager, *networkManager);
+
+    auto* dashPtr = dashboard.get();
+    auto* wifiPtr = wifiSetup.get();
+
+    screenManager->registerScreen("dashboard", std::move(dashboard));
+    screenManager->registerScreen("sensors", std::move(sensorList));
+    screenManager->registerScreen("wifi_setup", std::move(wifiSetup));
+    screenManager->setHomeScreen("dashboard");
+
+    // Simulate: Dashboard -> Sensors (tab) -> WiFi Setup (from settings)
+    screenManager->showScreen("dashboard");
+    screenManager->showScreen("sensors", TransitionType::None, false);  // Tab nav
+    screenManager->showScreen("wifi_setup");  // Push to stack
+
+    EXPECT_EQ(screenManager->currentScreen(), wifiPtr);
+    EXPECT_EQ(screenManager->stackDepth(), 1);
+
+    // Go home should return to dashboard
+    screenManager->goHome();
+    EXPECT_EQ(screenManager->currentScreen(), dashPtr);
+    EXPECT_EQ(screenManager->stackDepth(), 0);
+}
+
+TEST_F(ScreenTest, WifiSetupScreenName) {
+    screenManager = std::make_unique<ScreenManager>(*uiManager);
+
+    auto wifiSetup = std::make_unique<WifiSetupScreen>(
+        *screenManager, *themeManager, *networkManager);
+
+    EXPECT_EQ(wifiSetup->name(), "wifi_setup");
+}
+
+TEST_F(ScreenTest, WifiSetupScreenAutoRefresh) {
+    screenManager = std::make_unique<ScreenManager>(*uiManager);
+
+    auto wifiSetup = std::make_unique<WifiSetupScreen>(
+        *screenManager, *themeManager, *networkManager);
+
+    screenManager->registerScreen("wifi_setup", std::move(wifiSetup));
+    screenManager->showScreen("wifi_setup");
+
+    // Simulate 35 seconds of updates (past 30s auto-refresh interval)
+    for (int i = 0; i < 35; i++) {
+        ASSERT_NO_THROW({
+            screenManager->update(1000);  // 1 second each
+        });
+    }
+}
+
+TEST_F(ScreenTest, WifiSetupScreenMultipleShowHide) {
+    screenManager = std::make_unique<ScreenManager>(*uiManager);
+
+    auto dashboard = std::make_unique<DashboardScreen>(
+        *screenManager, *themeManager, *deviceManager);
+    auto wifiSetup = std::make_unique<WifiSetupScreen>(
+        *screenManager, *themeManager, *networkManager);
+
+    screenManager->registerScreen("dashboard", std::move(dashboard));
+    screenManager->registerScreen("wifi_setup", std::move(wifiSetup));
+    screenManager->setHomeScreen("dashboard");
+
+    // Show/hide multiple times
+    for (int i = 0; i < 3; i++) {
+        screenManager->showScreen("dashboard");
+        screenManager->showScreen("wifi_setup");
+        screenManager->goBack();
+    }
+
+    // Should end at dashboard
+    EXPECT_EQ(screenManager->stackDepth(), 0);
+}
+
+TEST_F(ScreenTest, WifiSetupWithNetworkManagerNotInitialized) {
+    // NetworkManager not initialized - screen should still work
+    screenManager = std::make_unique<ScreenManager>(*uiManager);
+
+    auto wifiSetup = std::make_unique<WifiSetupScreen>(
+        *screenManager, *themeManager, *networkManager);
+
+    screenManager->registerScreen("wifi_setup", std::move(wifiSetup));
+
+    ASSERT_NO_THROW({
+        screenManager->showScreen("wifi_setup");
+        screenManager->update(1000);
+    });
 }
 
 #else // !SMARTHUB_ENABLE_LVGL

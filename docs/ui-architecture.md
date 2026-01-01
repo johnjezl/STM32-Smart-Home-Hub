@@ -169,6 +169,20 @@ Sensor history with time series chart:
 - Time range selector (1h, 6h, 24h, 7d)
 - Auto-refresh every minute
 
+### WifiSetupScreen (`src/ui/screens/WifiSetupScreen.cpp`)
+
+WiFi network configuration:
+- Header with back button and refresh
+- Status bar showing connection state and IP
+- Scrollable list of available networks
+- Signal strength indicators (4-bar visual)
+- Security type and lock icon display
+- Password dialog with LVGL virtual keyboard
+- Show/hide password toggle
+- Loading spinner during scan/connect
+- Error message display
+- Auto-refresh every 30 seconds
+
 ## Widgets
 
 ### TimeSeriesChart (`src/ui/widgets/TimeSeriesChart.cpp`)
@@ -179,6 +193,24 @@ LVGL chart wrapper for time series data:
 - Time range dropdown selector
 - DataPoint struct with timestamp and value
 - Automatic resampling of data to fit chart
+
+## Network Management
+
+### NetworkManager (`src/network/NetworkManager.cpp`)
+
+WiFi network management using nmcli (NetworkManager CLI):
+- Scan for available WiFi networks
+- Connect to networks with password
+- Disconnect from current network
+- Get connection status and IP address
+- Signal strength conversion (dBm to percentage, icon levels)
+- Async operations with callbacks
+
+Key structures:
+- `WifiNetwork`: SSID, BSSID, signal strength, security type
+- `ConnectionState`: Disconnected, Scanning, Connecting, Connected, Failed
+- `ConnectionResult`: Success/failure with error message and IP
+- `NetworkStatus`: Current connection state and details
 
 ## Navigation Flow
 
@@ -197,7 +229,11 @@ Dashboard (Home)
     |               |
     |               +---> Back (pop from stack)
     |
-    +---> Settings (planned)
+    +---> Settings
+            |
+            +---> WiFi Setup (push to stack)
+                    |
+                    +---> Back (pop from stack)
 ```
 
 **Tab Navigation**: Direct screen switch without history push
@@ -223,6 +259,7 @@ This allows building without LVGL for:
 - `test_screen_manager.cpp`: Registration, navigation, lifecycle
 - `test_widgets.cpp`: Widget constants, data structures
 - `test_screens.cpp`: Screen registration, navigation flows
+- `test_network.cpp`: NetworkManager, WiFi structs, signal conversion
 
 ### Hardware Tests
 Test on STM32MP157F-DK2:
@@ -235,48 +272,58 @@ Test on STM32MP157F-DK2:
 
 ```
 app/
-├── include/smarthub/ui/
-│   ├── Screen.hpp
-│   ├── ScreenManager.hpp
-│   ├── ThemeManager.hpp
-│   ├── UIManager.hpp
-│   ├── screens/
-│   │   ├── DashboardScreen.hpp
-│   │   ├── DeviceListScreen.hpp
-│   │   ├── LightControlScreen.hpp
-│   │   ├── SensorListScreen.hpp
-│   │   └── SensorHistoryScreen.hpp
-│   └── widgets/
-│       ├── Header.hpp
-│       ├── NavBar.hpp
-│       ├── RoomCard.hpp
-│       └── TimeSeriesChart.hpp
-├── src/ui/
-│   ├── Screen.cpp
-│   ├── ScreenManager.cpp
-│   ├── ThemeManager.cpp
-│   ├── UIManager.cpp
-│   ├── screens/
-│   │   ├── DashboardScreen.cpp
-│   │   ├── DeviceListScreen.cpp
-│   │   ├── LightControlScreen.cpp
-│   │   ├── SensorListScreen.cpp
-│   │   └── SensorHistoryScreen.cpp
-│   └── widgets/
-│       ├── Header.cpp
-│       ├── NavBar.cpp
-│       ├── RoomCard.cpp
-│       └── TimeSeriesChart.cpp
-└── tests/ui/
-    ├── test_screen_manager.cpp
-    ├── test_screens.cpp
-    ├── test_theme_manager.cpp
-    ├── test_ui.cpp
-    └── test_widgets.cpp
+├── include/smarthub/
+│   ├── network/
+│   │   └── NetworkManager.hpp
+│   └── ui/
+│       ├── Screen.hpp
+│       ├── ScreenManager.hpp
+│       ├── ThemeManager.hpp
+│       ├── UIManager.hpp
+│       ├── screens/
+│       │   ├── DashboardScreen.hpp
+│       │   ├── DeviceListScreen.hpp
+│       │   ├── LightControlScreen.hpp
+│       │   ├── SensorListScreen.hpp
+│       │   ├── SensorHistoryScreen.hpp
+│       │   └── WifiSetupScreen.hpp
+│       └── widgets/
+│           ├── Header.hpp
+│           ├── NavBar.hpp
+│           ├── RoomCard.hpp
+│           └── TimeSeriesChart.hpp
+├── src/
+│   ├── network/
+│   │   └── NetworkManager.cpp
+│   └── ui/
+│       ├── Screen.cpp
+│       ├── ScreenManager.cpp
+│       ├── ThemeManager.cpp
+│       ├── UIManager.cpp
+│       ├── screens/
+│       │   ├── DashboardScreen.cpp
+│       │   ├── DeviceListScreen.cpp
+│       │   ├── LightControlScreen.cpp
+│       │   ├── SensorListScreen.cpp
+│       │   ├── SensorHistoryScreen.cpp
+│       │   └── WifiSetupScreen.cpp
+│       └── widgets/
+│           ├── Header.cpp
+│           ├── NavBar.cpp
+│           ├── RoomCard.cpp
+│           └── TimeSeriesChart.cpp
+└── tests/
+    ├── network/
+    │   └── test_network.cpp
+    └── ui/
+        ├── test_screen_manager.cpp
+        ├── test_screens.cpp
+        ├── test_theme_manager.cpp
+        ├── test_ui.cpp
+        └── test_widgets.cpp
 ```
 
-## Future Work (Phase 8.E-8.G)
+## Future Work (Phase 8.F-8.G)
 
-- **8.E**: WiFi configuration wizard
 - **8.F**: Settings screens, display management
 - **8.G**: Animations and polish

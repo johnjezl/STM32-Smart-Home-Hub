@@ -197,27 +197,45 @@ app/src/ui/widgets/
 
 ---
 
-### 8.E: WiFi Configuration Wizard ⏳ PENDING
+### 8.E: WiFi Configuration Wizard ✅ COMPLETE
 
 **Goal**: First-run WiFi setup with on-screen keyboard
 
-#### Files to Create
+#### Files Created
 ```
+app/include/smarthub/network/
+└── NetworkManager.hpp
+
+app/src/network/
+└── NetworkManager.cpp
+
 app/include/smarthub/ui/screens/
-├── WifiSetupScreen.hpp
-└── FirstRunWizard.hpp
+└── WifiSetupScreen.hpp
 
 app/src/ui/screens/
-├── WifiSetupScreen.cpp
-└── FirstRunWizard.cpp
+└── WifiSetupScreen.cpp
+
+app/tests/network/
+└── test_network.cpp
 ```
 
-#### Features
-- Network list (scan results)
-- Signal strength indicators
-- Password dialog with virtual keyboard
-- Connection status/spinner
-- Error handling with retry
+#### Features Implemented
+- NetworkManager backend using nmcli for WiFi operations
+- Network list with signal strength indicators (0-4 bars)
+- Password dialog with LVGL virtual keyboard
+- Show/hide password toggle
+- Connection status bar (Connected/Connecting/Failed)
+- Loading spinner during scan/connect
+- Error handling with user-friendly messages
+- Auto-refresh of network list (30s interval)
+
+#### Tests
+- WifiNetwork struct tests
+- ConnectionState, ConnectionResult, NetworkStatus tests
+- Signal strength to icon index conversion
+- dBm to percentage conversion
+- NetworkManager initialization and shutdown
+- WifiSetupScreen registration and navigation
 
 ---
 
@@ -270,13 +288,13 @@ app/src/ui/screens/
 | 7 | LightControlScreen | DeviceList | ✅ Complete |
 | 8 | SensorListScreen | Screen | ✅ Complete |
 | 9 | SensorHistoryScreen | Chart widget | ✅ Complete |
-| 10 | WifiSetupScreen | Screen, Keyboard | ⏳ Pending |
+| 10 | WifiSetupScreen | Screen, Keyboard | ✅ Complete |
 | 11 | SettingsScreen | Screen | ⏳ Pending |
 | 12 | DisplayManager | Theme | ⏳ Pending |
 | 13 | Animations | All screens | ⏳ Pending |
 | 14 | Testing & Polish | All | ⏳ Pending |
 
-**Progress**: 9/14 components complete (Phase 8.A-8.D)
+**Progress**: 10/14 components complete (Phase 8.A-8.E)
 
 ---
 
