@@ -36,7 +36,10 @@ find_package(Threads REQUIRED)
 # SQLite3
 find_package(SQLite3)
 if(NOT SQLite3_FOUND)
-    pkg_check_modules(SQLITE3 REQUIRED sqlite3)
+    pkg_check_modules(SQLITE3 sqlite3)
+    if(NOT SQLITE3_FOUND)
+        message(WARNING "SQLite3 not found - build may fail during linking")
+    endif()
 endif()
 
 # OpenSSL
