@@ -18,11 +18,13 @@
 
 ## Implementation Phases
 
-### 8.A: Core UI Architecture (Foundation)
+### 8.A: Core UI Architecture (Foundation) ✅ COMPLETE
 
 **Goal**: Establish screen management and navigation framework
 
-#### Files to Create
+**Status**: Implemented and tested
+
+#### Files Created
 ```
 app/include/smarthub/ui/
 ├── Screen.hpp              # Base screen class
@@ -56,17 +58,18 @@ app/src/ui/
    - Style presets
 
 #### Tests
-- Screen lifecycle
-- Navigation stack behavior
-- Theme switching
+- `test_screen_manager.cpp`: 14 tests for navigation and lifecycle
+- `test_theme_manager.cpp`: 8 tests for theme colors and modes
 
 ---
 
-### 8.B: Dashboard & Navigation (Primary Screen)
+### 8.B: Dashboard & Navigation (Primary Screen) ✅ COMPLETE
 
 **Goal**: Main home screen users see after boot
 
-#### Files to Create
+**Status**: Implemented and tested
+
+#### Files Created
 ```
 app/include/smarthub/ui/screens/
 ├── DashboardScreen.hpp
@@ -114,13 +117,18 @@ app/src/ui/widgets/
 3. **NavBar** - Bottom navigation (3-4 buttons)
 4. **DashboardScreen** - Composes above, handles room grid
 
+#### Tests
+- `test_widgets.cpp`: NavTab, RoomData structure tests, widget constants
+
 ---
 
-### 8.C: Device Control Screens
+### 8.C: Device Control Screens ✅ COMPLETE
 
 **Goal**: Control individual devices
 
-#### Files to Create
+**Status**: Implemented and tested
+
+#### Files Created
 ```
 app/include/smarthub/ui/screens/
 ├── DeviceListScreen.hpp
@@ -146,9 +154,14 @@ app/src/ui/screens/
 - Setpoint adjustment (+/- buttons)
 - Mode selection (Heat/Cool/Auto/Off)
 
+#### Tests
+- `test_screens.cpp`: Screen registration, navigation, lifecycle tests
+- Full navigation flow tests (dashboard → devices → light control → back)
+- Tab navigation tests (no history push)
+
 ---
 
-### 8.D: Sensor Displays
+### 8.D: Sensor Displays ⏳ PENDING
 
 **Goal**: Show sensor readings and history
 
@@ -232,24 +245,24 @@ app/src/ui/screens/
 
 ## Implementation Order
 
-| Order | Component | Depends On | Estimated Effort |
-|-------|-----------|------------|------------------|
-| 1 | Screen/ScreenManager | UIManager | 4h |
-| 2 | ThemeManager | Screen | 3h |
-| 3 | Header/NavBar widgets | Theme | 3h |
-| 4 | DashboardScreen | Above | 6h |
-| 5 | RoomCard widget | Dashboard | 2h |
-| 6 | DeviceListScreen | Screen | 4h |
-| 7 | LightControlScreen | DeviceList | 4h |
-| 8 | SensorOverviewScreen | Screen | 3h |
-| 9 | SensorHistoryScreen | Chart widget | 4h |
-| 10 | WifiSetupScreen | Screen, Keyboard | 6h |
-| 11 | SettingsScreen | Screen | 4h |
-| 12 | DisplayManager | Theme | 3h |
-| 13 | Animations | All screens | 3h |
-| 14 | Testing & Polish | All | 6h |
+| Order | Component | Depends On | Status |
+|-------|-----------|------------|--------|
+| 1 | Screen/ScreenManager | UIManager | ✅ Complete |
+| 2 | ThemeManager | Screen | ✅ Complete |
+| 3 | Header/NavBar widgets | Theme | ✅ Complete |
+| 4 | DashboardScreen | Above | ✅ Complete |
+| 5 | RoomCard widget | Dashboard | ✅ Complete |
+| 6 | DeviceListScreen | Screen | ✅ Complete |
+| 7 | LightControlScreen | DeviceList | ✅ Complete |
+| 8 | SensorListScreen | Screen | ✅ Complete |
+| 9 | SensorHistoryScreen | Chart widget | ⏳ Pending |
+| 10 | WifiSetupScreen | Screen, Keyboard | ⏳ Pending |
+| 11 | SettingsScreen | Screen | ⏳ Pending |
+| 12 | DisplayManager | Theme | ⏳ Pending |
+| 13 | Animations | All screens | ⏳ Pending |
+| 14 | Testing & Polish | All | ⏳ Pending |
 
-**Total Estimated**: ~55 hours
+**Progress**: 8/14 components complete (Phase 8.A-8.C)
 
 ---
 
@@ -306,6 +319,14 @@ app/src/ui/screens/
 
 ## Success Criteria
 
+- [x] Screen base class with lifecycle management
+- [x] ScreenManager with navigation stack
+- [x] ThemeManager with light/dark modes
+- [x] Dashboard screen with room cards
+- [x] Device list screen with toggle switches
+- [x] Light control screen (power, brightness, color temp)
+- [x] Sensor list screen with readings
+- [x] Comprehensive unit tests (30+ tests)
 - [ ] All screens navigable via touch (no keyboard)
 - [ ] Touch response <100ms
 - [ ] UI renders at 30+ FPS
@@ -313,4 +334,3 @@ app/src/ui/screens/
 - [ ] Device state changes reflected in UI within 500ms
 - [ ] Theme switching works (light/dark)
 - [ ] Screen timeout/wake functions correctly
-- [ ] All tests pass (target: 20+ UI tests)

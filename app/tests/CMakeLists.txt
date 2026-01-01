@@ -187,10 +187,19 @@ if(GTEST_AVAILABLE)
             ui/test_ui.cpp
             ui/test_screen_manager.cpp
             ui/test_theme_manager.cpp
+            ui/test_widgets.cpp
+            ui/test_screens.cpp
             ${CMAKE_SOURCE_DIR}/src/ui/UIManager.cpp
             ${CMAKE_SOURCE_DIR}/src/ui/Screen.cpp
             ${CMAKE_SOURCE_DIR}/src/ui/ScreenManager.cpp
             ${CMAKE_SOURCE_DIR}/src/ui/ThemeManager.cpp
+            ${CMAKE_SOURCE_DIR}/src/ui/widgets/Header.cpp
+            ${CMAKE_SOURCE_DIR}/src/ui/widgets/NavBar.cpp
+            ${CMAKE_SOURCE_DIR}/src/ui/widgets/RoomCard.cpp
+            ${CMAKE_SOURCE_DIR}/src/ui/screens/DashboardScreen.cpp
+            ${CMAKE_SOURCE_DIR}/src/ui/screens/DeviceListScreen.cpp
+            ${CMAKE_SOURCE_DIR}/src/ui/screens/LightControlScreen.cpp
+            ${CMAKE_SOURCE_DIR}/src/ui/screens/SensorListScreen.cpp
         )
         target_link_libraries(test_ui PRIVATE smarthub_lib GTest::gtest GTest::gtest_main)
         target_link_libraries(test_ui PRIVATE ${LVGL_LIBRARIES})
@@ -200,10 +209,12 @@ if(GTEST_AVAILABLE)
         target_compile_definitions(test_ui PRIVATE SMARTHUB_ENABLE_LVGL=1)
         add_test(NAME UI COMMAND test_ui)
     else()
-        # Stub test when LVGL not available - ThemeManager can still be tested
+        # Stub test when LVGL not available - ThemeManager and data structures can still be tested
         add_executable(test_ui
             ui/test_ui.cpp
             ui/test_theme_manager.cpp
+            ui/test_widgets.cpp
+            ui/test_screens.cpp
             ${CMAKE_SOURCE_DIR}/src/ui/ThemeManager.cpp
         )
         target_link_libraries(test_ui PRIVATE smarthub_lib GTest::gtest GTest::gtest_main)
@@ -238,6 +249,8 @@ if(GTEST_AVAILABLE)
         ui/test_ui.cpp
         ui/test_screen_manager.cpp
         ui/test_theme_manager.cpp
+        ui/test_widgets.cpp
+        ui/test_screens.cpp
     )
 
     add_executable(smarthub_tests ${ALL_TEST_SOURCES})
