@@ -8,9 +8,13 @@
 
 #include <gtest/gtest.h>
 
+#include <cmath>
+#include <climits>
+
 #include <smarthub/ui/widgets/Header.hpp>
 #include <smarthub/ui/widgets/NavBar.hpp>
 #include <smarthub/ui/widgets/RoomCard.hpp>
+#include <smarthub/ui/widgets/TimeSeriesChart.hpp>
 #include <smarthub/ui/ThemeManager.hpp>
 
 #include <string>
@@ -206,6 +210,161 @@ TEST_F(RoomCardTest, ClickCallback) {
 }
 
 TEST_F(RoomCardTest, RoomIdRetrieval) {
+    GTEST_SKIP() << "Requires LVGL display initialization";
+}
+
+#endif // SMARTHUB_ENABLE_LVGL
+
+// ============================================================================
+// TimeSeriesChart Widget Tests
+// ============================================================================
+
+class TimeSeriesChartTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        themeManager = std::make_unique<ThemeManager>();
+    }
+
+    std::unique_ptr<ThemeManager> themeManager;
+};
+
+TEST_F(TimeSeriesChartTest, Constants) {
+    // Verify chart constants
+    EXPECT_EQ(TimeSeriesChart::MAX_POINTS, 60);
+}
+
+TEST(TimeRangeTest, Labels) {
+    // Test time range labels
+    EXPECT_STREQ(timeRangeLabel(TimeRange::Hour1), "1 Hour");
+    EXPECT_STREQ(timeRangeLabel(TimeRange::Hours6), "6 Hours");
+    EXPECT_STREQ(timeRangeLabel(TimeRange::Hours24), "24 Hours");
+    EXPECT_STREQ(timeRangeLabel(TimeRange::Days7), "7 Days");
+}
+
+TEST(TimeRangeTest, Seconds) {
+    // Test time range in seconds
+    EXPECT_EQ(timeRangeSeconds(TimeRange::Hour1), 3600u);
+    EXPECT_EQ(timeRangeSeconds(TimeRange::Hours6), 6 * 3600u);
+    EXPECT_EQ(timeRangeSeconds(TimeRange::Hours24), 24 * 3600u);
+    EXPECT_EQ(timeRangeSeconds(TimeRange::Days7), 7 * 24 * 3600u);
+}
+
+TEST(DataPointTest, Construction) {
+    // Test DataPoint struct
+    DataPoint dp;
+    dp.timestamp = 1704067200;  // 2024-01-01 00:00:00
+    dp.value = 72.5f;
+
+    EXPECT_EQ(dp.timestamp, 1704067200u);
+    EXPECT_FLOAT_EQ(dp.value, 72.5f);
+}
+
+TEST(DataPointTest, Vector) {
+    // Test vector of data points
+    std::vector<DataPoint> data;
+
+    for (int i = 0; i < 10; i++) {
+        DataPoint dp;
+        dp.timestamp = 1704067200 + i * 60;
+        dp.value = 70.0f + i * 0.5f;
+        data.push_back(dp);
+    }
+
+    EXPECT_EQ(data.size(), 10u);
+    EXPECT_FLOAT_EQ(data[0].value, 70.0f);
+    EXPECT_FLOAT_EQ(data[9].value, 74.5f);
+}
+
+TEST(DataPointTest, AggregateInit) {
+    // Test aggregate initialization
+    DataPoint dp{1704067200, 72.5f};
+    EXPECT_EQ(dp.timestamp, 1704067200u);
+    EXPECT_FLOAT_EQ(dp.value, 72.5f);
+}
+
+TEST(DataPointTest, EdgeValues) {
+    // Test edge values
+    DataPoint negative;
+    negative.timestamp = 0;
+    negative.value = -40.0f;  // Very cold temperature
+    EXPECT_EQ(negative.timestamp, 0u);
+    EXPECT_FLOAT_EQ(negative.value, -40.0f);
+
+    DataPoint maxTimestamp;
+    maxTimestamp.timestamp = UINT64_MAX;
+    maxTimestamp.value = 150.0f;
+    EXPECT_EQ(maxTimestamp.timestamp, UINT64_MAX);
+}
+
+TEST(DataPointTest, LargeDataSet) {
+    // Test with MAX_POINTS amount of data
+    std::vector<DataPoint> data;
+    data.reserve(TimeSeriesChart::MAX_POINTS);
+
+    for (int i = 0; i < TimeSeriesChart::MAX_POINTS; i++) {
+        DataPoint dp;
+        dp.timestamp = 1704067200 + i * 60;
+        dp.value = 70.0f + sinf(i * 0.1f) * 5.0f;
+        data.push_back(dp);
+    }
+
+    EXPECT_EQ(data.size(), static_cast<size_t>(TimeSeriesChart::MAX_POINTS));
+    EXPECT_EQ(data.size(), 60u);
+}
+
+TEST(TimeRangeTest, DefaultLabel) {
+    // Test default case returns valid string
+    // Cast an invalid value to test default case
+    TimeRange invalidRange = static_cast<TimeRange>(99);
+    const char* label = timeRangeLabel(invalidRange);
+    EXPECT_STREQ(label, "24 Hours");
+}
+
+TEST(TimeRangeTest, DefaultSeconds) {
+    // Test default case returns valid value
+    TimeRange invalidRange = static_cast<TimeRange>(99);
+    uint64_t seconds = timeRangeSeconds(invalidRange);
+    EXPECT_EQ(seconds, 24 * 3600u);
+}
+
+TEST(TimeRangeTest, AllRangesHaveLabels) {
+    // Verify all enum values have labels
+    EXPECT_NE(timeRangeLabel(TimeRange::Hour1), nullptr);
+    EXPECT_NE(timeRangeLabel(TimeRange::Hours6), nullptr);
+    EXPECT_NE(timeRangeLabel(TimeRange::Hours24), nullptr);
+    EXPECT_NE(timeRangeLabel(TimeRange::Days7), nullptr);
+}
+
+TEST(TimeRangeTest, SecondsCalculations) {
+    // Verify correct time calculations
+    EXPECT_EQ(timeRangeSeconds(TimeRange::Hour1), 60u * 60u);
+    EXPECT_EQ(timeRangeSeconds(TimeRange::Hours6), 6u * 60u * 60u);
+    EXPECT_EQ(timeRangeSeconds(TimeRange::Hours24), 24u * 60u * 60u);
+    EXPECT_EQ(timeRangeSeconds(TimeRange::Days7), 7u * 24u * 60u * 60u);
+}
+
+TEST(TimeRangeTest, RangeOrdering) {
+    // Verify ranges are in increasing order
+    EXPECT_LT(timeRangeSeconds(TimeRange::Hour1), timeRangeSeconds(TimeRange::Hours6));
+    EXPECT_LT(timeRangeSeconds(TimeRange::Hours6), timeRangeSeconds(TimeRange::Hours24));
+    EXPECT_LT(timeRangeSeconds(TimeRange::Hours24), timeRangeSeconds(TimeRange::Days7));
+}
+
+#ifdef SMARTHUB_ENABLE_LVGL
+
+TEST_F(TimeSeriesChartTest, SetTitle) {
+    GTEST_SKIP() << "Requires LVGL display initialization";
+}
+
+TEST_F(TimeSeriesChartTest, SetYRange) {
+    GTEST_SKIP() << "Requires LVGL display initialization";
+}
+
+TEST_F(TimeSeriesChartTest, SetData) {
+    GTEST_SKIP() << "Requires LVGL display initialization";
+}
+
+TEST_F(TimeSeriesChartTest, TimeRangeCallback) {
     GTEST_SKIP() << "Requires LVGL display initialization";
 }
 

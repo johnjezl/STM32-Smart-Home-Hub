@@ -161,29 +161,43 @@ app/src/ui/screens/
 
 ---
 
-### 8.D: Sensor Displays ⏳ PENDING
+### 8.D: Sensor Displays ✅ COMPLETE
 
 **Goal**: Show sensor readings and history
 
-#### Files to Create
+**Status**: Implemented and tested
+
+#### Files Created
 ```
 app/include/smarthub/ui/screens/
-├── SensorOverviewScreen.hpp
 └── SensorHistoryScreen.hpp
 
 app/include/smarthub/ui/widgets/
-├── SensorCard.hpp
 └── TimeSeriesChart.hpp
+
+app/src/ui/screens/
+└── SensorHistoryScreen.cpp
+
+app/src/ui/widgets/
+└── TimeSeriesChart.cpp
 ```
 
 #### Features
-- Current readings with icons (temp, humidity, motion)
-- LVGL chart widget for history (1h, 24h, 7d views)
-- Time range selector dropdown
+- SensorListScreen (from 8.C) shows current readings with icons
+- SensorHistoryScreen with time series chart
+- TimeSeriesChart widget using LVGL chart
+- Time range selector (1h, 6h, 24h, 7d)
+- Click on sensor card navigates to history
+- Mock data generation for demo (real data from database future)
+
+#### Tests
+- TimeSeriesChart constants and TimeRange helpers
+- DataPoint struct construction
+- SensorHistoryScreen registration and navigation
 
 ---
 
-### 8.E: WiFi Configuration Wizard
+### 8.E: WiFi Configuration Wizard ⏳ PENDING
 
 **Goal**: First-run WiFi setup with on-screen keyboard
 
@@ -255,14 +269,14 @@ app/src/ui/screens/
 | 6 | DeviceListScreen | Screen | ✅ Complete |
 | 7 | LightControlScreen | DeviceList | ✅ Complete |
 | 8 | SensorListScreen | Screen | ✅ Complete |
-| 9 | SensorHistoryScreen | Chart widget | ⏳ Pending |
+| 9 | SensorHistoryScreen | Chart widget | ✅ Complete |
 | 10 | WifiSetupScreen | Screen, Keyboard | ⏳ Pending |
 | 11 | SettingsScreen | Screen | ⏳ Pending |
 | 12 | DisplayManager | Theme | ⏳ Pending |
 | 13 | Animations | All screens | ⏳ Pending |
 | 14 | Testing & Polish | All | ⏳ Pending |
 
-**Progress**: 8/14 components complete (Phase 8.A-8.C)
+**Progress**: 9/14 components complete (Phase 8.A-8.D)
 
 ---
 

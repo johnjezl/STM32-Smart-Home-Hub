@@ -202,11 +202,13 @@ if(SMARTHUB_ENABLE_LVGL)
         src/ui/widgets/Header.cpp
         src/ui/widgets/NavBar.cpp
         src/ui/widgets/RoomCard.cpp
+        src/ui/widgets/TimeSeriesChart.cpp
         # Screens
         src/ui/screens/DashboardScreen.cpp
         src/ui/screens/DeviceListScreen.cpp
         src/ui/screens/LightControlScreen.cpp
         src/ui/screens/SensorListScreen.cpp
+        src/ui/screens/SensorHistoryScreen.cpp
     )
 else()
     set(UI_SOURCES "")
