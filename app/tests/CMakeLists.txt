@@ -64,6 +64,7 @@ if(GTEST_AVAILABLE)
         ${CMAKE_SOURCE_DIR}/src/protocols/wifi/TuyaDevice.cpp
         ${CMAKE_SOURCE_DIR}/src/protocols/wifi/WifiHandler.cpp
         ${CMAKE_SOURCE_DIR}/src/rpmsg/RpmsgClient.cpp
+        ${CMAKE_SOURCE_DIR}/src/network/NetworkManager.cpp
         ${CMAKE_SOURCE_DIR}/src/security/CertManager.cpp
         ${CMAKE_SOURCE_DIR}/src/security/UserManager.cpp
         ${CMAKE_SOURCE_DIR}/src/security/SessionManager.cpp
@@ -181,6 +182,11 @@ if(GTEST_AVAILABLE)
     target_link_libraries(test_rpmsg PRIVATE smarthub_lib GTest::gtest GTest::gtest_main)
     add_test(NAME RPMsg COMMAND test_rpmsg)
 
+    # Network tests
+    add_executable(test_network network/test_network.cpp)
+    target_link_libraries(test_network PRIVATE smarthub_lib GTest::gtest GTest::gtest_main)
+    add_test(NAME Network COMMAND test_network)
+
     # UI tests (conditional on LVGL availability)
     if(SMARTHUB_ENABLE_LVGL)
         add_executable(test_ui
@@ -202,6 +208,7 @@ if(GTEST_AVAILABLE)
             ${CMAKE_SOURCE_DIR}/src/ui/screens/LightControlScreen.cpp
             ${CMAKE_SOURCE_DIR}/src/ui/screens/SensorListScreen.cpp
             ${CMAKE_SOURCE_DIR}/src/ui/screens/SensorHistoryScreen.cpp
+            ${CMAKE_SOURCE_DIR}/src/ui/screens/WifiSetupScreen.cpp
         )
         target_link_libraries(test_ui PRIVATE smarthub_lib GTest::gtest GTest::gtest_main)
         target_link_libraries(test_ui PRIVATE ${LVGL_LIBRARIES})
@@ -247,6 +254,7 @@ if(GTEST_AVAILABLE)
         protocols/test_zigbee.cpp
         protocols/test_wifi.cpp
         rpmsg/test_rpmsg.cpp
+        network/test_network.cpp
         integration/test_integration.cpp
         ui/test_ui.cpp
         ui/test_screen_manager.cpp
