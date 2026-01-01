@@ -15,6 +15,8 @@
 
 #include <chrono>
 #include <algorithm>
+#include <fstream>
+#include <sstream>
 
 // Check if mongoose is available
 #if __has_include("mongoose/mongoose.h")
@@ -49,28 +51,52 @@ WebServer::~WebServer() {
     s_instance = nullptr;
 }
 
+// Static TLS options and cert data - must persist for lifetime of connections
+static struct mg_tls_opts s_tls_opts = {};
+static std::string s_certData;
+static std::string s_keyData;
+
+// Helper to read file contents
+static std::string readFile(const std::string& path) {
+    std::ifstream file(path, std::ios::binary);
+    if (!file) return "";
+    std::ostringstream ss;
+    ss << file.rdbuf();
+    return ss.str();
+}
+
 bool WebServer::start() {
     m_mgr = new struct mg_mgr;
     mg_mgr_init(m_mgr);
 
     char addr[128];
-    struct mg_tls_opts tls_opts = {};
 
     // Check if TLS is configured
     bool useTls = !m_certPath.empty() && !m_keyPath.empty();
 
     if (useTls) {
-        std::snprintf(addr, sizeof(addr), "https://0.0.0.0:%d", m_port);
-        tls_opts.cert = mg_str(m_certPath.c_str());
-        tls_opts.key = mg_str(m_keyPath.c_str());
-        LOG_INFO("TLS enabled with cert: %s", m_certPath.c_str());
-    } else {
+        // Read certificate and key file contents
+        s_certData = readFile(m_certPath);
+        s_keyData = readFile(m_keyPath);
+
+        if (s_certData.empty() || s_keyData.empty()) {
+            LOG_ERROR("Failed to read TLS cert/key files");
+            useTls = false;
+        } else {
+            std::snprintf(addr, sizeof(addr), "https://0.0.0.0:%d", m_port);
+            s_tls_opts.cert = mg_str_n(s_certData.c_str(), s_certData.size());
+            s_tls_opts.key = mg_str_n(s_keyData.c_str(), s_keyData.size());
+            LOG_INFO("TLS enabled with cert: %s (%zu bytes)", m_certPath.c_str(), s_certData.size());
+        }
+    }
+
+    if (!useTls) {
         std::snprintf(addr, sizeof(addr), "http://0.0.0.0:%d", m_port);
         LOG_WARN("TLS not configured - running HTTP only (insecure)");
     }
 
     struct mg_connection* c = mg_http_listen(m_mgr, addr, eventHandler,
-                                              useTls ? &tls_opts : nullptr);
+                                              useTls ? &s_tls_opts : nullptr);
     if (!c) {
         LOG_ERROR("Failed to start web server on %s", addr);
         delete m_mgr;
@@ -265,7 +291,11 @@ void WebServer::addSecurityHeaders(std::string& headers) {
 void WebServer::eventHandler(struct mg_connection* c, int ev, void* ev_data) {
     if (!s_instance) return;
 
-    if (ev == MG_EV_HTTP_MSG) {
+    if (ev == MG_EV_ACCEPT && c->fn_data != nullptr) {
+        // Initialize TLS on new connection if TLS opts were provided
+        struct mg_tls_opts* opts = static_cast<struct mg_tls_opts*>(c->fn_data);
+        mg_tls_init(c, opts);
+    } else if (ev == MG_EV_HTTP_MSG) {
         struct mg_http_message* hm = static_cast<struct mg_http_message*>(ev_data);
         s_instance->handleHttpRequest(c, hm);
     }

@@ -277,3 +277,201 @@ TEST_F(WebServerTest, ConcurrentRequests) {
 
     EXPECT_EQ(successCount.load(), 10);
 }
+
+// ============================================================
+// Security Feature Tests
+// ============================================================
+
+// Helper to get HTTP headers
+static std::string curlHeaders(const std::string& url) {
+    std::string cmd = "curl -s -I --max-time 5 " + url + " 2>/dev/null";
+    std::array<char, 4096> buffer;
+    std::string result;
+
+    FILE* pipe = popen(cmd.c_str(), "r");
+    if (!pipe) return "";
+
+    while (fgets(buffer.data(), buffer.size(), pipe) != nullptr) {
+        result += buffer.data();
+    }
+    pclose(pipe);
+    return result;
+}
+
+// Helper to make POST request
+static std::string curlPost(const std::string& url, const std::string& data) {
+    std::string cmd = "curl -s --max-time 5 -X POST -H 'Content-Type: application/json' -d '" + data + "' " + url + " 2>/dev/null";
+    std::array<char, 4096> buffer;
+    std::string result;
+
+    FILE* pipe = popen(cmd.c_str(), "r");
+    if (!pipe) return "";
+
+    while (fgets(buffer.data(), buffer.size(), pipe) != nullptr) {
+        result += buffer.data();
+    }
+    pclose(pipe);
+    return result;
+}
+
+// Helper to get with auth header
+static std::string curlGetWithAuth(const std::string& url, const std::string& token) {
+    std::string cmd = "curl -s --max-time 5 -H 'Authorization: Bearer " + token + "' " + url + " 2>/dev/null";
+    std::array<char, 4096> buffer;
+    std::string result;
+
+    FILE* pipe = popen(cmd.c_str(), "r");
+    if (!pipe) return "";
+
+    while (fgets(buffer.data(), buffer.size(), pipe) != nullptr) {
+        result += buffer.data();
+    }
+    pclose(pipe);
+    return result;
+}
+
+// Security Headers Tests
+TEST_F(WebServerTest, SecurityHeadersPresent) {
+    startServer();
+    std::string headers = curlHeaders(baseUrl() + "/api/system/status");
+
+    // Check for essential security headers
+    EXPECT_NE(headers.find("X-Content-Type-Options: nosniff"), std::string::npos)
+        << "Missing X-Content-Type-Options header";
+    EXPECT_NE(headers.find("X-Frame-Options: DENY"), std::string::npos)
+        << "Missing X-Frame-Options header";
+    EXPECT_NE(headers.find("X-XSS-Protection: 1; mode=block"), std::string::npos)
+        << "Missing X-XSS-Protection header";
+    EXPECT_NE(headers.find("Cache-Control: no-store"), std::string::npos)
+        << "Missing Cache-Control header";
+    EXPECT_NE(headers.find("Referrer-Policy: strict-origin-when-cross-origin"), std::string::npos)
+        << "Missing Referrer-Policy header";
+}
+
+TEST_F(WebServerTest, ContentTypeHeader) {
+    startServer();
+    std::string headers = curlHeaders(baseUrl() + "/api/system/status");
+
+    EXPECT_NE(headers.find("Content-Type: application/json"), std::string::npos)
+        << "Missing or incorrect Content-Type header";
+}
+
+// Authentication Tests
+class WebServerAuthTest : public WebServerTest {
+protected:
+    void startServerWithAuth() {
+        webServer = std::make_unique<smarthub::WebServer>(
+            *eventBus, *deviceManager, testPort, "/tmp"
+        );
+        // Don't set public routes - require auth for protected endpoints
+        ASSERT_TRUE(webServer->start());
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+};
+
+TEST_F(WebServerAuthTest, UnauthorizedWithoutCredentials) {
+    startServerWithAuth();
+
+    std::string response = curlGet(baseUrl() + "/api/devices");
+    EXPECT_NE(response.find("Unauthorized"), std::string::npos)
+        << "Expected 401 Unauthorized for protected route without auth";
+}
+
+TEST_F(WebServerAuthTest, PublicRoutesAccessible) {
+    startServerWithAuth();
+
+    // /api/system/status is a public route by default
+    std::string response = curlGet(baseUrl() + "/api/system/status");
+    EXPECT_NE(response.find("version"), std::string::npos)
+        << "Public route should be accessible without auth";
+}
+
+TEST_F(WebServerAuthTest, InvalidTokenRejected) {
+    startServerWithAuth();
+
+    std::string response = curlGetWithAuth(baseUrl() + "/api/devices", "invalid-token-12345");
+    EXPECT_NE(response.find("Unauthorized"), std::string::npos)
+        << "Invalid token should be rejected";
+}
+
+// Rate Limiting Tests
+class WebServerRateLimitTest : public WebServerTest {
+protected:
+    void startServerWithRateLimit(int requestsPerMinute) {
+        webServer = std::make_unique<smarthub::WebServer>(
+            *eventBus, *deviceManager, testPort, "/tmp"
+        );
+        webServer->setPublicRoutes({"/api/"});
+        webServer->setRateLimit(requestsPerMinute);
+        ASSERT_TRUE(webServer->start());
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+};
+
+TEST_F(WebServerRateLimitTest, AllowsRequestsUnderLimit) {
+    startServerWithRateLimit(100);  // 100 requests per minute
+
+    int successCount = 0;
+    for (int i = 0; i < 10; i++) {
+        std::string response = curlGet(baseUrl() + "/api/system/status");
+        if (response.find("version") != std::string::npos) {
+            successCount++;
+        }
+    }
+
+    EXPECT_EQ(successCount, 10) << "All requests under limit should succeed";
+}
+
+TEST_F(WebServerRateLimitTest, BlocksExcessiveRequests) {
+    startServerWithRateLimit(5);  // Only 5 requests per minute
+
+    int successCount = 0;
+    int blockedCount = 0;
+
+    for (int i = 0; i < 10; i++) {
+        std::string response = curlGet(baseUrl() + "/api/system/status");
+        if (response.find("version") != std::string::npos) {
+            successCount++;
+        } else if (response.find("Too many") != std::string::npos) {
+            blockedCount++;
+        }
+    }
+
+    EXPECT_LE(successCount, 5) << "Should not exceed rate limit";
+    EXPECT_GE(blockedCount, 5) << "Excessive requests should be blocked";
+}
+
+// Public Routes Configuration Tests
+TEST_F(WebServerTest, CustomPublicRoutes) {
+    webServer = std::make_unique<smarthub::WebServer>(
+        *eventBus, *deviceManager, testPort, "/tmp"
+    );
+    webServer->setPublicRoutes({"/api/devices"});  // Only /api/devices is public
+    ASSERT_TRUE(webServer->start());
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    // /api/devices should be accessible (starts with public route)
+    deviceManager->addDevice(std::make_shared<smarthub::Device>(
+        "light1", "Light", smarthub::DeviceType::Light));
+    std::string response = curlGet(baseUrl() + "/api/devices");
+    EXPECT_NE(response.find("light1"), std::string::npos)
+        << "Public route should be accessible";
+}
+
+// Login/Logout Tests (stub - requires full security manager integration)
+TEST_F(WebServerTest, LoginEndpointExists) {
+    startServer();
+
+    std::string response = curlPost(baseUrl() + "/api/auth/login", "{}");
+    // Should get a meaningful response (even if error about missing credentials)
+    EXPECT_FALSE(response.empty()) << "Login endpoint should respond";
+}
+
+// Error Response Format Tests
+TEST_F(WebServerTest, ErrorResponseFormat) {
+    startServer();
+
+    std::string response = curlGet(baseUrl() + "/api/nonexistent");
+    EXPECT_NE(response.find("\"error\""), std::string::npos)
+        << "Error responses should have JSON format with 'error' field";
+}

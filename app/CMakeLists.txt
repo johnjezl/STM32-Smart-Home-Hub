@@ -218,6 +218,9 @@ if(SMARTHUB_ENABLE_LVGL)
     target_compile_definitions(smarthub PRIVATE SMARTHUB_ENABLE_LVGL=1)
 endif()
 
+# Enable Mongoose TLS via OpenSSL
+target_compile_definitions(smarthub PRIVATE MG_TLS=2)  # MG_TLS_OPENSSL=2
+
 # Link libraries
 target_link_libraries(smarthub PRIVATE Threads::Threads)
 

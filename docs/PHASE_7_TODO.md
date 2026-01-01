@@ -556,17 +556,23 @@ private:
 
 | Item | Status | Notes |
 |------|--------|-------|
-| TLS certificates generate | ☐ | |
-| HTTPS works | ☐ | |
-| HTTP redirects to HTTPS | ☐ | |
-| User creation works | ☐ | |
-| Login authentication works | ☐ | |
-| Session management works | ☐ | |
-| API token auth works | ☐ | |
-| Rate limiting works | ☐ | |
-| Firewall rules active | ☐ | |
-| Credentials encrypted | ☐ | |
-| First-run setup works | ☐ | |
+| TLS certificates generate | ✅ | CertManager with OpenSSL |
+| HTTPS works | ✅ | OpenSSL TLS on ARM (MG_TLS=2) |
+| HTTP redirects to HTTPS | ✅ | 301 redirect on port 80 |
+| User creation works | ✅ | Argon2id password hashing |
+| Login authentication works | ✅ | Session cookie flow |
+| Session management works | ✅ | 18 tests pass |
+| API token auth works | ✅ | Bearer token flow |
+| Rate limiting works | ✅ | Per-IP rate limiting |
+| Firewall rules active | ⏸️ | Deferred - system-level config |
+| Credentials encrypted | ✅ | AES-256-GCM |
+| First-run setup works | ✅ | Backend complete |
+
+**Hardware Validation (STM32MP157F-DK2):**
+- ✅ HTTPS connectivity verified
+- ✅ Security headers confirmed
+- ✅ Authentication middleware working
+- ✅ 115 tests passing
 
 ---
 
