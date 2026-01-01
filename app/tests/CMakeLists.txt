@@ -64,6 +64,12 @@ if(GTEST_AVAILABLE)
         ${CMAKE_SOURCE_DIR}/src/protocols/wifi/TuyaDevice.cpp
         ${CMAKE_SOURCE_DIR}/src/protocols/wifi/WifiHandler.cpp
         ${CMAKE_SOURCE_DIR}/src/rpmsg/RpmsgClient.cpp
+        ${CMAKE_SOURCE_DIR}/src/security/CertManager.cpp
+        ${CMAKE_SOURCE_DIR}/src/security/UserManager.cpp
+        ${CMAKE_SOURCE_DIR}/src/security/SessionManager.cpp
+        ${CMAKE_SOURCE_DIR}/src/security/ApiTokenManager.cpp
+        ${CMAKE_SOURCE_DIR}/src/security/CredentialStore.cpp
+        ${CMAKE_SOURCE_DIR}/src/security/SetupManager.cpp
         ${CMAKE_SOURCE_DIR}/src/web/WebServer.cpp
     )
 
@@ -146,6 +152,11 @@ if(GTEST_AVAILABLE)
     target_link_libraries(test_webserver PRIVATE smarthub_lib GTest::gtest GTest::gtest_main)
     add_test(NAME WebServer COMMAND test_webserver)
 
+    # Security tests
+    add_executable(test_security security/test_security.cpp)
+    target_link_libraries(test_security PRIVATE smarthub_lib GTest::gtest GTest::gtest_main)
+    add_test(NAME Security COMMAND test_security)
+
     # Protocol tests
     add_executable(test_mqtt protocols/test_mqtt.cpp)
     target_link_libraries(test_mqtt PRIVATE smarthub_lib GTest::gtest GTest::gtest_main)
@@ -205,6 +216,7 @@ if(GTEST_AVAILABLE)
         devices/test_device_manager.cpp
         devices/test_organization.cpp
         web/test_webserver.cpp
+        security/test_security.cpp
         protocols/test_mqtt.cpp
         protocols/test_protocol_factory.cpp
         protocols/test_zigbee.cpp
@@ -231,10 +243,11 @@ if(GTEST_AVAILABLE)
 
     # ==== Code Coverage ====
 
-    option(SMARTHUB_COVERAGE "Enable code coverage" OFF)
+    # Note: SMARTHUB_COVERAGE option is defined in the parent CMakeLists.txt
     if(SMARTHUB_COVERAGE AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        # Use PUBLIC for link options so coverage links propagate to test executables
         target_compile_options(smarthub_lib PRIVATE --coverage -fprofile-arcs -ftest-coverage)
-        target_link_options(smarthub_lib PRIVATE --coverage)
+        target_link_options(smarthub_lib PUBLIC --coverage)
         target_compile_options(smarthub_tests PRIVATE --coverage -fprofile-arcs -ftest-coverage)
         target_link_options(smarthub_tests PRIVATE --coverage)
 

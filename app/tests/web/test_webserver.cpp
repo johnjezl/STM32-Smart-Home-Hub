@@ -88,6 +88,10 @@ protected:
         webServer = std::make_unique<smarthub::WebServer>(
             *eventBus, *deviceManager, testPort, "/tmp"
         );
+
+        // Make all API routes public for testing (no auth required)
+        webServer->setPublicRoutes({"/api/"});
+
         ASSERT_TRUE(webServer->start());
         // Give server time to start
         std::this_thread::sleep_for(std::chrono::milliseconds(100));

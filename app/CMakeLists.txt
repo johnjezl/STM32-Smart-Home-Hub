@@ -14,6 +14,7 @@ endif()
 option(SMARTHUB_BUILD_TESTS "Build unit tests" ON)
 option(SMARTHUB_ENABLE_SANITIZERS "Enable address/undefined sanitizers" OFF)
 option(SMARTHUB_NATIVE_BUILD "Building natively (not cross-compiling)" OFF)
+option(SMARTHUB_COVERAGE "Enable code coverage" OFF)
 
 # Compiler flags
 add_compile_options(-Wall -Wextra -Wpedantic)
@@ -167,6 +168,16 @@ set(RPMSG_SOURCES
     src/rpmsg/RpmsgClient.cpp
 )
 
+# Source files - Security
+set(SECURITY_SOURCES
+    src/security/CertManager.cpp
+    src/security/UserManager.cpp
+    src/security/SessionManager.cpp
+    src/security/ApiTokenManager.cpp
+    src/security/CredentialStore.cpp
+    src/security/SetupManager.cpp
+)
+
 # Source files - Web (using Mongoose)
 set(WEB_SOURCES
     src/web/WebServer.cpp
@@ -193,6 +204,7 @@ set(SOURCES
     ${DATABASE_SOURCES}
     ${DEVICES_SOURCES}
     ${PROTOCOLS_SOURCES}
+    ${SECURITY_SOURCES}
     ${RPMSG_SOURCES}
     ${WEB_SOURCES}
     ${UI_SOURCES}
@@ -261,6 +273,8 @@ endif()
 message(STATUS "")
 message(STATUS "SmartHub Configuration Summary:")
 message(STATUS "  Build type: ${CMAKE_BUILD_TYPE}")
+message(STATUS "  Tests: ${SMARTHUB_BUILD_TESTS}")
+message(STATUS "  Coverage: ${SMARTHUB_COVERAGE}")
 message(STATUS "  SQLite3: ${SQLite3_FOUND} OR ${SQLITE3_FOUND}")
 message(STATUS "  OpenSSL: ${OPENSSL_FOUND}")
 message(STATUS "  Mosquitto: ${MOSQUITTO_FOUND}")

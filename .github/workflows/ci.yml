@@ -103,7 +103,7 @@ jobs:
           cmake -B build-arm \
             -G Ninja \
             -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
-            -DCMAKE_TOOLCHAIN_FILE=cmake/arm-linux-gnueabihf.cmake \
+            -DCMAKE_TOOLCHAIN_FILE=cmake/arm-linux-gnueabihf-ci.cmake \
             -DSMARTHUB_BUILD_TESTS=OFF
 
       - name: Build
