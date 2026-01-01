@@ -255,8 +255,6 @@ echo stop > /sys/class/remoteproc/remoteproc0/state
 ```
 
 ### 0.3.3 Remote Development Setup
-- ✅ Configure VS Code Remote SSH to board — *Host "stm32mp1" configured*
-- ⏸️ Test editing files directly on board — *VS Code Remote SSH doesn't support ARM32; use SSH + nano/vi or SFTP instead*
 - ✅ Set up SSH key authentication: — *~/.ssh/stm32mp1 key installed*
 ```bash
 # On host
