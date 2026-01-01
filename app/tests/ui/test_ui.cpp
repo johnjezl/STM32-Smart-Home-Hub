@@ -97,9 +97,9 @@ TEST_F(UIManagerTest, InitializeFailsWithInvalidPath) {
 TEST_F(UIManagerTest, DefaultDimensions) {
     uiManager = std::make_unique<smarthub::UIManager>(*eventBus, *deviceManager);
 
-    // Default dimensions should be set (480x800 as per header)
-    EXPECT_EQ(uiManager->getWidth(), 480);
-    EXPECT_EQ(uiManager->getHeight(), 800);
+    // Default dimensions should be set (800x480 landscape)
+    EXPECT_EQ(uiManager->getWidth(), 800);
+    EXPECT_EQ(uiManager->getHeight(), 480);
 }
 
 // Test: Shutdown is safe to call without initialization

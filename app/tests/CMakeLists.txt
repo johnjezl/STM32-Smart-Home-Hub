@@ -183,7 +183,15 @@ if(GTEST_AVAILABLE)
 
     # UI tests (conditional on LVGL availability)
     if(SMARTHUB_ENABLE_LVGL)
-        add_executable(test_ui ui/test_ui.cpp ${CMAKE_SOURCE_DIR}/src/ui/UIManager.cpp)
+        add_executable(test_ui
+            ui/test_ui.cpp
+            ui/test_screen_manager.cpp
+            ui/test_theme_manager.cpp
+            ${CMAKE_SOURCE_DIR}/src/ui/UIManager.cpp
+            ${CMAKE_SOURCE_DIR}/src/ui/Screen.cpp
+            ${CMAKE_SOURCE_DIR}/src/ui/ScreenManager.cpp
+            ${CMAKE_SOURCE_DIR}/src/ui/ThemeManager.cpp
+        )
         target_link_libraries(test_ui PRIVATE smarthub_lib GTest::gtest GTest::gtest_main)
         target_link_libraries(test_ui PRIVATE ${LVGL_LIBRARIES})
         if(LIBDRM_FOUND)
@@ -192,8 +200,12 @@ if(GTEST_AVAILABLE)
         target_compile_definitions(test_ui PRIVATE SMARTHUB_ENABLE_LVGL=1)
         add_test(NAME UI COMMAND test_ui)
     else()
-        # Stub test when LVGL not available
-        add_executable(test_ui ui/test_ui.cpp)
+        # Stub test when LVGL not available - ThemeManager can still be tested
+        add_executable(test_ui
+            ui/test_ui.cpp
+            ui/test_theme_manager.cpp
+            ${CMAKE_SOURCE_DIR}/src/ui/ThemeManager.cpp
+        )
         target_link_libraries(test_ui PRIVATE smarthub_lib GTest::gtest GTest::gtest_main)
         add_test(NAME UI COMMAND test_ui)
     endif()
@@ -224,14 +236,23 @@ if(GTEST_AVAILABLE)
         rpmsg/test_rpmsg.cpp
         integration/test_integration.cpp
         ui/test_ui.cpp
+        ui/test_screen_manager.cpp
+        ui/test_theme_manager.cpp
     )
 
     add_executable(smarthub_tests ${ALL_TEST_SOURCES})
     target_link_libraries(smarthub_tests PRIVATE smarthub_lib GTest::gtest)
 
+    # ThemeManager works without LVGL
+    target_sources(smarthub_tests PRIVATE ${CMAKE_SOURCE_DIR}/src/ui/ThemeManager.cpp)
+
     # Add UI dependencies if LVGL is available
     if(SMARTHUB_ENABLE_LVGL)
-        target_sources(smarthub_tests PRIVATE ${CMAKE_SOURCE_DIR}/src/ui/UIManager.cpp)
+        target_sources(smarthub_tests PRIVATE
+            ${CMAKE_SOURCE_DIR}/src/ui/UIManager.cpp
+            ${CMAKE_SOURCE_DIR}/src/ui/Screen.cpp
+            ${CMAKE_SOURCE_DIR}/src/ui/ScreenManager.cpp
+        )
         target_link_libraries(smarthub_tests PRIVATE ${LVGL_LIBRARIES})
         if(LIBDRM_FOUND)
             target_link_libraries(smarthub_tests PRIVATE ${LIBDRM_LIBRARIES})
