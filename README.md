@@ -9,10 +9,11 @@ A custom smart home hub built on the STM32MP157F-DK2 development board featuring
 - **Local-only operation** - No internet or cloud required
 - **Dual-core architecture** - A7 Linux + M4 real-time firmware
 - **Touch-screen UI** - 4" 480x800 LVGL-based interface
-- **Secure web interface** - HTTPS REST API with local authentication
+- **Secure web interface** - HTTPS with TLS, session auth, rate limiting
+- **Security hardening** - Argon2id passwords, AES-256-GCM credential storage
 - **MQTT broker** - Built-in Mosquitto for device communication
-- **Zigbee support** - Via CC2652P coordinator (planned)
-- **WiFi device control** - Tasmota, Shelly, Tuya local protocols (planned)
+- **Zigbee support** - Via CC2652P USB coordinator with Z-Stack
+- **WiFi device control** - Tasmota, Shelly, Tuya local protocols
 
 ## Project Status
 
@@ -22,10 +23,10 @@ A custom smart home hub built on the STM32MP157F-DK2 development board featuring
 | 1 | Buildroot Base System | ✅ Complete |
 | 2 | Core Application Framework | ✅ Complete |
 | 3 | Device Integration Framework | ✅ Complete |
-| 4 | Zigbee Integration | 🔄 In Progress |
-| 5 | WiFi Device Integration | ⏳ Planned |
-| 6 | M4 Bare-Metal Firmware | ⏳ Planned |
-| 7 | Security Hardening | ⏳ Planned |
+| 4 | Zigbee Integration | ✅ Complete |
+| 5 | WiFi Device Integration | ✅ Complete |
+| 6 | M4 Bare-Metal Firmware | ✅ Complete |
+| 7 | Security Hardening | ✅ Complete |
 | 8 | UI Refinement & Polish | ⏳ Planned |
 
 ## Hardware
@@ -138,8 +139,12 @@ See [docs/building.md](docs/building.md) for detailed instructions.
 - [Buildroot](docs/buildroot.md) - Linux image configuration
 - [Networking](docs/networking.md) - WiFi, Ethernet, mDNS setup
 - [REST API](docs/api.md) - Web server REST API reference
+- [Security](docs/security.md) - TLS, authentication, credential storage
 - [MQTT Client](docs/mqtt.md) - MQTT protocol integration
-- [RPMsg/M4](docs/rpmsg.md) - Cortex-M4 communication
+- [Zigbee](docs/zigbee.md) - CC2652P coordinator integration
+- [WiFi Devices](docs/wifi.md) - Tasmota, Shelly, Tuya protocols
+- [M4 Firmware](docs/m4-firmware.md) - Cortex-M4 bare-metal firmware
+- [RPMsg/M4](docs/rpmsg.md) - A7-M4 inter-processor communication
 - [Testing](docs/testing.md) - Testing infrastructure guide
 - [Lab Operations](docs/lab-operations.md) - Hardware interaction guide
 
