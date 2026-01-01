@@ -198,6 +198,12 @@ if(SMARTHUB_ENABLE_LVGL)
         src/ui/Screen.cpp
         src/ui/ScreenManager.cpp
         src/ui/ThemeManager.cpp
+        # Widgets
+        src/ui/widgets/Header.cpp
+        src/ui/widgets/NavBar.cpp
+        src/ui/widgets/RoomCard.cpp
+        # Screens
+        src/ui/screens/DashboardScreen.cpp
     )
 else()
     set(UI_SOURCES "")
