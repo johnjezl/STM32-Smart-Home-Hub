@@ -204,6 +204,9 @@ if(SMARTHUB_ENABLE_LVGL)
         src/ui/widgets/RoomCard.cpp
         # Screens
         src/ui/screens/DashboardScreen.cpp
+        src/ui/screens/DeviceListScreen.cpp
+        src/ui/screens/LightControlScreen.cpp
+        src/ui/screens/SensorListScreen.cpp
     )
 else()
     set(UI_SOURCES "")
