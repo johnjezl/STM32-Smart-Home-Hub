@@ -1,7 +1,8 @@
 /**
- * Screen Unit Tests (Phase 8.C)
+ * Screen Unit Tests (Phase 8.C + 8.D)
  *
- * Tests for DeviceListScreen, LightControlScreen, and SensorListScreen.
+ * Tests for DeviceListScreen, LightControlScreen, SensorListScreen,
+ * and SensorHistoryScreen.
  * LVGL-specific rendering tested on hardware; these tests focus on
  * screen registration, navigation, and data handling.
  */
@@ -14,6 +15,7 @@
 #include <smarthub/ui/screens/DeviceListScreen.hpp>
 #include <smarthub/ui/screens/LightControlScreen.hpp>
 #include <smarthub/ui/screens/SensorListScreen.hpp>
+#include <smarthub/ui/screens/SensorHistoryScreen.hpp>
 #include <smarthub/ui/ScreenManager.hpp>
 #include <smarthub/ui/ThemeManager.hpp>
 #include <smarthub/ui/UIManager.hpp>
@@ -227,6 +229,132 @@ TEST_F(ScreenTest, SensorListScreenNavigation) {
 }
 
 // ============================================================================
+// SensorHistoryScreen Tests (Phase 8.D)
+// ============================================================================
+
+TEST_F(ScreenTest, SensorHistoryScreenRegistration) {
+    screenManager = std::make_unique<ScreenManager>(*uiManager);
+
+    auto sensorHistory = std::make_unique<SensorHistoryScreen>(
+        *screenManager, *themeManager, *deviceManager);
+
+    EXPECT_EQ(sensorHistory->name(), "sensor_history");
+
+    screenManager->registerScreen("sensor_history", std::move(sensorHistory));
+    EXPECT_TRUE(screenManager->hasScreen("sensor_history"));
+}
+
+TEST_F(ScreenTest, SensorHistoryScreenSensorId) {
+    screenManager = std::make_unique<ScreenManager>(*uiManager);
+
+    auto sensorHistory = std::make_unique<SensorHistoryScreen>(
+        *screenManager, *themeManager, *deviceManager);
+
+    // Set sensor ID before showing screen
+    sensorHistory->setSensorId("temp_sensor_001");
+    EXPECT_EQ(sensorHistory->sensorId(), "temp_sensor_001");
+
+    screenManager->registerScreen("sensor_history", std::move(sensorHistory));
+    EXPECT_TRUE(screenManager->hasScreen("sensor_history"));
+}
+
+TEST_F(ScreenTest, SensorHistoryScreenNavigation) {
+    screenManager = std::make_unique<ScreenManager>(*uiManager);
+
+    auto sensorList = std::make_unique<SensorListScreen>(
+        *screenManager, *themeManager, *deviceManager);
+    auto sensorHistory = std::make_unique<SensorHistoryScreen>(
+        *screenManager, *themeManager, *deviceManager);
+    auto* sensorListPtr = sensorList.get();
+    auto* sensorHistoryPtr = sensorHistory.get();
+
+    screenManager->registerScreen("sensors", std::move(sensorList));
+    screenManager->registerScreen("sensor_history", std::move(sensorHistory));
+
+    // Navigate from sensor list to history
+    screenManager->showScreen("sensors");
+    screenManager->showScreen("sensor_history");
+
+    EXPECT_EQ(screenManager->currentScreen(), sensorHistoryPtr);
+    EXPECT_EQ(screenManager->stackDepth(), 1);
+
+    // Navigate back to sensor list
+    screenManager->goBack();
+    EXPECT_EQ(screenManager->currentScreen(), sensorListPtr);
+    EXPECT_EQ(screenManager->stackDepth(), 0);
+}
+
+TEST_F(ScreenTest, SensorHistoryScreenUpdateInterval) {
+    screenManager = std::make_unique<ScreenManager>(*uiManager);
+
+    auto sensorHistory = std::make_unique<SensorHistoryScreen>(
+        *screenManager, *themeManager, *deviceManager);
+
+    screenManager->registerScreen("sensor_history", std::move(sensorHistory));
+    screenManager->showScreen("sensor_history");
+
+    // Multiple updates shouldn't crash, even over the refresh interval
+    for (int i = 0; i < 70; i++) {
+        ASSERT_NO_THROW({
+            screenManager->update(1000);  // 1 second, total 70 seconds > 60s interval
+        });
+    }
+}
+
+TEST_F(ScreenTest, SensorHistoryScreenSensorIdPersistence) {
+    screenManager = std::make_unique<ScreenManager>(*uiManager);
+
+    auto sensorList = std::make_unique<SensorListScreen>(
+        *screenManager, *themeManager, *deviceManager);
+    auto sensorHistory = std::make_unique<SensorHistoryScreen>(
+        *screenManager, *themeManager, *deviceManager);
+
+    screenManager->registerScreen("sensors", std::move(sensorList));
+    screenManager->registerScreen("sensor_history", std::move(sensorHistory));
+
+    // Get the history screen and set sensor ID
+    auto* historyScreen = dynamic_cast<SensorHistoryScreen*>(
+        screenManager->getScreen("sensor_history"));
+    ASSERT_NE(historyScreen, nullptr);
+
+    historyScreen->setSensorId("motion_001");
+    EXPECT_EQ(historyScreen->sensorId(), "motion_001");
+
+    // Navigate away and back
+    screenManager->showScreen("sensors");
+    screenManager->showScreen("sensor_history");
+
+    // Sensor ID should persist
+    EXPECT_EQ(historyScreen->sensorId(), "motion_001");
+}
+
+TEST_F(ScreenTest, SensorHistoryScreenMultipleSensors) {
+    screenManager = std::make_unique<ScreenManager>(*uiManager);
+
+    auto sensorHistory = std::make_unique<SensorHistoryScreen>(
+        *screenManager, *themeManager, *deviceManager);
+
+    screenManager->registerScreen("sensor_history", std::move(sensorHistory));
+
+    auto* historyScreen = dynamic_cast<SensorHistoryScreen*>(
+        screenManager->getScreen("sensor_history"));
+    ASSERT_NE(historyScreen, nullptr);
+
+    // Test with different sensor types
+    std::vector<std::string> sensorIds = {
+        "temp_living_room",
+        "humidity_bathroom",
+        "motion_hallway",
+        "contact_front_door"
+    };
+
+    for (const auto& id : sensorIds) {
+        historyScreen->setSensorId(id);
+        EXPECT_EQ(historyScreen->sensorId(), id);
+    }
+}
+
+// ============================================================================
 // Full Navigation Flow Tests
 // ============================================================================
 
@@ -285,6 +413,64 @@ TEST_F(ScreenTest, FullNavigationFlow) {
     EXPECT_EQ(screenManager->stackDepth(), 0);
 }
 
+TEST_F(ScreenTest, FullNavigationFlowWithSensorHistory) {
+    screenManager = std::make_unique<ScreenManager>(*uiManager);
+
+    // Register all screens including sensor history
+    auto dashboard = std::make_unique<DashboardScreen>(
+        *screenManager, *themeManager, *deviceManager);
+    auto sensorList = std::make_unique<SensorListScreen>(
+        *screenManager, *themeManager, *deviceManager);
+    auto sensorHistory = std::make_unique<SensorHistoryScreen>(
+        *screenManager, *themeManager, *deviceManager);
+
+    auto* dashPtr = dashboard.get();
+    auto* sensorListPtr = sensorList.get();
+    auto* sensorHistoryPtr = sensorHistory.get();
+
+    screenManager->registerScreen("dashboard", std::move(dashboard));
+    screenManager->registerScreen("sensors", std::move(sensorList));
+    screenManager->registerScreen("sensor_history", std::move(sensorHistory));
+    screenManager->setHomeScreen("dashboard");
+
+    // Start at dashboard
+    screenManager->showScreen("dashboard");
+    EXPECT_EQ(screenManager->currentScreen(), dashPtr);
+    EXPECT_EQ(screenManager->stackDepth(), 0);
+
+    // Navigate to sensor list (tab navigation, no push)
+    screenManager->showScreen("sensors", TransitionType::None, false);
+    EXPECT_EQ(screenManager->currentScreen(), sensorListPtr);
+    EXPECT_EQ(screenManager->stackDepth(), 0);  // Tab navigation doesn't push
+
+    // Navigate to sensor history (detail navigation, pushes)
+    auto* historyScreen = dynamic_cast<SensorHistoryScreen*>(
+        screenManager->getScreen("sensor_history"));
+    ASSERT_NE(historyScreen, nullptr);
+    historyScreen->setSensorId("temp_001");
+
+    screenManager->showScreen("sensor_history");
+    EXPECT_EQ(screenManager->currentScreen(), sensorHistoryPtr);
+    EXPECT_EQ(screenManager->stackDepth(), 1);  // Detail view pushes
+    EXPECT_EQ(historyScreen->sensorId(), "temp_001");
+
+    // Go back to sensor list
+    screenManager->goBack();
+    EXPECT_EQ(screenManager->currentScreen(), sensorListPtr);
+    EXPECT_EQ(screenManager->stackDepth(), 0);
+
+    // Navigate to different sensor's history
+    historyScreen->setSensorId("humidity_001");
+    screenManager->showScreen("sensor_history");
+    EXPECT_EQ(screenManager->currentScreen(), sensorHistoryPtr);
+    EXPECT_EQ(historyScreen->sensorId(), "humidity_001");
+
+    // Go home from sensor history
+    screenManager->goHome();
+    EXPECT_EQ(screenManager->currentScreen(), dashPtr);
+    EXPECT_EQ(screenManager->stackDepth(), 0);
+}
+
 TEST_F(ScreenTest, TabNavigation) {
     screenManager = std::make_unique<ScreenManager>(*uiManager);
 
@@ -320,6 +506,119 @@ TEST_F(ScreenTest, TabNavigation) {
 
     // Can't go back since no history
     EXPECT_FALSE(screenManager->goBack());
+}
+
+TEST_F(ScreenTest, CompleteAppNavigationFlow) {
+    screenManager = std::make_unique<ScreenManager>(*uiManager);
+
+    // Register ALL screens used in the app
+    auto dashboard = std::make_unique<DashboardScreen>(
+        *screenManager, *themeManager, *deviceManager);
+    auto deviceList = std::make_unique<DeviceListScreen>(
+        *screenManager, *themeManager, *deviceManager);
+    auto lightControl = std::make_unique<LightControlScreen>(
+        *screenManager, *themeManager, *deviceManager);
+    auto sensorList = std::make_unique<SensorListScreen>(
+        *screenManager, *themeManager, *deviceManager);
+    auto sensorHistory = std::make_unique<SensorHistoryScreen>(
+        *screenManager, *themeManager, *deviceManager);
+
+    auto* dashPtr = dashboard.get();
+    auto* deviceListPtr = deviceList.get();
+    auto* lightControlPtr = lightControl.get();
+    auto* sensorListPtr = sensorList.get();
+    auto* sensorHistoryPtr = sensorHistory.get();
+
+    screenManager->registerScreen("dashboard", std::move(dashboard));
+    screenManager->registerScreen("devices", std::move(deviceList));
+    screenManager->registerScreen("light_control", std::move(lightControl));
+    screenManager->registerScreen("sensors", std::move(sensorList));
+    screenManager->registerScreen("sensor_history", std::move(sensorHistory));
+    screenManager->setHomeScreen("dashboard");
+
+    // ========== Scenario 1: Device control flow ==========
+    // User opens app → taps Devices tab → selects light → controls → back → home
+
+    screenManager->showScreen("dashboard");
+    EXPECT_EQ(screenManager->currentScreen(), dashPtr);
+    EXPECT_EQ(screenManager->stackDepth(), 0);
+
+    // Tab to devices (no push)
+    screenManager->showScreen("devices", TransitionType::None, false);
+    EXPECT_EQ(screenManager->currentScreen(), deviceListPtr);
+    EXPECT_EQ(screenManager->stackDepth(), 0);
+
+    // Select a light (detail push)
+    auto* lightScreen = dynamic_cast<LightControlScreen*>(
+        screenManager->getScreen("light_control"));
+    lightScreen->setDeviceId("living_room_light");
+    screenManager->showScreen("light_control");
+    EXPECT_EQ(screenManager->currentScreen(), lightControlPtr);
+    EXPECT_EQ(screenManager->stackDepth(), 1);
+
+    // Go back
+    screenManager->goBack();
+    EXPECT_EQ(screenManager->currentScreen(), deviceListPtr);
+    EXPECT_EQ(screenManager->stackDepth(), 0);
+
+    // Go home
+    screenManager->goHome();
+    EXPECT_EQ(screenManager->currentScreen(), dashPtr);
+
+    // ========== Scenario 2: Sensor history flow ==========
+    // User taps Sensors tab → selects sensor → views history → back → home
+
+    screenManager->showScreen("sensors", TransitionType::None, false);
+    EXPECT_EQ(screenManager->currentScreen(), sensorListPtr);
+    EXPECT_EQ(screenManager->stackDepth(), 0);
+
+    // Select a sensor for history (detail push)
+    auto* historyScreen = dynamic_cast<SensorHistoryScreen*>(
+        screenManager->getScreen("sensor_history"));
+    historyScreen->setSensorId("kitchen_temp");
+    screenManager->showScreen("sensor_history");
+    EXPECT_EQ(screenManager->currentScreen(), sensorHistoryPtr);
+    EXPECT_EQ(screenManager->stackDepth(), 1);
+    EXPECT_EQ(historyScreen->sensorId(), "kitchen_temp");
+
+    // Go back to sensor list
+    screenManager->goBack();
+    EXPECT_EQ(screenManager->currentScreen(), sensorListPtr);
+
+    // View another sensor's history
+    historyScreen->setSensorId("bedroom_humidity");
+    screenManager->showScreen("sensor_history");
+    EXPECT_EQ(historyScreen->sensorId(), "bedroom_humidity");
+
+    // Go home directly
+    screenManager->goHome();
+    EXPECT_EQ(screenManager->currentScreen(), dashPtr);
+    EXPECT_EQ(screenManager->stackDepth(), 0);
+
+    // ========== Scenario 3: Deep navigation ==========
+    // Dashboard → Devices → Light → back → Sensors → History → back → back → home
+
+    screenManager->showScreen("devices");
+    screenManager->showScreen("light_control");
+    EXPECT_EQ(screenManager->stackDepth(), 2);
+
+    screenManager->goBack();  // to devices
+    EXPECT_EQ(screenManager->currentScreen(), deviceListPtr);
+
+    screenManager->showScreen("sensors");
+    screenManager->showScreen("sensor_history");
+    EXPECT_EQ(screenManager->stackDepth(), 4);  // dashboard → devices → sensors → history
+
+    // Back through entire stack
+    screenManager->goBack();  // to sensors
+    EXPECT_EQ(screenManager->currentScreen(), sensorListPtr);
+
+    screenManager->goBack();  // to devices
+    EXPECT_EQ(screenManager->currentScreen(), deviceListPtr);
+
+    screenManager->goBack();  // to dashboard
+    EXPECT_EQ(screenManager->currentScreen(), dashPtr);
+    EXPECT_EQ(screenManager->stackDepth(), 0);
 }
 
 // ============================================================================

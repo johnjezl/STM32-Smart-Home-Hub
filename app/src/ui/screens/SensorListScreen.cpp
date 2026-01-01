@@ -3,6 +3,7 @@
  */
 
 #include "smarthub/ui/screens/SensorListScreen.hpp"
+#include "smarthub/ui/screens/SensorHistoryScreen.hpp"
 #include "smarthub/ui/ScreenManager.hpp"
 #include "smarthub/ui/ThemeManager.hpp"
 #include "smarthub/ui/widgets/Header.hpp"
@@ -162,6 +163,12 @@ void SensorListScreen::createSensorCards() {
         lv_obj_add_flag(card, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
 
+        // Store device ID in user data for click handler
+        char* idCopy = new char[device->id().size() + 1];
+        strcpy(idCopy, device->id().c_str());
+        lv_obj_set_user_data(card, idCopy);
+        lv_obj_add_event_cb(card, sensorCardClickHandler, LV_EVENT_CLICKED, this);
+
         // Icon
         lv_obj_t* iconLabel = lv_label_create(card);
         lv_label_set_text(iconLabel, icon.c_str());
@@ -244,7 +251,26 @@ void SensorListScreen::refreshSensorValues() {
 
 void SensorListScreen::onSensorClicked(const std::string& sensorId) {
     LOG_DEBUG("Sensor clicked: %s", sensorId.c_str());
-    // TODO: Navigate to sensor history screen
+
+    // Navigate to sensor history screen
+    auto* screen = m_screenManager.getScreen("sensor_history");
+    if (screen) {
+        auto* historyScreen = dynamic_cast<SensorHistoryScreen*>(screen);
+        if (historyScreen) {
+            historyScreen->setSensorId(sensorId);
+        }
+    }
+    m_screenManager.showScreen("sensor_history");
+}
+
+void SensorListScreen::sensorCardClickHandler(lv_event_t* e) {
+    SensorListScreen* self = static_cast<SensorListScreen*>(lv_event_get_user_data(e));
+    lv_obj_t* card = lv_event_get_target(e);
+    char* sensorId = static_cast<char*>(lv_obj_get_user_data(card));
+
+    if (self && sensorId) {
+        self->onSensorClicked(sensorId);
+    }
 }
 
 void SensorListScreen::onNavTabSelected(const std::string& tabId) {

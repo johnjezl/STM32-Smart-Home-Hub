@@ -158,6 +158,27 @@ Grid of sensor cards:
 - Motion sensors (Active/Inactive)
 - Contact sensors (Open/Closed)
 - Auto-refresh every 5 seconds
+- Click card to view history
+
+### SensorHistoryScreen (`src/ui/screens/SensorHistoryScreen.cpp`)
+
+Sensor history with time series chart:
+- Back navigation button
+- Sensor name and current value display
+- TimeSeriesChart widget with historical data
+- Time range selector (1h, 6h, 24h, 7d)
+- Auto-refresh every minute
+
+## Widgets
+
+### TimeSeriesChart (`src/ui/widgets/TimeSeriesChart.cpp`)
+
+LVGL chart wrapper for time series data:
+- Line chart with configurable Y-axis range
+- Up to 60 data points displayed
+- Time range dropdown selector
+- DataPoint struct with timestamp and value
+- Automatic resampling of data to fit chart
 
 ## Navigation Flow
 
@@ -171,6 +192,10 @@ Dashboard (Home)
     |               +---> Back (pop from stack)
     |
     +---> Sensors
+    |       |
+    |       +---> Sensor History (push to stack)
+    |               |
+    |               +---> Back (pop from stack)
     |
     +---> Settings (planned)
 ```
@@ -219,11 +244,13 @@ app/
 │   │   ├── DashboardScreen.hpp
 │   │   ├── DeviceListScreen.hpp
 │   │   ├── LightControlScreen.hpp
-│   │   └── SensorListScreen.hpp
+│   │   ├── SensorListScreen.hpp
+│   │   └── SensorHistoryScreen.hpp
 │   └── widgets/
 │       ├── Header.hpp
 │       ├── NavBar.hpp
-│       └── RoomCard.hpp
+│       ├── RoomCard.hpp
+│       └── TimeSeriesChart.hpp
 ├── src/ui/
 │   ├── Screen.cpp
 │   ├── ScreenManager.cpp
@@ -233,11 +260,13 @@ app/
 │   │   ├── DashboardScreen.cpp
 │   │   ├── DeviceListScreen.cpp
 │   │   ├── LightControlScreen.cpp
-│   │   └── SensorListScreen.cpp
+│   │   ├── SensorListScreen.cpp
+│   │   └── SensorHistoryScreen.cpp
 │   └── widgets/
 │       ├── Header.cpp
 │       ├── NavBar.cpp
-│       └── RoomCard.cpp
+│       ├── RoomCard.cpp
+│       └── TimeSeriesChart.cpp
 └── tests/ui/
     ├── test_screen_manager.cpp
     ├── test_screens.cpp
@@ -246,9 +275,8 @@ app/
     └── test_widgets.cpp
 ```
 
-## Future Work (Phase 8.D-8.G)
+## Future Work (Phase 8.E-8.G)
 
-- **8.D**: Sensor history charts
 - **8.E**: WiFi configuration wizard
 - **8.F**: Settings screens, display management
 - **8.G**: Animations and polish

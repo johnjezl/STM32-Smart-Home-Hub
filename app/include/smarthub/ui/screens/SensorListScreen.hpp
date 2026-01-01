@@ -46,6 +46,8 @@ private:
     void onSensorClicked(const std::string& sensorId);
     void onNavTabSelected(const std::string& tabId);
 
+    static void sensorCardClickHandler(lv_event_t* e);
+
     lv_obj_t* m_content = nullptr;
 
     std::unique_ptr<Header> m_header;
