@@ -89,13 +89,15 @@ jobs:
             qemu-user-static
 
       - name: Install ARM cross-compile libraries
+        continue-on-error: true
         run: |
           sudo dpkg --add-architecture armhf
-          sudo apt-get update
+          # Update with armhf repos - may fail on some Ubuntu versions
+          sudo apt-get update || true
           sudo apt-get install -y \
             libsqlite3-dev:armhf \
             libssl-dev:armhf \
-            libyaml-cpp-dev:armhf || true  # May fail in minimal CI
+            libyaml-cpp-dev:armhf || true
 
       - name: Configure CMake (Cross-compile)
         working-directory: app
