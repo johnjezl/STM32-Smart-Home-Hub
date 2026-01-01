@@ -5,7 +5,7 @@
 ### Existing Infrastructure
 - **UIManager**: DRM display backend with double-buffering, evdev touch input
 - **LVGL Integration**: Conditional compilation, pkg-config detection
-- **Display**: 480x800 portrait, DSI MIPI
+- **Display**: 800x480 landscape, DSI MIPI
 - **Test Framework**: Basic UIManager tests (10 tests)
 
 ### Dependencies Already Met
@@ -87,24 +87,25 @@ app/src/ui/widgets/
 └── Header.cpp
 ```
 
-#### Dashboard Layout (480x800)
+#### Dashboard Layout (800x480 Landscape)
 ```
-+----------------------------------+
-|  SmartHub          🔔  ⚙️  12:34 |  <- Header (50px)
-+----------------------------------+
-|                                  |
-|  +------------+ +------------+   |
-|  | Living Rm  | | Bedroom    |   |  <- Room Cards
-|  | 72°F  💡3  | | 68°F  💡2  |   |     (scrollable)
-|  +------------+ +------------+   |
-|                                  |
-|  +------------+ +------------+   |
-|  | Kitchen    | | Bathroom   |   |
-|  +------------+ +------------+   |
-|                                  |
-+----------------------------------+
-|  [Devices] [Sensors] [Settings]  |  <- NavBar (60px)
-+----------------------------------+
++---------------------------------------------------------------+
+|  SmartHub                                    🔔  ⚙️  12:34 PM |  <- Header (50px)
++---------------------------------------------------------------+
+|                                                               |
+|  +-------------+ +-------------+ +-------------+ +----------+ |
+|  | Living Rm   | | Bedroom     | | Kitchen     | | Bathroom | |  <- Room Cards
+|  | 72°F   💡3  | | 68°F   💡2  | | 74°F   💡1  | | 70°F 💡0 | |     (scrollable)
+|  +-------------+ +-------------+ +-------------+ +----------+ |
+|                                                               |
+|  +-------------+ +-------------+ +-------------+ +----------+ |
+|  | Garage      | | Office      | | Patio       | | + Add    | |
+|  | --°F   💡1  | | 71°F   💡2  | | 65°F   💡0  | |          | |
+|  +-------------+ +-------------+ +-------------+ +----------+ |
+|                                                               |
++---------------------------------------------------------------+
+|    [🏠 Home]    [💡 Devices]    [📊 Sensors]    [⚙️ Settings] |  <- NavBar (60px)
++---------------------------------------------------------------+
 ```
 
 #### Components

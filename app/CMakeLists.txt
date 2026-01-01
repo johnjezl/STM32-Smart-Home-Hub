@@ -195,6 +195,9 @@ endif()
 if(SMARTHUB_ENABLE_LVGL)
     set(UI_SOURCES
         src/ui/UIManager.cpp
+        src/ui/Screen.cpp
+        src/ui/ScreenManager.cpp
+        src/ui/ThemeManager.cpp
     )
 else()
     set(UI_SOURCES "")

@@ -71,8 +71,8 @@ private:
 
     std::string m_fbDevice;
     std::string m_touchDevice;
-    int m_width = 480;
-    int m_height = 800;
+    int m_width = 800;
+    int m_height = 480;
 
     std::atomic<bool> m_running{false};
     std::atomic<bool> m_initialized{false};
