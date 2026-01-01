@@ -56,39 +56,35 @@ void ThemeManager::apply() {
 }
 
 void ThemeManager::loadLightTheme() {
-    m_colors = ThemeColors{
-        .background = 0xFAFAFA,      // Light gray background
-        .surface = 0xFFFFFF,         // White surface
-        .surfaceVariant = 0xF5F5F5,  // Slightly darker surface
-        .primary = 0x1976D2,         // Blue
-        .primaryVariant = 0x1565C0,  // Darker blue
-        .secondary = 0x26A69A,       // Teal
-        .textPrimary = 0x212121,     // Near black
-        .textSecondary = 0x757575,   // Gray
-        .textOnPrimary = 0xFFFFFF,   // White
-        .divider = 0xE0E0E0,         // Light gray
-        .error = 0xD32F2F,           // Red
-        .success = 0x388E3C,         // Green
-        .warning = 0xF57C00          // Orange
-    };
+    m_colors.background = 0xFAFAFA;       // Light gray background
+    m_colors.surface = 0xFFFFFF;          // White surface
+    m_colors.surfaceVariant = 0xF5F5F5;   // Slightly darker surface
+    m_colors.primary = 0x1976D2;          // Blue
+    m_colors.primaryVariant = 0x1565C0;   // Darker blue
+    m_colors.secondary = 0x26A69A;        // Teal
+    m_colors.textPrimary = 0x212121;      // Near black
+    m_colors.textSecondary = 0x757575;    // Gray
+    m_colors.textOnPrimary = 0xFFFFFF;    // White
+    m_colors.divider = 0xE0E0E0;          // Light gray
+    m_colors.error = 0xD32F2F;            // Red
+    m_colors.success = 0x388E3C;          // Green
+    m_colors.warning = 0xF57C00;          // Orange
 }
 
 void ThemeManager::loadDarkTheme() {
-    m_colors = ThemeColors{
-        .background = 0x121212,      // Dark background
-        .surface = 0x1E1E1E,         // Dark surface
-        .surfaceVariant = 0x2D2D2D,  // Slightly lighter surface
-        .primary = 0x2196F3,         // Blue
-        .primaryVariant = 0x1976D2,  // Darker blue
-        .secondary = 0x03DAC6,       // Teal
-        .textPrimary = 0xFFFFFF,     // White
-        .textSecondary = 0xB3B3B3,   // Light gray
-        .textOnPrimary = 0xFFFFFF,   // White
-        .divider = 0x424242,         // Dark gray
-        .error = 0xCF6679,           // Light red
-        .success = 0x4CAF50,         // Green
-        .warning = 0xFFB74D          // Light orange
-    };
+    m_colors.background = 0x121212;       // Dark background
+    m_colors.surface = 0x1E1E1E;          // Dark surface
+    m_colors.surfaceVariant = 0x2D2D2D;   // Slightly lighter surface
+    m_colors.primary = 0x2196F3;          // Blue
+    m_colors.primaryVariant = 0x1976D2;   // Darker blue
+    m_colors.secondary = 0x03DAC6;        // Teal
+    m_colors.textPrimary = 0xFFFFFF;      // White
+    m_colors.textSecondary = 0xB3B3B3;    // Light gray
+    m_colors.textOnPrimary = 0xFFFFFF;    // White
+    m_colors.divider = 0x424242;          // Dark gray
+    m_colors.error = 0xCF6679;            // Light red
+    m_colors.success = 0x4CAF50;          // Green
+    m_colors.warning = 0xFFB74D;          // Light orange
 }
 
 #ifdef SMARTHUB_ENABLE_LVGL
