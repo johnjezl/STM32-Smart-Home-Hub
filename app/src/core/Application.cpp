@@ -228,6 +228,14 @@ bool Application::initializeWebServer() {
         m_config->webRoot()
     );
 
+    // Configure TLS if cert and key paths are set
+    std::string certPath = m_config->tlsCertPath();
+    std::string keyPath = m_config->tlsKeyPath();
+    if (!certPath.empty() && !keyPath.empty()) {
+        m_webServer->setTlsCert(certPath, keyPath);
+        m_webServer->setHttpRedirect(true, 80);  // Redirect HTTP to HTTPS
+    }
+
     if (!m_webServer->start()) {
         return false;
     }
