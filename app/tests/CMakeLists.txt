@@ -209,6 +209,10 @@ if(GTEST_AVAILABLE)
             ${CMAKE_SOURCE_DIR}/src/ui/screens/SensorListScreen.cpp
             ${CMAKE_SOURCE_DIR}/src/ui/screens/SensorHistoryScreen.cpp
             ${CMAKE_SOURCE_DIR}/src/ui/screens/WifiSetupScreen.cpp
+            ${CMAKE_SOURCE_DIR}/src/ui/screens/SettingsScreen.cpp
+            ${CMAKE_SOURCE_DIR}/src/ui/screens/DisplaySettingsScreen.cpp
+            ${CMAKE_SOURCE_DIR}/src/ui/screens/AboutScreen.cpp
+            ${CMAKE_SOURCE_DIR}/src/ui/DisplayManager.cpp
         )
         target_link_libraries(test_ui PRIVATE smarthub_lib GTest::gtest GTest::gtest_main)
         target_link_libraries(test_ui PRIVATE ${LVGL_LIBRARIES})
@@ -225,6 +229,7 @@ if(GTEST_AVAILABLE)
             ui/test_widgets.cpp
             ui/test_screens.cpp
             ${CMAKE_SOURCE_DIR}/src/ui/ThemeManager.cpp
+            ${CMAKE_SOURCE_DIR}/src/ui/DisplayManager.cpp
         )
         target_link_libraries(test_ui PRIVATE smarthub_lib GTest::gtest GTest::gtest_main)
         add_test(NAME UI COMMAND test_ui)
@@ -266,8 +271,11 @@ if(GTEST_AVAILABLE)
     add_executable(smarthub_tests ${ALL_TEST_SOURCES})
     target_link_libraries(smarthub_tests PRIVATE smarthub_lib GTest::gtest)
 
-    # ThemeManager works without LVGL
-    target_sources(smarthub_tests PRIVATE ${CMAKE_SOURCE_DIR}/src/ui/ThemeManager.cpp)
+    # ThemeManager and DisplayManager work without LVGL
+    target_sources(smarthub_tests PRIVATE
+        ${CMAKE_SOURCE_DIR}/src/ui/ThemeManager.cpp
+        ${CMAKE_SOURCE_DIR}/src/ui/DisplayManager.cpp
+    )
 
     # Add UI dependencies if LVGL is available
     if(SMARTHUB_ENABLE_LVGL)

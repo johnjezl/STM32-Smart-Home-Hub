@@ -212,6 +212,58 @@ Key structures:
 - `ConnectionResult`: Success/failure with error message and IP
 - `NetworkStatus`: Current connection state and details
 
+### SettingsScreen (`src/ui/screens/SettingsScreen.cpp`)
+
+Main settings menu with category list:
+- Network (links to WifiSetupScreen)
+- Display (links to DisplaySettingsScreen)
+- Devices (manage paired devices)
+- Security (password, API tokens)
+- About (system information)
+
+Each category shows icon, title, subtitle, and chevron indicator.
+
+### DisplaySettingsScreen (`src/ui/screens/DisplaySettingsScreen.cpp`)
+
+Display and theme settings:
+- Brightness slider (10-100%)
+- Screen timeout buttons (Never, 30s, 1m, 5m, 10m)
+- Theme buttons (Light, Dark, Auto)
+- Back navigation button
+
+Uses DisplayManager for sysfs backlight control.
+
+### AboutScreen (`src/ui/screens/AboutScreen.cpp`)
+
+System information display:
+- Version and build date
+- Platform (STM32MP157F-DK2)
+- Kernel version from /proc/version
+- System uptime from /proc/uptime
+- IP and MAC address
+- Memory usage with progress bar
+
+## Display Management
+
+### DisplayManager (`src/ui/DisplayManager.cpp`)
+
+Hardware display control via Linux sysfs:
+- Brightness control (0-100%) → `/sys/class/backlight/brightness`
+- Screen timeout with configurable duration
+- Dim phase before screen off (5 second warning)
+- Wake on touch event
+- Timeout callback notifications
+
+**Key APIs:**
+```cpp
+void setBrightness(int percent);
+void setTimeoutSeconds(int seconds);
+void setDimLevel(int percent);
+void wake();
+void setScreenOn(bool on);
+void setTimeoutCallback(TimeoutCallback callback);
+```
+
 ## Navigation Flow
 
 ```
@@ -232,6 +284,14 @@ Dashboard (Home)
     +---> Settings
             |
             +---> WiFi Setup (push to stack)
+            |       |
+            |       +---> Back (pop from stack)
+            |
+            +---> Display Settings (push to stack)
+            |       |
+            |       +---> Back (pop from stack)
+            |
+            +---> About (push to stack)
                     |
                     +---> Back (pop from stack)
 ```
@@ -276,16 +336,20 @@ app/
 │   ├── network/
 │   │   └── NetworkManager.hpp
 │   └── ui/
+│       ├── DisplayManager.hpp
 │       ├── Screen.hpp
 │       ├── ScreenManager.hpp
 │       ├── ThemeManager.hpp
 │       ├── UIManager.hpp
 │       ├── screens/
+│       │   ├── AboutScreen.hpp
 │       │   ├── DashboardScreen.hpp
 │       │   ├── DeviceListScreen.hpp
+│       │   ├── DisplaySettingsScreen.hpp
 │       │   ├── LightControlScreen.hpp
-│       │   ├── SensorListScreen.hpp
 │       │   ├── SensorHistoryScreen.hpp
+│       │   ├── SensorListScreen.hpp
+│       │   ├── SettingsScreen.hpp
 │       │   └── WifiSetupScreen.hpp
 │       └── widgets/
 │           ├── Header.hpp
@@ -296,16 +360,20 @@ app/
 │   ├── network/
 │   │   └── NetworkManager.cpp
 │   └── ui/
+│       ├── DisplayManager.cpp
 │       ├── Screen.cpp
 │       ├── ScreenManager.cpp
 │       ├── ThemeManager.cpp
 │       ├── UIManager.cpp
 │       ├── screens/
+│       │   ├── AboutScreen.cpp
 │       │   ├── DashboardScreen.cpp
 │       │   ├── DeviceListScreen.cpp
+│       │   ├── DisplaySettingsScreen.cpp
 │       │   ├── LightControlScreen.cpp
-│       │   ├── SensorListScreen.cpp
 │       │   ├── SensorHistoryScreen.cpp
+│       │   ├── SensorListScreen.cpp
+│       │   ├── SettingsScreen.cpp
 │       │   └── WifiSetupScreen.cpp
 │       └── widgets/
 │           ├── Header.cpp
@@ -323,7 +391,10 @@ app/
         └── test_widgets.cpp
 ```
 
-## Future Work (Phase 8.F-8.G)
+## Future Work (Phase 8.G)
 
-- **8.F**: Settings screens, display management
 - **8.G**: Animations and polish
+  - Screen transitions (slide left/right, fade)
+  - Button press feedback
+  - Loading spinners
+  - Value change animations
