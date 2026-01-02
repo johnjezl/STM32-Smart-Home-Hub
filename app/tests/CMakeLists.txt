@@ -153,6 +153,10 @@ if(GTEST_AVAILABLE)
     target_link_libraries(test_webserver PRIVATE smarthub_lib GTest::gtest GTest::gtest_main)
     add_test(NAME WebServer COMMAND test_webserver)
 
+    add_executable(test_web_api web/test_web_api.cpp)
+    target_link_libraries(test_web_api PRIVATE smarthub_lib GTest::gtest GTest::gtest_main)
+    add_test(NAME WebAPI COMMAND test_web_api)
+
     # Security tests
     add_executable(test_security security/test_security.cpp)
     target_link_libraries(test_security PRIVATE smarthub_lib GTest::gtest GTest::gtest_main)
@@ -254,6 +258,7 @@ if(GTEST_AVAILABLE)
         devices/test_device_manager.cpp
         devices/test_organization.cpp
         web/test_webserver.cpp
+        web/test_web_api.cpp
         security/test_security.cpp
         protocols/test_mqtt.cpp
         protocols/test_protocol_factory.cpp

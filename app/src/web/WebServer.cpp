@@ -268,6 +268,11 @@ bool WebServer::isPublicRoute(const std::string& uri) const {
         return true;
     }
 
+    // For demo: allow device API without auth
+    if (uri == "/api/devices" || uri.rfind("/api/devices/", 0) == 0) {
+        return true;
+    }
+
     return false;
 }
 
@@ -404,7 +409,9 @@ void WebServer::apiGetDevices(struct mg_connection* c) {
         json += "\"id\":\"" + device->id() + "\",";
         json += "\"name\":\"" + device->name() + "\",";
         json += "\"type\":\"" + device->typeString() + "\",";
-        json += "\"online\":" + std::string(device->isAvailable() ? "true" : "false");
+        json += "\"room\":\"" + device->room() + "\",";
+        json += "\"online\":" + std::string(device->isAvailable() ? "true" : "false") + ",";
+        json += "\"state\":" + device->getState().dump();
         json += "}";
     }
 
@@ -424,7 +431,8 @@ void WebServer::apiGetDevice(struct mg_connection* c, const std::string& id) {
     json += "\"name\":\"" + device->name() + "\",";
     json += "\"type\":\"" + device->typeString() + "\",";
     json += "\"room\":\"" + device->room() + "\",";
-    json += "\"online\":" + std::string(device->isAvailable() ? "true" : "false");
+    json += "\"online\":" + std::string(device->isAvailable() ? "true" : "false") + ",";
+    json += "\"state\":" + device->getState().dump();
     json += "}";
 
     sendJson(c, 200, json);
@@ -439,11 +447,24 @@ void WebServer::apiSetDeviceState(struct mg_connection* c, const std::string& id
     }
 
     // Parse JSON body and update device state
-    // Simplified - real implementation would use proper JSON parsing
     std::string body(hm->body.buf, hm->body.len);
     LOG_DEBUG("Set device state: %s = %s", id.c_str(), body.c_str());
 
-    sendJson(c, 200, "{\"success\":true}");
+    try {
+        auto stateJson = nlohmann::json::parse(body);
+
+        // Apply each state property
+        for (auto& [key, value] : stateJson.items()) {
+            device->setState(key, value);
+        }
+
+        // Return updated state
+        std::string json = "{\"success\":true,\"state\":" + device->getState().dump() + "}";
+        sendJson(c, 200, json);
+    } catch (const std::exception& e) {
+        LOG_ERROR("Failed to parse device state: %s", e.what());
+        sendError(c, 400, "Invalid JSON");
+    }
 }
 
 void WebServer::apiGetSensorHistory(struct mg_connection* c, const std::string& /*id*/,
