@@ -5,6 +5,7 @@
 #include "smarthub/ui/screens/LightControlScreen.hpp"
 #include "smarthub/ui/ScreenManager.hpp"
 #include "smarthub/ui/ThemeManager.hpp"
+#include "smarthub/ui/widgets/Header.hpp"
 #include "smarthub/devices/DeviceManager.hpp"
 #include "smarthub/devices/Device.hpp"
 #include "smarthub/core/Logger.hpp"
@@ -179,7 +180,11 @@ void LightControlScreen::updateControls() {
         lv_label_set_text(m_titleLabel, device->name().c_str());
     }
 
-    bool isOn = device->isOn();
+    bool isOn = false;
+    auto state = device->getState();
+    if (state.contains("on")) {
+        isOn = state["on"].get<bool>();
+    }
 
     if (m_powerSwitch) {
         if (isOn) {
@@ -227,11 +232,7 @@ void LightControlScreen::onPowerToggle(bool on) {
     auto device = m_deviceManager.getDevice(m_deviceId);
     if (!device) return;
 
-    if (on) {
-        device->turnOn();
-    } else {
-        device->turnOff();
-    }
+    device->setState("on", on);
 
     updateControls();
 }
@@ -240,7 +241,7 @@ void LightControlScreen::onBrightnessChange(int percent) {
     auto device = m_deviceManager.getDevice(m_deviceId);
     if (!device) return;
 
-    device->setProperty("brightness", percent);
+    device->setState("brightness", percent);
 
     if (m_brightnessLabel) {
         char buf[16];
@@ -253,7 +254,7 @@ void LightControlScreen::onColorTempChange(int kelvin) {
     auto device = m_deviceManager.getDevice(m_deviceId);
     if (!device) return;
 
-    device->setProperty("colorTemp", kelvin);
+    device->setState("colorTemp", kelvin);
 
     if (m_colorTempLabel) {
         char buf[16];

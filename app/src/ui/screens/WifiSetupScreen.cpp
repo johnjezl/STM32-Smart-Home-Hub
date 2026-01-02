@@ -183,7 +183,7 @@ void WifiSetupScreen::createPasswordDialog() {
     lv_textarea_set_placeholder_text(m_passwordInput, "Password");
     lv_textarea_set_password_mode(m_passwordInput, true);
     lv_textarea_set_one_line(m_passwordInput, true);
-    lv_obj_set_style_border_color(m_passwordInput, m_theme.outline(), 0);
+    lv_obj_set_style_border_color(m_passwordInput, m_theme.divider(), 0);
     lv_obj_set_style_border_width(m_passwordInput, 1, 0);
     lv_obj_set_style_bg_color(m_passwordInput, m_theme.surface(), 0);
 
@@ -368,7 +368,7 @@ void WifiSetupScreen::updateNetworkList() {
         if (network.secured && !(status.state == network::ConnectionState::Connected &&
                                   status.ssid == network.ssid)) {
             lv_obj_t* lockIcon = lv_label_create(item);
-            lv_label_set_text(lockIcon, LV_SYMBOL_LOCK);
+            lv_label_set_text(lockIcon, LV_SYMBOL_EYE_CLOSE);  // Lock icon substitute
             lv_obj_set_style_text_color(lockIcon, m_theme.textSecondary(), 0);
             lv_obj_align(lockIcon, LV_ALIGN_RIGHT_MID, -60, 0);
         }

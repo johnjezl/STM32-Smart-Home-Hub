@@ -181,8 +181,7 @@ void ThemeManager::applyButtonPressAnimation(lv_obj_t* obj) const {
     lv_obj_set_style_transform_pivot_y(obj, lv_pct(50), 0);
 
     // Scale down to 95% when pressed (256 = 100% in LVGL)
-    lv_obj_set_style_transform_scale_x(obj, 243, LV_STATE_PRESSED);  // 95% of 256
-    lv_obj_set_style_transform_scale_y(obj, 243, LV_STATE_PRESSED);
+    lv_obj_set_style_transform_zoom(obj, 243, LV_STATE_PRESSED);  // 95% of 256
 
     // Darken background on press
     lv_obj_set_style_bg_color(obj, primaryVariant(), LV_STATE_PRESSED);
@@ -190,8 +189,7 @@ void ThemeManager::applyButtonPressAnimation(lv_obj_t* obj) const {
     // Create smooth transition
     static lv_style_transition_dsc_t pressTrans;
     static lv_style_prop_t pressProps[] = {
-        LV_STYLE_TRANSFORM_SCALE_X,
-        LV_STYLE_TRANSFORM_SCALE_Y,
+        LV_STYLE_TRANSFORM_ZOOM,
         LV_STYLE_BG_COLOR,
         LV_STYLE_PROP_INV
     };
