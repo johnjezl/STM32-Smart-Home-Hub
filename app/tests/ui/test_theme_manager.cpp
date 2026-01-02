@@ -115,6 +115,58 @@ TEST_F(ThemeManagerTest, ThemesAreDifferent) {
     EXPECT_NE(darkText, lightText);
 }
 
+// Test: High contrast mode
+TEST_F(ThemeManagerTest, HighContrastMode) {
+    theme.setMode(ThemeMode::HighContrast);
+
+    EXPECT_EQ(theme.mode(), ThemeMode::HighContrast);
+    EXPECT_TRUE(theme.isHighContrast());
+
+    const auto& colors = theme.colors();
+
+    // High contrast should use pure black background
+    EXPECT_EQ(colors.background, 0x000000u);
+    // Pure white text
+    EXPECT_EQ(colors.textPrimary, 0xFFFFFFu);
+    // High visibility primary color (cyan)
+    EXPECT_EQ(colors.primary, 0x00FFFFu);
+}
+
+// Test: High contrast has maximum contrast
+TEST_F(ThemeManagerTest, HighContrastMaximumContrast) {
+    theme.setMode(ThemeMode::HighContrast);
+
+    const auto& colors = theme.colors();
+
+    // In high contrast, text secondary should also be white (no gray)
+    EXPECT_EQ(colors.textSecondary, 0xFFFFFFu);
+    // Dividers should be visible (white on black)
+    EXPECT_EQ(colors.divider, 0xFFFFFFu);
+}
+
+// Test: isHighContrast returns false for other modes
+TEST_F(ThemeManagerTest, IsHighContrastFalseForOtherModes) {
+    theme.setMode(ThemeMode::Light);
+    EXPECT_FALSE(theme.isHighContrast());
+
+    theme.setMode(ThemeMode::Dark);
+    EXPECT_FALSE(theme.isHighContrast());
+}
+
+// Test: High contrast error/success colors are pure
+TEST_F(ThemeManagerTest, HighContrastPureColors) {
+    theme.setMode(ThemeMode::HighContrast);
+
+    const auto& colors = theme.colors();
+
+    // Pure red for errors
+    EXPECT_EQ(colors.error, 0xFF0000u);
+    // Pure green for success
+    EXPECT_EQ(colors.success, 0x00FF00u);
+    // Yellow for warnings
+    EXPECT_EQ(colors.warning, 0xFFFF00u);
+}
+
 #ifdef SMARTHUB_ENABLE_LVGL
 
 // Test: LVGL color accessors
@@ -127,3 +179,41 @@ TEST_F(ThemeManagerTest, LVGLColorAccessors) {
 }
 
 #endif
+
+// ============================================================================
+// Animation Constants Tests
+// ============================================================================
+
+#include <smarthub/ui/AnimationManager.hpp>
+
+TEST(AnimationManagerTest, AnimationDurations) {
+    // Verify animation duration constants
+    EXPECT_EQ(AnimationManager::DURATION_FAST, 150u);
+    EXPECT_EQ(AnimationManager::DURATION_NORMAL, 300u);
+    EXPECT_EQ(AnimationManager::DURATION_SLOW, 500u);
+}
+
+TEST(AnimationManagerTest, ScaleConstants) {
+    // Verify scale constants for button press
+    EXPECT_EQ(AnimationManager::PRESS_SCALE, 95);
+    EXPECT_EQ(AnimationManager::NORMAL_SCALE, 100);
+}
+
+TEST(AnimationManagerTest, Construction) {
+    // Verify AnimationManager can be constructed
+    AnimationManager anim;
+    EXPECT_TRUE(true);  // No crash
+}
+
+// ============================================================================
+// Loading Spinner Tests
+// ============================================================================
+
+#include <smarthub/ui/widgets/LoadingSpinner.hpp>
+
+TEST(LoadingSpinnerTest, Constants) {
+    // Verify spinner constants
+    EXPECT_EQ(LoadingSpinner::DEFAULT_SIZE, 48);
+    EXPECT_EQ(LoadingSpinner::DEFAULT_DURATION, 1000u);
+    EXPECT_EQ(LoadingSpinner::ARC_LENGTH, 60);
+}

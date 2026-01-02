@@ -204,11 +204,13 @@ if(SMARTHUB_ENABLE_LVGL)
         src/ui/ScreenManager.cpp
         src/ui/ThemeManager.cpp
         src/ui/DisplayManager.cpp
+        src/ui/AnimationManager.cpp
         # Widgets
         src/ui/widgets/Header.cpp
         src/ui/widgets/NavBar.cpp
         src/ui/widgets/RoomCard.cpp
         src/ui/widgets/TimeSeriesChart.cpp
+        src/ui/widgets/LoadingSpinner.cpp
         # Screens
         src/ui/screens/DashboardScreen.cpp
         src/ui/screens/DeviceListScreen.cpp
