@@ -217,3 +217,176 @@ TEST(LoadingSpinnerTest, Constants) {
     EXPECT_EQ(LoadingSpinner::DEFAULT_DURATION, 1000u);
     EXPECT_EQ(LoadingSpinner::ARC_LENGTH, 60);
 }
+
+// ============================================================================
+// Additional AnimationManager Tests
+// ============================================================================
+
+TEST(AnimationManagerTest, DurationFastIsQuickest) {
+    // FAST should be less than NORMAL
+    EXPECT_LT(AnimationManager::DURATION_FAST, AnimationManager::DURATION_NORMAL);
+}
+
+TEST(AnimationManagerTest, DurationNormalIsMiddle) {
+    // NORMAL should be between FAST and SLOW
+    EXPECT_GT(AnimationManager::DURATION_NORMAL, AnimationManager::DURATION_FAST);
+    EXPECT_LT(AnimationManager::DURATION_NORMAL, AnimationManager::DURATION_SLOW);
+}
+
+TEST(AnimationManagerTest, DurationSlowIsLongest) {
+    // SLOW should be greater than NORMAL
+    EXPECT_GT(AnimationManager::DURATION_SLOW, AnimationManager::DURATION_NORMAL);
+}
+
+TEST(AnimationManagerTest, PressScaleLessThanNormal) {
+    // Press scale should be less than normal (button shrinks when pressed)
+    EXPECT_LT(AnimationManager::PRESS_SCALE, AnimationManager::NORMAL_SCALE);
+}
+
+TEST(AnimationManagerTest, ScaleValuesArePercentages) {
+    // Scale values should be percentages (0-100 range makes sense)
+    EXPECT_GE(AnimationManager::PRESS_SCALE, 0);
+    EXPECT_LE(AnimationManager::PRESS_SCALE, 100);
+    EXPECT_EQ(AnimationManager::NORMAL_SCALE, 100);
+}
+
+TEST(AnimationManagerTest, MultipleInstances) {
+    // Multiple AnimationManager instances should work
+    AnimationManager anim1;
+    AnimationManager anim2;
+    AnimationManager anim3;
+    EXPECT_TRUE(true);  // No crash with multiple instances
+}
+
+TEST(AnimationManagerTest, ConstructDestruct) {
+    // Construct and destruct in a loop
+    for (int i = 0; i < 10; i++) {
+        AnimationManager anim;
+        (void)anim;
+    }
+    EXPECT_TRUE(true);  // No crash or memory issues
+}
+
+// ============================================================================
+// AnimationEasing Enum Tests
+// ============================================================================
+
+TEST(AnimationEasingTest, EnumValues) {
+    // Verify all easing values are distinct
+    EXPECT_NE(static_cast<int>(AnimationEasing::Linear),
+              static_cast<int>(AnimationEasing::EaseOut));
+    EXPECT_NE(static_cast<int>(AnimationEasing::EaseIn),
+              static_cast<int>(AnimationEasing::EaseInOut));
+    EXPECT_NE(static_cast<int>(AnimationEasing::Overshoot),
+              static_cast<int>(AnimationEasing::Bounce));
+}
+
+TEST(AnimationEasingTest, AllEasingTypesExist) {
+    // Verify we can use all easing types
+    AnimationEasing e1 = AnimationEasing::Linear;
+    AnimationEasing e2 = AnimationEasing::EaseOut;
+    AnimationEasing e3 = AnimationEasing::EaseIn;
+    AnimationEasing e4 = AnimationEasing::EaseInOut;
+    AnimationEasing e5 = AnimationEasing::Overshoot;
+    AnimationEasing e6 = AnimationEasing::Bounce;
+
+    // Suppress unused variable warnings
+    (void)e1; (void)e2; (void)e3; (void)e4; (void)e5; (void)e6;
+    EXPECT_TRUE(true);
+}
+
+// ============================================================================
+// Additional LoadingSpinner Tests
+// ============================================================================
+
+TEST(LoadingSpinnerTest, DefaultSizeIsTouchTarget) {
+    // Default size should meet minimum touch target
+    EXPECT_GE(LoadingSpinner::DEFAULT_SIZE, ThemeManager::MIN_TOUCH_TARGET);
+}
+
+TEST(LoadingSpinnerTest, ArcLengthIsReasonable) {
+    // Arc length should be less than full circle (360)
+    EXPECT_GT(LoadingSpinner::ARC_LENGTH, 0);
+    EXPECT_LT(LoadingSpinner::ARC_LENGTH, 360);
+}
+
+TEST(LoadingSpinnerTest, DurationIsReasonable) {
+    // Duration should be between 100ms and 10s
+    EXPECT_GE(LoadingSpinner::DEFAULT_DURATION, 100u);
+    EXPECT_LE(LoadingSpinner::DEFAULT_DURATION, 10000u);
+}
+
+// ============================================================================
+// ThemeManager High Contrast Additional Tests
+// ============================================================================
+
+TEST_F(ThemeManagerTest, HighContrastSecondaryIsHighVisibility) {
+    theme.setMode(ThemeMode::HighContrast);
+    const auto& colors = theme.colors();
+
+    // Secondary color should be yellow (high visibility)
+    EXPECT_EQ(colors.secondary, 0xFFFF00u);
+}
+
+TEST_F(ThemeManagerTest, HighContrastSurfaceIsPureBlack) {
+    theme.setMode(ThemeMode::HighContrast);
+    const auto& colors = theme.colors();
+
+    // Surface should also be pure black
+    EXPECT_EQ(colors.surface, 0x000000u);
+}
+
+TEST_F(ThemeManagerTest, HighContrastTextOnPrimaryIsBlack) {
+    theme.setMode(ThemeMode::HighContrast);
+    const auto& colors = theme.colors();
+
+    // Text on primary (cyan) should be black for contrast
+    EXPECT_EQ(colors.textOnPrimary, 0x000000u);
+}
+
+TEST_F(ThemeManagerTest, HighContrastPrimaryVariantExists) {
+    theme.setMode(ThemeMode::HighContrast);
+    const auto& colors = theme.colors();
+
+    // Primary variant should be different from primary
+    EXPECT_NE(colors.primary, colors.primaryVariant);
+    // But still cyan-ish
+    EXPECT_EQ(colors.primaryVariant, 0x00CCCCu);
+}
+
+TEST_F(ThemeManagerTest, AllThreeModesAreDifferent) {
+    theme.setMode(ThemeMode::Light);
+    auto lightBg = theme.colors().background;
+
+    theme.setMode(ThemeMode::Dark);
+    auto darkBg = theme.colors().background;
+
+    theme.setMode(ThemeMode::HighContrast);
+    auto highContrastBg = theme.colors().background;
+
+    // All three should have different backgrounds
+    EXPECT_NE(lightBg, darkBg);
+    EXPECT_NE(darkBg, highContrastBg);
+    EXPECT_NE(lightBg, highContrastBg);
+}
+
+TEST_F(ThemeManagerTest, SwitchBetweenAllModes) {
+    // Should be able to switch between all modes without issues
+    theme.setMode(ThemeMode::Light);
+    EXPECT_EQ(theme.mode(), ThemeMode::Light);
+
+    theme.setMode(ThemeMode::Dark);
+    EXPECT_EQ(theme.mode(), ThemeMode::Dark);
+
+    theme.setMode(ThemeMode::HighContrast);
+    EXPECT_EQ(theme.mode(), ThemeMode::HighContrast);
+
+    theme.setMode(ThemeMode::Light);
+    EXPECT_EQ(theme.mode(), ThemeMode::Light);
+
+    theme.setMode(ThemeMode::HighContrast);
+    EXPECT_EQ(theme.mode(), ThemeMode::HighContrast);
+
+    theme.setMode(ThemeMode::Dark);
+    EXPECT_EQ(theme.mode(), ThemeMode::Dark);
+}
