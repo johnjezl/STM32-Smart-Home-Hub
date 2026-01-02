@@ -20,19 +20,13 @@ void AnimationManager::setupButtonPressEffect(lv_obj_t* btn) {
     lv_obj_set_style_transform_pivot_x(btn, lv_pct(50), 0);
     lv_obj_set_style_transform_pivot_y(btn, lv_pct(50), 0);
 
-    // Add pressed state scale
-    lv_obj_set_style_transform_scale_x(btn, 256, LV_STATE_PRESSED);  // 100% = 256
-    lv_obj_set_style_transform_scale_y(btn, 256, LV_STATE_PRESSED);
-
-    // Normal state (back to full size)
-    lv_obj_set_style_transform_scale_x(btn, 256 * PRESS_SCALE / 100, LV_STATE_PRESSED);
-    lv_obj_set_style_transform_scale_y(btn, 256 * PRESS_SCALE / 100, LV_STATE_PRESSED);
+    // Pressed state scale (256 = 100%, so 95% = 243)
+    lv_obj_set_style_transform_zoom(btn, 256 * PRESS_SCALE / 100, LV_STATE_PRESSED);
 
     // Enable transition for smooth animation
     static lv_style_transition_dsc_t trans;
     static lv_style_prop_t props[] = {
-        LV_STYLE_TRANSFORM_SCALE_X,
-        LV_STYLE_TRANSFORM_SCALE_Y,
+        LV_STYLE_TRANSFORM_ZOOM,
         LV_STYLE_PROP_INV  // End marker
     };
     lv_style_transition_dsc_init(&trans, props, lv_anim_path_ease_out, DURATION_FAST, 0, nullptr);
@@ -203,8 +197,7 @@ lv_anim_path_cb_t AnimationManager::getAnimPath(AnimationEasing easing) {
 
 void AnimationManager::scaleAnimCallback(void* obj, int32_t value) {
     lv_obj_t* target = static_cast<lv_obj_t*>(obj);
-    lv_obj_set_style_transform_scale_x(target, value, 0);
-    lv_obj_set_style_transform_scale_y(target, value, 0);
+    lv_obj_set_style_transform_zoom(target, value, 0);
 }
 
 void AnimationManager::opacityAnimCallback(void* obj, int32_t value) {
@@ -224,14 +217,12 @@ void AnimationManager::yAnimCallback(void* obj, int32_t value) {
 
 void AnimationManager::onButtonPressed(lv_event_t* e) {
     lv_obj_t* btn = lv_event_get_target(e);
-    lv_obj_set_style_transform_scale_x(btn, 256 * PRESS_SCALE / 100, 0);
-    lv_obj_set_style_transform_scale_y(btn, 256 * PRESS_SCALE / 100, 0);
+    lv_obj_set_style_transform_zoom(btn, 256 * PRESS_SCALE / 100, 0);
 }
 
 void AnimationManager::onButtonReleased(lv_event_t* e) {
     lv_obj_t* btn = lv_event_get_target(e);
-    lv_obj_set_style_transform_scale_x(btn, 256, 0);
-    lv_obj_set_style_transform_scale_y(btn, 256, 0);
+    lv_obj_set_style_transform_zoom(btn, 256, 0);
 }
 
 #endif // SMARTHUB_ENABLE_LVGL

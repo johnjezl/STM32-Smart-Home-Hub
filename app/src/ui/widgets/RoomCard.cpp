@@ -49,7 +49,7 @@ void RoomCard::createLayout() {
 
     // Device count with icon (bottom right)
     m_devicesLabel = lv_label_create(m_card);
-    lv_label_set_text(m_devicesLabel, LV_SYMBOL_LIGHT_BULB " 0");
+    lv_label_set_text(m_devicesLabel, LV_SYMBOL_POWER " 0");
     lv_obj_set_style_text_color(m_devicesLabel, m_theme.textSecondary(), 0);
     lv_obj_align(m_devicesLabel, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
 }
@@ -73,7 +73,7 @@ void RoomCard::setRoomData(const RoomData& data) {
 
     if (m_devicesLabel) {
         char buf[16];
-        snprintf(buf, sizeof(buf), LV_SYMBOL_LIGHT_BULB " %d", data.activeDevices);
+        snprintf(buf, sizeof(buf), LV_SYMBOL_POWER " %d", data.activeDevices);
         lv_label_set_text(m_devicesLabel, buf);
 
         // Highlight if devices are on

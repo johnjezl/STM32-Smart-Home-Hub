@@ -95,7 +95,7 @@ void DeviceListScreen::createNavBar() {
     m_navBar = std::make_unique<NavBar>(m_container, m_theme);
 
     m_navBar->addTab({"home", "Home", LV_SYMBOL_HOME});
-    m_navBar->addTab({"devices", "Devices", LV_SYMBOL_LIGHT_BULB});
+    m_navBar->addTab({"devices", "Devices", LV_SYMBOL_POWER});
     m_navBar->addTab({"sensors", "Sensors", LV_SYMBOL_CHARGE});
     m_navBar->addTab({"settings", "Settings", LV_SYMBOL_SETTINGS});
 
@@ -140,11 +140,18 @@ void DeviceListScreen::refreshDeviceList() {
             default: typeStr = "Device"; break;
         }
 
+        // Check if device is on via state JSON
+        bool isOn = false;
+        auto state = device->getState();
+        if (state.contains("on")) {
+            isOn = state["on"].get<bool>();
+        }
+
         lv_obj_t* row = createDeviceRow(m_deviceList,
                                          device->id(),
                                          device->name(),
                                          typeStr,
-                                         device->isOn());
+                                         isOn);
         m_deviceRows.emplace_back(device->id(), row);
     }
 }
@@ -173,7 +180,7 @@ lv_obj_t* DeviceListScreen::createDeviceRow(lv_obj_t* parent,
 
     // Icon based on device type
     lv_obj_t* icon = lv_label_create(row);
-    lv_label_set_text(icon, LV_SYMBOL_LIGHT_BULB);
+    lv_label_set_text(icon, LV_SYMBOL_POWER);
     lv_obj_set_style_text_color(icon, isOn ? m_theme.warning() : m_theme.textSecondary(), 0);
     lv_obj_align(icon, LV_ALIGN_LEFT_MID, 0, 0);
 
@@ -211,11 +218,7 @@ void DeviceListScreen::onDeviceToggle(const std::string& deviceId, bool newState
 
     auto device = m_deviceManager.getDevice(deviceId);
     if (device) {
-        if (newState) {
-            device->turnOn();
-        } else {
-            device->turnOff();
-        }
+        device->setState("on", newState);
     }
 }
 

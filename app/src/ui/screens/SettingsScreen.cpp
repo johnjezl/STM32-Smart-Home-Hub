@@ -23,7 +23,7 @@ SettingsScreen::SettingsScreen(ScreenManager& screenManager,
         {"network", "Network", "WiFi, IP settings", LV_SYMBOL_WIFI},
         {"display", "Display", "Brightness, theme, timeout", LV_SYMBOL_IMAGE},
         {"devices", "Devices", "Manage paired devices", LV_SYMBOL_SETTINGS},
-        {"security", "Security", "Password, API tokens", LV_SYMBOL_LOCK},
+        {"security", "Security", "Password, API tokens", LV_SYMBOL_EYE_CLOSE},
         {"about", "About", "Version, system info", LV_SYMBOL_LIST}
     };
 }

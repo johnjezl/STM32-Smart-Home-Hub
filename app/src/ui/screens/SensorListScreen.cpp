@@ -99,7 +99,7 @@ void SensorListScreen::createNavBar() {
     m_navBar = std::make_unique<NavBar>(m_container, m_theme);
 
     m_navBar->addTab({"home", "Home", LV_SYMBOL_HOME});
-    m_navBar->addTab({"devices", "Devices", LV_SYMBOL_LIGHT_BULB});
+    m_navBar->addTab({"devices", "Devices", LV_SYMBOL_POWER});
     m_navBar->addTab({"sensors", "Sensors", LV_SYMBOL_CHARGE});
     m_navBar->addTab({"settings", "Settings", LV_SYMBOL_SETTINGS});
 
