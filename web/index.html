@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SmartHub Dashboard</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <!-- Login Screen -->
+    <div id="login-screen" class="screen">
+        <div class="login-container">
+            <div class="login-header">
+                <div class="logo">SmartHub</div>
+                <p>Smart Home Control</p>
+            </div>
+            <form id="login-form">
+                <div class="form-group">
+                    <label for="username">Username</label>
+                    <input type="text" id="username" name="username" required autocomplete="username">
+                </div>
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <input type="password" id="password" name="password" required autocomplete="current-password">
+                </div>
+                <div id="login-error" class="error-message"></div>
+                <button type="submit" class="btn btn-primary">Login</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Dashboard Screen -->
+    <div id="dashboard-screen" class="screen hidden">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-left">
+                <div class="logo-small">SmartHub</div>
+            </div>
+            <div class="header-right">
+                <span id="user-name"></span>
+                <button id="logout-btn" class="btn btn-outline">Logout</button>
+            </div>
+        </header>
+
+        <!-- Navigation Tabs -->
+        <nav class="nav-tabs">
+            <button class="tab active" data-tab="dashboard">Dashboard</button>
+            <button class="tab" data-tab="devices">Devices</button>
+            <button class="tab" data-tab="sensors">Sensors</button>
+        </nav>
+
+        <!-- Dashboard Tab -->
+        <main id="tab-dashboard" class="tab-content active">
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-icon devices-icon"></div>
+                    <div class="stat-info">
+                        <span class="stat-value" id="total-devices">0</span>
+                        <span class="stat-label">Total Devices</span>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon active-icon"></div>
+                    <div class="stat-info">
+                        <span class="stat-value" id="active-devices">0</span>
+                        <span class="stat-label">Active</span>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon sensors-icon"></div>
+                    <div class="stat-info">
+                        <span class="stat-value" id="total-sensors">0</span>
+                        <span class="stat-label">Sensors</span>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon rooms-icon"></div>
+                    <div class="stat-info">
+                        <span class="stat-value" id="total-rooms">0</span>
+                        <span class="stat-label">Rooms</span>
+                    </div>
+                </div>
+            </div>
+
+            <h2>Rooms</h2>
+            <div id="rooms-grid" class="rooms-grid">
+                <!-- Room cards inserted here -->
+            </div>
+        </main>
+
+        <!-- Devices Tab -->
+        <main id="tab-devices" class="tab-content">
+            <div class="devices-header">
+                <h2>All Devices</h2>
+                <div class="filter-group">
+                    <select id="room-filter">
+                        <option value="">All Rooms</option>
+                    </select>
+                </div>
+            </div>
+            <div id="devices-list" class="devices-list">
+                <!-- Device cards inserted here -->
+            </div>
+        </main>
+
+        <!-- Sensors Tab -->
+        <main id="tab-sensors" class="tab-content">
+            <h2>Sensor Readings</h2>
+            <div id="sensors-grid" class="sensors-grid">
+                <!-- Sensor cards inserted here -->
+            </div>
+        </main>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="toast"></div>
+
+    <script src="app.js"></script>
+</body>
+</html>
