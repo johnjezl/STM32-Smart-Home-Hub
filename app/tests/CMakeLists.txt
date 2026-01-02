@@ -230,6 +230,7 @@ if(GTEST_AVAILABLE)
             ui/test_screens.cpp
             ${CMAKE_SOURCE_DIR}/src/ui/ThemeManager.cpp
             ${CMAKE_SOURCE_DIR}/src/ui/DisplayManager.cpp
+            ${CMAKE_SOURCE_DIR}/src/ui/AnimationManager.cpp
         )
         target_link_libraries(test_ui PRIVATE smarthub_lib GTest::gtest GTest::gtest_main)
         add_test(NAME UI COMMAND test_ui)
@@ -271,10 +272,11 @@ if(GTEST_AVAILABLE)
     add_executable(smarthub_tests ${ALL_TEST_SOURCES})
     target_link_libraries(smarthub_tests PRIVATE smarthub_lib GTest::gtest)
 
-    # ThemeManager and DisplayManager work without LVGL
+    # ThemeManager, DisplayManager, and AnimationManager work without LVGL
     target_sources(smarthub_tests PRIVATE
         ${CMAKE_SOURCE_DIR}/src/ui/ThemeManager.cpp
         ${CMAKE_SOURCE_DIR}/src/ui/DisplayManager.cpp
+        ${CMAKE_SOURCE_DIR}/src/ui/AnimationManager.cpp
     )
 
     # Add UI dependencies if LVGL is available

@@ -336,6 +336,7 @@ app/
 │   ├── network/
 │   │   └── NetworkManager.hpp
 │   └── ui/
+│       ├── AnimationManager.hpp
 │       ├── DisplayManager.hpp
 │       ├── Screen.hpp
 │       ├── ScreenManager.hpp
@@ -353,6 +354,7 @@ app/
 │       │   └── WifiSetupScreen.hpp
 │       └── widgets/
 │           ├── Header.hpp
+│           ├── LoadingSpinner.hpp
 │           ├── NavBar.hpp
 │           ├── RoomCard.hpp
 │           └── TimeSeriesChart.hpp
@@ -360,6 +362,7 @@ app/
 │   ├── network/
 │   │   └── NetworkManager.cpp
 │   └── ui/
+│       ├── AnimationManager.cpp
 │       ├── DisplayManager.cpp
 │       ├── Screen.cpp
 │       ├── ScreenManager.cpp
@@ -377,6 +380,7 @@ app/
 │       │   └── WifiSetupScreen.cpp
 │       └── widgets/
 │           ├── Header.cpp
+│           ├── LoadingSpinner.cpp
 │           ├── NavBar.cpp
 │           ├── RoomCard.cpp
 │           └── TimeSeriesChart.cpp
@@ -391,10 +395,59 @@ app/
         └── test_widgets.cpp
 ```
 
-## Future Work (Phase 8.G)
+## Animations (Phase 8.G)
 
-- **8.G**: Animations and polish
-  - Screen transitions (slide left/right, fade)
-  - Button press feedback
-  - Loading spinners
-  - Value change animations
+### AnimationManager (`src/ui/AnimationManager.cpp`)
+
+Provides reusable animation utilities:
+
+```cpp
+AnimationManager anim;
+anim.setupButtonPressEffect(btn);  // Scale 95% + color on press
+anim.fadeIn(obj, 300);             // Fade in over 300ms
+anim.fadeOut(obj, 300);            // Fade out
+anim.pulse(obj, 110);              // Pulse to 110% size
+anim.shake(obj, 10);               // Error shake (10px amplitude)
+anim.slideTo(obj, x, y);           // Animated move
+anim.animateValue(slider, 0, 100); // Animate value change
+```
+
+**Animation Durations:**
+- DURATION_FAST: 150ms (quick feedback)
+- DURATION_NORMAL: 300ms (standard transitions)
+- DURATION_SLOW: 500ms (deliberate animations)
+
+**Easing Functions:**
+- Linear, EaseOut, EaseIn, EaseInOut, Overshoot, Bounce
+
+### LoadingSpinner (`src/ui/widgets/LoadingSpinner.cpp`)
+
+Animated loading indicator:
+- Rotating arc animation
+- Configurable size (default 48px)
+- Configurable speed (default 1s/rotation)
+- Uses theme primary color
+- Show/hide controls animation
+
+```cpp
+LoadingSpinner spinner(parent, theme, 48);
+spinner.show();   // Start animation
+spinner.hide();   // Stop animation
+spinner.setSpeed(500);  // Faster rotation
+```
+
+### High Contrast Mode
+
+Accessibility theme with maximum contrast:
+- Pure black background (#000000)
+- Pure white text (#FFFFFF)
+- Cyan primary (#00FFFF)
+- No gray colors
+- Pure red/green/yellow for error/success/warning
+
+```cpp
+theme.setMode(ThemeMode::HighContrast);
+if (theme.isHighContrast()) {
+    // Adjust for accessibility
+}
+```

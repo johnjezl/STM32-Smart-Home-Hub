@@ -21,7 +21,8 @@ namespace ui {
  */
 enum class ThemeMode {
     Light,
-    Dark
+    Dark,
+    HighContrast  // Accessibility mode with high contrast colors
 };
 
 /**
@@ -107,7 +108,30 @@ public:
     void applyButtonStyle(lv_obj_t* obj) const;
     void applyHeaderStyle(lv_obj_t* obj) const;
     void applyNavBarStyle(lv_obj_t* obj) const;
+
+    /**
+     * Apply animated button press effect (scale + color transition)
+     * @param obj Button object
+     */
+    void applyButtonPressAnimation(lv_obj_t* obj) const;
+
+    /**
+     * Apply error shake animation style (for invalid input feedback)
+     * @param obj Object to style
+     */
+    void applyErrorStyle(lv_obj_t* obj) const;
+
+    /**
+     * Apply success feedback style
+     * @param obj Object to style
+     */
+    void applySuccessStyle(lv_obj_t* obj) const;
 #endif
+
+    /**
+     * Check if high contrast mode is active
+     */
+    bool isHighContrast() const { return m_mode == ThemeMode::HighContrast; }
 
     // UI constants
     static constexpr int HEADER_HEIGHT = 50;
@@ -122,6 +146,7 @@ public:
 private:
     void loadLightTheme();
     void loadDarkTheme();
+    void loadHighContrastTheme();
 
     ThemeMode m_mode = ThemeMode::Dark;
     ThemeColors m_colors;
