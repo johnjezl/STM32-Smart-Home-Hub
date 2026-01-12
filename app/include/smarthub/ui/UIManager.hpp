@@ -16,6 +16,11 @@ namespace smarthub {
 class EventBus;
 class DeviceManager;
 
+namespace ui {
+class ScreenManager;
+class ThemeManager;
+}
+
 /**
  * UI Manager for LVGL-based touchscreen interface
  */
@@ -63,8 +68,18 @@ public:
      */
     int getHeight() const { return m_height; }
 
+    /**
+     * Get the screen manager
+     */
+    ui::ScreenManager* screenManager() const { return m_screenManager.get(); }
+
+    /**
+     * Get the theme manager
+     */
+    ui::ThemeManager* themeManager() const { return m_themeManager.get(); }
+
 private:
-    void createMainScreen();
+    void setupScreens();
 
     EventBus& m_eventBus;
     DeviceManager& m_deviceManager;
@@ -77,6 +92,9 @@ private:
     std::atomic<bool> m_running{false};
     std::atomic<bool> m_initialized{false};
     uint32_t m_lastTick = 0;
+
+    std::unique_ptr<ui::ThemeManager> m_themeManager;
+    std::unique_ptr<ui::ScreenManager> m_screenManager;
 };
 
 } // namespace smarthub

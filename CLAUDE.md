@@ -38,6 +38,12 @@ To open an interactive serial console to the STM32MP157F-DK2:
 C:/cygwin64/bin/env.exe -i HOME=/tmp PATH=/usr/bin:/bin C:/cygwin64/bin/bash.exe --login -c "picocom -b 115200 /dev/ttyS7"
 ```
 
+### Avoid Using `cat` with TTY Devices
+
+**Never use `cat` to read from tty devices** (e.g., `/dev/ttyS7`, `/dev/ttyUSB0`). The `cat` command will block indefinitely waiting for EOF, which never comes from a serial port. This causes Claude Code to hang.
+
+Use `picocom` or other proper terminal emulators instead for interactive sessions.
+
 ---
 
 ### TODO File Formatting

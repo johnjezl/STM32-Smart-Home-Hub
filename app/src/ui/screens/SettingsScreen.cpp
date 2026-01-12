@@ -134,18 +134,18 @@ lv_obj_t* SettingsScreen::createCategoryItem(lv_obj_t* parent,
     lv_obj_set_style_text_font(icon, &lv_font_montserrat_24, 0);
     lv_obj_align(icon, LV_ALIGN_LEFT_MID, 0, 0);
 
-    // Title
+    // Title (position from vertical center, offset up)
     lv_obj_t* title = lv_label_create(item);
     lv_label_set_text(title, category.title.c_str());
     lv_obj_set_style_text_color(title, m_theme.textPrimary(), 0);
-    lv_obj_align(title, LV_ALIGN_TOP_LEFT, 45, 8);
+    lv_obj_align(title, LV_ALIGN_LEFT_MID, 45, -12);
 
-    // Subtitle
+    // Subtitle (position from vertical center, offset down)
     lv_obj_t* subtitle = lv_label_create(item);
     lv_label_set_text(subtitle, category.subtitle.c_str());
     lv_obj_set_style_text_color(subtitle, m_theme.textSecondary(), 0);
     lv_obj_set_style_text_font(subtitle, &lv_font_montserrat_12, 0);
-    lv_obj_align(subtitle, LV_ALIGN_BOTTOM_LEFT, 45, -8);
+    lv_obj_align(subtitle, LV_ALIGN_LEFT_MID, 45, 10);
 
     // Chevron
     lv_obj_t* chevron = lv_label_create(item);

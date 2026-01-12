@@ -6,6 +6,14 @@
  */
 
 #include "smarthub/ui/UIManager.hpp"
+#include "smarthub/ui/ScreenManager.hpp"
+#include "smarthub/ui/ThemeManager.hpp"
+#include "smarthub/ui/screens/DashboardScreen.hpp"
+#include "smarthub/ui/screens/DeviceListScreen.hpp"
+#include "smarthub/ui/screens/SensorListScreen.hpp"
+#include "smarthub/ui/screens/SettingsScreen.hpp"
+#include "smarthub/ui/screens/LightControlScreen.hpp"
+#include "smarthub/ui/screens/AboutScreen.hpp"
 #include "smarthub/core/EventBus.hpp"
 #include "smarthub/core/Logger.hpp"
 #include "smarthub/devices/DeviceManager.hpp"
@@ -525,8 +533,8 @@ bool UIManager::initialize(const std::string& drmDevice, const std::string& touc
     s_indev_drv.read_cb = touch_read_cb;
     lv_indev_drv_register(&s_indev_drv);
 
-    // Create the main screen
-    createMainScreen();
+    // Set up screens and show dashboard
+    setupScreens();
 
     m_initialized = true;
     m_running = true;
@@ -554,6 +562,11 @@ void UIManager::update() {
     m_lastTick = currentTick;
 
     lv_tick_inc(elapsed);
+
+    // Update screen manager (for screen animations and updates)
+    if (m_screenManager) {
+        m_screenManager->update(elapsed);
+    }
 
     // Handle LVGL tasks
     lv_timer_handler();
@@ -614,6 +627,10 @@ void UIManager::shutdown() {
         s_touch.fd = -1;
     }
 
+    // Clean up screen manager before LVGL buffers
+    m_screenManager.reset();
+    m_themeManager.reset();
+
     // Free LVGL buffers
     delete[] s_lvgl_buf1;
     delete[] s_lvgl_buf2;
@@ -624,66 +641,40 @@ void UIManager::shutdown() {
     LOG_INFO("UIManager", "UI stopped");
 }
 
-// Welcome screen tap callback
-static void welcome_tap_cb(lv_event_t* e) {
-    lv_obj_t* label = (lv_obj_t*)lv_event_get_user_data(e);
-    static int tap_count = 0;
-    tap_count++;
+void UIManager::setupScreens() {
+    // Create theme manager
+    m_themeManager = std::make_unique<ui::ThemeManager>();
 
-    char buf[64];
-    snprintf(buf, sizeof(buf), "Touch detected! (%d)", tap_count);
-    lv_label_set_text(label, buf);
-}
+    // Create screen manager
+    m_screenManager = std::make_unique<ui::ScreenManager>(*this);
 
-void UIManager::createMainScreen() {
-    // Get the active screen
-    lv_obj_t* scr = lv_scr_act();
+    // Register screens that we have dependencies for
+    m_screenManager->registerScreen("dashboard",
+        std::make_unique<ui::DashboardScreen>(*m_screenManager, *m_themeManager, m_deviceManager));
 
-    // Set background color
-    lv_obj_set_style_bg_color(scr, lv_color_hex(0x1a1a2e), LV_PART_MAIN);
+    m_screenManager->registerScreen("devices",
+        std::make_unique<ui::DeviceListScreen>(*m_screenManager, *m_themeManager, m_deviceManager));
 
-    // Create a header bar
-    lv_obj_t* header = lv_obj_create(scr);
-    lv_obj_set_size(header, LV_PCT(100), 60);
-    lv_obj_set_pos(header, 0, 0);
-    lv_obj_set_style_bg_color(header, lv_color_hex(0x16213e), LV_PART_MAIN);
-    lv_obj_set_style_border_width(header, 0, LV_PART_MAIN);
-    lv_obj_set_style_radius(header, 0, LV_PART_MAIN);
+    m_screenManager->registerScreen("sensors",
+        std::make_unique<ui::SensorListScreen>(*m_screenManager, *m_themeManager, m_deviceManager));
 
-    // Header title
-    lv_obj_t* title = lv_label_create(header);
-    lv_label_set_text(title, "SmartHub");
-    lv_obj_set_style_text_color(title, lv_color_hex(0xe94560), LV_PART_MAIN);
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_24, LV_PART_MAIN);
-    lv_obj_center(title);
+    m_screenManager->registerScreen("settings",
+        std::make_unique<ui::SettingsScreen>(*m_screenManager, *m_themeManager, m_deviceManager));
 
-    // Create a container for the main content - make it clickable
-    lv_obj_t* cont = lv_obj_create(scr);
-    lv_obj_set_size(cont, LV_PCT(90), LV_PCT(70));
-    lv_obj_align(cont, LV_ALIGN_CENTER, 0, 30);
-    lv_obj_set_style_bg_color(cont, lv_color_hex(0x0f3460), LV_PART_MAIN);
-    lv_obj_set_style_radius(cont, 10, LV_PART_MAIN);
-    lv_obj_set_style_border_width(cont, 0, LV_PART_MAIN);
-    lv_obj_clear_flag(cont, LV_OBJ_FLAG_SCROLLABLE);  // Disable scrolling
-    lv_obj_add_flag(cont, LV_OBJ_FLAG_CLICKABLE);     // Make clickable
+    m_screenManager->registerScreen("lights",
+        std::make_unique<ui::LightControlScreen>(*m_screenManager, *m_themeManager, m_deviceManager));
 
-    // Welcome message
-    lv_obj_t* welcome = lv_label_create(cont);
-    lv_label_set_text(welcome, "Welcome to SmartHub!\n\nTouch screen to interact");
-    lv_obj_set_style_text_color(welcome, lv_color_white(), LV_PART_MAIN);
-    lv_obj_set_style_text_font(welcome, &lv_font_montserrat_18, LV_PART_MAIN);
-    lv_obj_set_style_text_align(welcome, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-    lv_obj_center(welcome);
+    m_screenManager->registerScreen("about",
+        std::make_unique<ui::AboutScreen>(*m_screenManager, *m_themeManager));
 
-    // Add tap event handler to the container
-    lv_obj_add_event_cb(cont, welcome_tap_cb, LV_EVENT_CLICKED, welcome);
+    // Note: WifiSetupScreen and DisplaySettingsScreen require NetworkManager and DisplayManager
+    // which are not currently available in UIManager. Add them when those managers are integrated.
 
-    // Status label at bottom
-    lv_obj_t* status = lv_label_create(scr);
-    lv_label_set_text(status, "LVGL 8.3.11 | DRM Backend");
-    lv_obj_set_style_text_color(status, lv_color_hex(0x888888), LV_PART_MAIN);
-    lv_obj_set_style_text_font(status, &lv_font_montserrat_12, LV_PART_MAIN);
-    lv_obj_align(status, LV_ALIGN_BOTTOM_MID, 0, -10);
+    // Set home screen and show it
+    m_screenManager->setHomeScreen("dashboard");
+    m_screenManager->showScreen("dashboard", ui::TransitionType::None, false);
+
+    LOG_INFO("UIManager", "Screens initialized");
 }
 
 } // namespace smarthub
