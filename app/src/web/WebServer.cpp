@@ -117,6 +117,18 @@ bool WebServer::start() {
         }
     }
 
+    // Additional HTTP listener on port 4321 for development/testing
+    {
+        char devAddr[64];
+        std::snprintf(devAddr, sizeof(devAddr), "http://0.0.0.0:4321");
+        struct mg_connection* devC = mg_http_listen(m_mgr, devAddr, eventHandler, nullptr);
+        if (devC) {
+            LOG_INFO("Additional HTTP listener on port 4321");
+        } else {
+            LOG_WARN("Failed to start listener on port 4321");
+        }
+    }
+
     m_running = true;
 
     // Start server thread
