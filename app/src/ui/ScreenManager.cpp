@@ -225,6 +225,10 @@ void ScreenManager::performTransition(Screen* from, Screen* to, TransitionType t
     // Load the new screen with animation
     // auto_del = false because we manage screen lifecycle ourselves
     lv_scr_load_anim(to->container(), animType, duration, 0, false);
+
+    // Force a full screen refresh to clear any transition artifacts
+    // This is especially important when using manual display rotation
+    lv_obj_invalidate(to->container());
 #else
     (void)from;
     (void)to;

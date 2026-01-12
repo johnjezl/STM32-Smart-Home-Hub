@@ -79,9 +79,11 @@ void SensorListScreen::createHeader() {
 }
 
 void SensorListScreen::createContent() {
+    // Display is 800x480 landscape, header=50, navbar=60, so content=370
+    constexpr int CONTENT_HEIGHT = 480 - Header::HEIGHT - NavBar::HEIGHT;
+
     m_content = lv_obj_create(m_container);
-    lv_obj_set_size(m_content, LV_PCT(100),
-                    lv_pct(100) - Header::HEIGHT - NavBar::HEIGHT);
+    lv_obj_set_size(m_content, LV_PCT(100), CONTENT_HEIGHT);
     lv_obj_align(m_content, LV_ALIGN_TOP_MID, 0, Header::HEIGHT);
 
     lv_obj_set_style_bg_opa(m_content, LV_OPA_TRANSP, 0);
