@@ -35,7 +35,7 @@ public:
      * @return true on success
      */
     bool initialize(const std::string& drmDevice = "/dev/dri/card0",
-                    const std::string& touchDevice = "/dev/input/event0");
+                    const std::string& touchDevice = "/dev/input/event1");
 
     /**
      * Update the UI (called from main loop)

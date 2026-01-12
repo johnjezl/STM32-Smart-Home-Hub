@@ -58,9 +58,17 @@ static lv_color_t* s_lvgl_buf2 = nullptr;
 // Evdev touch input state
 static struct {
     int fd = -1;
-    int x = 0;
-    int y = 0;
+    int x = -1;  // Raw physical X from touchscreen (-1 = no valid reading)
+    int y = -1;  // Raw physical Y from touchscreen (-1 = no valid reading)
     bool pressed = false;
+    bool got_coords = false;  // True if we received coordinate events this poll
+    // Physical panel dimensions for coordinate transformation
+    int phys_width = 0;
+    int phys_height = 0;
+    // Logical display dimensions (after rotation)
+    int logical_width = 0;
+    int logical_height = 0;
+    bool rotated = false;  // True if display is rotated 90° (portrait->landscape)
 } s_touch;
 
 static lv_indev_drv_t s_indev_drv;
@@ -80,6 +88,11 @@ static void page_flip_handler(int fd, unsigned int sequence, unsigned int tv_sec
     s_drm.page_flip_pending = false;
 }
 
+// Display rotation state
+static bool s_display_rotated = false;
+static int s_logical_width = 0;
+static int s_logical_height = 0;
+
 // LVGL flush callback - copies rendered pixels to DRM buffer and flips
 static void drm_flush_cb(lv_disp_drv_t* drv, const lv_area_t* area, lv_color_t* color_p) {
     if (s_drm.fd < 0) {
@@ -96,12 +109,32 @@ static void drm_flush_cb(lv_disp_drv_t* drv, const lv_area_t* area, lv_color_t* 
         return;
     }
 
-    // Copy pixels to the back buffer
-    int32_t x, y;
-    for (y = area->y1; y <= area->y2 && y < (int32_t)buf->height; y++) {
-        uint32_t* dest = (uint32_t*)(buf->map + y * buf->stride + area->x1 * 4);
-        for (x = area->x1; x <= area->x2 && x < (int32_t)buf->width; x++) {
-            *dest++ = lv_color_to32(*color_p++);
+    // Copy pixels to the back buffer with optional rotation
+    int32_t lx, ly;  // Logical coordinates (what LVGL renders)
+
+    if (s_display_rotated) {
+        // Manual 90° rotation: logical (800x480) -> physical (480x800)
+        // physical_x = logical_height - 1 - logical_y
+        // physical_y = logical_x
+        for (ly = area->y1; ly <= area->y2; ly++) {
+            for (lx = area->x1; lx <= area->x2; lx++) {
+                int32_t px = s_logical_height - 1 - ly;
+                int32_t py = lx;
+
+                if (px >= 0 && px < (int32_t)buf->width && py >= 0 && py < (int32_t)buf->height) {
+                    uint32_t* dest = (uint32_t*)(buf->map + py * buf->stride + px * 4);
+                    *dest = lv_color_to32(*color_p);
+                }
+                color_p++;
+            }
+        }
+    } else {
+        // No rotation - direct copy
+        for (ly = area->y1; ly <= area->y2 && ly < (int32_t)buf->height; ly++) {
+            uint32_t* dest = (uint32_t*)(buf->map + ly * buf->stride + area->x1 * 4);
+            for (lx = area->x1; lx <= area->x2 && lx < (int32_t)buf->width; lx++) {
+                *dest++ = lv_color_to32(*color_p++);
+            }
         }
     }
 
@@ -127,6 +160,11 @@ static void drm_flush_cb(lv_disp_drv_t* drv, const lv_area_t* area, lv_color_t* 
     lv_disp_flush_ready(drv);
 }
 
+// Multi-touch tracking ID for touch state
+#ifndef ABS_MT_TRACKING_ID
+#define ABS_MT_TRACKING_ID 0x39
+#endif
+
 // Touch input read callback
 static void touch_read_cb(lv_indev_drv_t* drv, lv_indev_data_t* data) {
     (void)drv;
@@ -136,22 +174,77 @@ static void touch_read_cb(lv_indev_drv_t* drv, lv_indev_data_t* data) {
         return;
     }
 
+    // Track if we got any events this poll
+    bool got_events = false;
+    bool got_sync = false;
+
     // Read available events
     struct input_event ev;
     while (read(s_touch.fd, &ev, sizeof(ev)) == sizeof(ev)) {
         if (ev.type == EV_ABS) {
             if (ev.code == ABS_X || ev.code == ABS_MT_POSITION_X) {
                 s_touch.x = ev.value;
+                got_events = true;
             } else if (ev.code == ABS_Y || ev.code == ABS_MT_POSITION_Y) {
                 s_touch.y = ev.value;
+                got_events = true;
+            } else if (ev.code == ABS_MT_TRACKING_ID) {
+                // MT protocol B: tracking_id >= 0 means touch, -1 means release
+                s_touch.pressed = (ev.value >= 0);
+                got_events = true;
             }
         } else if (ev.type == EV_KEY && ev.code == BTN_TOUCH) {
             s_touch.pressed = (ev.value != 0);
+            got_events = true;
+        } else if (ev.type == EV_SYN && ev.code == SYN_REPORT) {
+            got_sync = true;
         }
     }
 
-    data->point.x = s_touch.x;
-    data->point.y = s_touch.y;
+    // If we got coordinate events, consider it a touch
+    // Many touchscreens just send coords when touched, nothing when released
+    if (got_events) {
+        s_touch.got_coords = true;
+        s_touch.pressed = true;  // Assume pressed if we got events
+    } else if (got_sync || !s_touch.got_coords) {
+        // No events but got sync, or never got coords - consider released
+        // (we keep pressed state until we poll with no events)
+    } else {
+        // No events read at all - touch may have been released
+        s_touch.pressed = false;
+    }
+
+    // If no valid coordinates yet, report (0,0) as released
+    if (s_touch.x < 0 || s_touch.y < 0) {
+        data->point.x = 0;
+        data->point.y = 0;
+        data->state = LV_INDEV_STATE_RELEASED;
+        return;
+    }
+
+    int lx, ly;
+
+    // Transform touch coordinates for 90° rotation (portrait panel -> landscape display)
+    // Display rotation: px = logical_height - 1 - ly, py = lx
+    // Inverse (touch): lx = py (touch physical y), ly = logical_height - 1 - px (inverted touch physical x)
+    // Physical panel: 480 wide x 800 tall (portrait)
+    // Logical display: 800 wide x 480 tall (landscape)
+    if (s_touch.rotated) {
+        lx = s_touch.y;  // Touch physical Y becomes logical X
+        ly = s_touch.logical_height - 1 - s_touch.x;  // Touch physical X inverted becomes logical Y
+    } else {
+        lx = s_touch.x;
+        ly = s_touch.y;
+    }
+
+    // Clamp to valid logical display range
+    if (lx < 0) lx = 0;
+    if (ly < 0) ly = 0;
+    if (lx >= s_touch.logical_width) lx = s_touch.logical_width - 1;
+    if (ly >= s_touch.logical_height) ly = s_touch.logical_height - 1;
+
+    data->point.x = lx;
+    data->point.y = ly;
     data->state = s_touch.pressed ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
 }
 
@@ -285,11 +378,36 @@ bool UIManager::initialize(const std::string& drmDevice, const std::string& touc
 
     // Use the first (preferred) mode
     s_drm.mode = connector->modes[0];
-    m_width = s_drm.mode.hdisplay;
-    m_height = s_drm.mode.vdisplay;
+    int phys_width = s_drm.mode.hdisplay;
+    int phys_height = s_drm.mode.vdisplay;
 
-    LOG_INFO("UIManager", "Display: " + std::to_string(m_width) + "x" + std::to_string(m_height) +
+    LOG_INFO("UIManager", "Physical display: " + std::to_string(phys_width) + "x" + std::to_string(phys_height) +
              " @ " + std::to_string(s_drm.mode.vrefresh) + "Hz (" + s_drm.mode.name + ")");
+
+    // Detect portrait mode and enable rotation to landscape
+    // Portrait: height > width (e.g., 480x800)
+    // Landscape: width > height (e.g., 800x480)
+    bool needs_rotation = (phys_height > phys_width);
+
+    if (needs_rotation) {
+        // Swap dimensions for landscape orientation
+        m_width = phys_height;   // Logical width = physical height
+        m_height = phys_width;   // Logical height = physical width
+        LOG_INFO("UIManager", "Rotating display 90° to landscape: " +
+                 std::to_string(m_width) + "x" + std::to_string(m_height));
+    } else {
+        m_width = phys_width;
+        m_height = phys_height;
+    }
+
+    // Store dimensions for touch coordinate transformation
+    s_touch.phys_width = phys_width;
+    s_touch.phys_height = phys_height;
+    s_touch.logical_width = m_width;
+    s_touch.logical_height = m_height;
+    s_touch.rotated = needs_rotation;
+    s_touch.x = -1;  // Reset to indicate no valid touch yet
+    s_touch.y = -1;
 
     // Find encoder and CRTC
     drmModeEncoder* encoder = nullptr;
@@ -333,9 +451,9 @@ bool UIManager::initialize(const std::string& drmDevice, const std::string& touc
     drmModeFreeConnector(connector);
     drmModeFreeResources(res);
 
-    // Create double buffers
+    // Create double buffers at physical dimensions (DRM operates at physical resolution)
     for (int i = 0; i < 2; i++) {
-        if (!drm_create_buffer(s_drm.fd, &s_drm.buffers[i], m_width, m_height)) {
+        if (!drm_create_buffer(s_drm.fd, &s_drm.buffers[i], phys_width, phys_height)) {
             LOG_ERROR("UIManager", "Failed to create DRM buffer " + std::to_string(i));
             // Cleanup already created buffers
             for (int j = 0; j < i; j++) {
@@ -385,13 +503,20 @@ bool UIManager::initialize(const std::string& drmDevice, const std::string& touc
 
     lv_disp_draw_buf_init(&s_draw_buf, s_lvgl_buf1, s_lvgl_buf2, buf_size);
 
+    // Set rotation state for flush callback
+    s_display_rotated = needs_rotation;
+    s_logical_width = m_width;
+    s_logical_height = m_height;
+
     // Initialize display driver
     lv_disp_drv_init(&s_disp_drv);
-    s_disp_drv.hor_res = m_width;
+    s_disp_drv.hor_res = m_width;   // Logical resolution (800x480 in landscape)
     s_disp_drv.ver_res = m_height;
     s_disp_drv.flush_cb = drm_flush_cb;
     s_disp_drv.draw_buf = &s_draw_buf;
     s_disp_drv.full_refresh = 0;  // Partial updates work with DRM
+    // Note: We handle rotation manually in drm_flush_cb, not using sw_rotate
+
     lv_disp_drv_register(&s_disp_drv);
 
     // Initialize input driver
@@ -499,6 +624,17 @@ void UIManager::shutdown() {
     LOG_INFO("UIManager", "UI stopped");
 }
 
+// Welcome screen tap callback
+static void welcome_tap_cb(lv_event_t* e) {
+    lv_obj_t* label = (lv_obj_t*)lv_event_get_user_data(e);
+    static int tap_count = 0;
+    tap_count++;
+
+    char buf[64];
+    snprintf(buf, sizeof(buf), "Touch detected! (%d)", tap_count);
+    lv_label_set_text(label, buf);
+}
+
 void UIManager::createMainScreen() {
     // Get the active screen
     lv_obj_t* scr = lv_scr_act();
@@ -521,13 +657,15 @@ void UIManager::createMainScreen() {
     lv_obj_set_style_text_font(title, &lv_font_montserrat_24, LV_PART_MAIN);
     lv_obj_center(title);
 
-    // Create a container for the main content
+    // Create a container for the main content - make it clickable
     lv_obj_t* cont = lv_obj_create(scr);
     lv_obj_set_size(cont, LV_PCT(90), LV_PCT(70));
     lv_obj_align(cont, LV_ALIGN_CENTER, 0, 30);
     lv_obj_set_style_bg_color(cont, lv_color_hex(0x0f3460), LV_PART_MAIN);
     lv_obj_set_style_radius(cont, 10, LV_PART_MAIN);
     lv_obj_set_style_border_width(cont, 0, LV_PART_MAIN);
+    lv_obj_clear_flag(cont, LV_OBJ_FLAG_SCROLLABLE);  // Disable scrolling
+    lv_obj_add_flag(cont, LV_OBJ_FLAG_CLICKABLE);     // Make clickable
 
     // Welcome message
     lv_obj_t* welcome = lv_label_create(cont);
@@ -536,6 +674,9 @@ void UIManager::createMainScreen() {
     lv_obj_set_style_text_font(welcome, &lv_font_montserrat_18, LV_PART_MAIN);
     lv_obj_set_style_text_align(welcome, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
     lv_obj_center(welcome);
+
+    // Add tap event handler to the container
+    lv_obj_add_event_cb(cont, welcome_tap_cb, LV_EVENT_CLICKED, welcome);
 
     // Status label at bottom
     lv_obj_t* status = lv_label_create(scr);
