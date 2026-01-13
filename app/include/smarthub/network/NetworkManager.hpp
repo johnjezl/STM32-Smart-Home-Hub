@@ -1,7 +1,7 @@
 /**
  * Network Manager
  *
- * Manages system WiFi connections using NetworkManager (nmcli).
+ * Manages system WiFi connections using wpa_supplicant (wpa_cli).
  * Provides scanning, connection, and status APIs for the UI.
  */
 #pragma once
@@ -64,7 +64,7 @@ struct NetworkStatus {
 /**
  * NetworkManager for WiFi configuration
  *
- * Uses nmcli (NetworkManager CLI) on Linux to manage WiFi.
+ * Uses wpa_cli (wpa_supplicant CLI) on Linux to manage WiFi.
  */
 class NetworkManager {
 public:
@@ -154,14 +154,17 @@ public:
     static int dbmToPercent(int dbm);
 
 private:
-    // Execute nmcli command and return output
+    // Execute wpa_cli command and return output
     std::string executeCommand(const std::string& command) const;
 
-    // Parse scan output
+    // Parse scan output from wpa_cli scan_results
     std::vector<WifiNetwork> parseScanOutput(const std::string& output);
 
-    // Parse connection status
+    // Parse connection status from wpa_cli status
     NetworkStatus parseStatusOutput(const std::string& output);
+
+    // Update current status from wpa_cli
+    void updateStatus();
 
     // Worker thread for async operations
     void scanWorker(ScanCallback callback);
