@@ -1,7 +1,7 @@
 /**
  * Network Manager Implementation
  *
- * Uses nmcli (NetworkManager CLI) for WiFi management on Linux.
+ * Uses wpa_cli (wpa_supplicant CLI) for WiFi management on Linux.
  */
 
 #include "smarthub/network/NetworkManager.hpp"
@@ -12,6 +12,7 @@
 #include <cstdio>
 #include <algorithm>
 #include <regex>
+#include <fstream>
 
 namespace smarthub {
 namespace network {
@@ -25,10 +26,10 @@ NetworkManager::~NetworkManager() {
 bool NetworkManager::initialize() {
     if (m_initialized) return true;
 
-    // Check if nmcli is available
-    std::string version = executeCommand("nmcli --version 2>/dev/null");
-    if (version.empty() || version.find("nmcli") == std::string::npos) {
-        LOG_WARN("NetworkManager: nmcli not available");
+    // Check if wpa_cli is available
+    std::string version = executeCommand("wpa_cli -v 2>&1 | head -1");
+    if (version.empty() || version.find("wpa_cli") == std::string::npos) {
+        LOG_WARN("NetworkManager: wpa_cli not available");
         m_wifiAvailable = false;
         m_initialized = true;
         return false;
@@ -36,33 +37,30 @@ bool NetworkManager::initialize() {
 
     LOG_INFO("NetworkManager: %s", version.c_str());
 
-    // Check for WiFi device
-    std::string devices = executeCommand("nmcli device status 2>/dev/null");
-    if (devices.find("wifi") != std::string::npos) {
-        m_wifiAvailable = true;
-
-        // Find WiFi interface name
-        std::istringstream iss(devices);
-        std::string line;
-        while (std::getline(iss, line)) {
-            if (line.find("wifi") != std::string::npos) {
-                std::istringstream lineStream(line);
-                lineStream >> m_wifiInterface;
-                break;
-            }
+    // Find WiFi interface (look for wlan*)
+    std::string interfaces = executeCommand("ls /sys/class/net/ 2>/dev/null");
+    std::istringstream iss(interfaces);
+    std::string iface;
+    while (iss >> iface) {
+        if (iface.find("wlan") == 0) {
+            m_wifiInterface = iface;
+            break;
         }
+    }
 
-        LOG_INFO("NetworkManager: WiFi interface: %s", m_wifiInterface.c_str());
-    } else {
-        LOG_WARN("NetworkManager: No WiFi device found");
+    if (m_wifiInterface.empty()) {
+        LOG_WARN("NetworkManager: No WiFi interface found");
         m_wifiAvailable = false;
+    } else {
+        m_wifiAvailable = true;
+        LOG_INFO("NetworkManager: WiFi interface: %s", m_wifiInterface.c_str());
     }
 
     m_running = true;
     m_initialized = true;
 
     // Get initial status
-    m_status = parseStatusOutput(executeCommand("nmcli -t -f active,ssid,signal dev wifi 2>/dev/null"));
+    updateStatus();
 
     return true;
 }
@@ -85,17 +83,19 @@ bool NetworkManager::isWifiAvailable() const {
 bool NetworkManager::setWifiEnabled(bool enabled) {
     if (!m_wifiAvailable) return false;
 
-    std::string cmd = enabled ? "nmcli radio wifi on" : "nmcli radio wifi off";
-    std::string result = executeCommand(cmd);
+    std::string cmd = enabled
+        ? "ip link set " + m_wifiInterface + " up"
+        : "ip link set " + m_wifiInterface + " down";
+    executeCommand(cmd);
 
-    return result.find("Error") == std::string::npos;
+    return true;
 }
 
 bool NetworkManager::isWifiEnabled() const {
     if (!m_wifiAvailable) return false;
 
-    std::string result = executeCommand("nmcli radio wifi");
-    return result.find("enabled") != std::string::npos;
+    std::string result = executeCommand("ip link show " + m_wifiInterface);
+    return result.find("UP") != std::string::npos;
 }
 
 void NetworkManager::startScan(ScanCallback callback) {
@@ -158,7 +158,7 @@ void NetworkManager::connect(const std::string& ssid,
 void NetworkManager::disconnect() {
     if (!m_wifiAvailable || m_wifiInterface.empty()) return;
 
-    executeCommand("nmcli device disconnect " + m_wifiInterface);
+    executeCommand("wpa_cli -i " + m_wifiInterface + " disconnect");
 
     {
         std::lock_guard<std::mutex> lock(m_mutex);
@@ -175,31 +175,29 @@ void NetworkManager::disconnect() {
 bool NetworkManager::forgetNetwork(const std::string& ssid) {
     if (!m_wifiAvailable) return false;
 
-    // Get connection UUID for this SSID
-    std::string listCmd = "nmcli -t -f NAME,UUID connection show";
-    std::string output = executeCommand(listCmd);
+    // List networks and find the one with matching SSID
+    std::string listOutput = executeCommand(
+        "wpa_cli -i " + m_wifiInterface + " list_networks");
 
-    std::istringstream iss(output);
+    std::istringstream iss(listOutput);
     std::string line;
-    std::string uuid;
+    std::getline(iss, line);  // Skip header
 
     while (std::getline(iss, line)) {
-        size_t pos = line.find(':');
-        if (pos != std::string::npos) {
-            std::string name = line.substr(0, pos);
-            if (name == ssid) {
-                uuid = line.substr(pos + 1);
-                break;
-            }
+        // Format: network_id / ssid / bssid / flags
+        std::istringstream lineStream(line);
+        std::string networkId, networkSsid;
+        lineStream >> networkId >> networkSsid;
+
+        if (networkSsid == ssid) {
+            executeCommand("wpa_cli -i " + m_wifiInterface +
+                          " remove_network " + networkId);
+            executeCommand("wpa_cli -i " + m_wifiInterface + " save_config");
+            return true;
         }
     }
 
-    if (uuid.empty()) return false;
-
-    std::string delCmd = "nmcli connection delete uuid " + uuid;
-    std::string result = executeCommand(delCmd);
-
-    return result.find("successfully") != std::string::npos;
+    return false;
 }
 
 NetworkStatus NetworkManager::getStatus() const {
@@ -212,16 +210,19 @@ std::vector<std::string> NetworkManager::getSavedNetworks() const {
 
     if (!m_wifiAvailable) return networks;
 
-    std::string output = executeCommand("nmcli -t -f NAME,TYPE connection show");
+    std::string output = executeCommand(
+        "wpa_cli -i " + m_wifiInterface + " list_networks");
+
     std::istringstream iss(output);
     std::string line;
+    std::getline(iss, line);  // Skip header
 
     while (std::getline(iss, line)) {
-        if (line.find("802-11-wireless") != std::string::npos) {
-            size_t pos = line.find(':');
-            if (pos != std::string::npos) {
-                networks.push_back(line.substr(0, pos));
-            }
+        std::istringstream lineStream(line);
+        std::string networkId, ssid;
+        lineStream >> networkId >> ssid;
+        if (!ssid.empty()) {
+            networks.push_back(ssid);
         }
     }
 
@@ -234,10 +235,12 @@ void NetworkManager::setStatusCallback(StatusCallback callback) {
 }
 
 int NetworkManager::signalToIconIndex(int signalStrength) {
-    if (signalStrength >= 80) return 4;  // Excellent
-    if (signalStrength >= 60) return 3;  // Good
-    if (signalStrength >= 40) return 2;  // Fair
-    if (signalStrength >= 20) return 1;  // Weak
+    // wpa_cli returns signal in dBm, convert to index
+    // Typical range: -90 dBm (weak) to -30 dBm (strong)
+    if (signalStrength >= -50) return 4;  // Excellent
+    if (signalStrength >= -60) return 3;  // Good
+    if (signalStrength >= -70) return 2;  // Fair
+    if (signalStrength >= -80) return 1;  // Weak
     return 0;  // Very weak
 }
 
@@ -278,65 +281,68 @@ std::string NetworkManager::executeCommand(const std::string& command) const {
 std::vector<WifiNetwork> NetworkManager::parseScanOutput(const std::string& output) {
     std::vector<WifiNetwork> networks;
 
-    // nmcli -t -f SSID,BSSID,SIGNAL,SECURITY,FREQ,ACTIVE dev wifi list
+    // wpa_cli scan_results format:
+    // bssid / frequency / signal level / flags / ssid
     std::istringstream iss(output);
     std::string line;
+
+    // Skip header line
+    std::getline(iss, line);
 
     while (std::getline(iss, line)) {
         if (line.empty()) continue;
 
-        // Parse colon-separated fields
+        // Parse tab-separated fields
         std::vector<std::string> fields;
         std::string field;
-        bool escaped = false;
+        std::istringstream lineStream(line);
 
-        for (char c : line) {
-            if (escaped) {
-                field += c;
-                escaped = false;
-            } else if (c == '\\') {
-                escaped = true;
-            } else if (c == ':') {
-                fields.push_back(field);
-                field.clear();
-            } else {
-                field += c;
-            }
+        while (std::getline(lineStream, field, '\t')) {
+            fields.push_back(field);
         }
-        fields.push_back(field);
 
         if (fields.size() >= 5) {
             WifiNetwork net;
-            net.ssid = fields[0];
-            net.bssid = fields[1];
-
-            // Skip networks with empty SSID (hidden networks)
-            if (net.ssid.empty()) continue;
+            net.bssid = fields[0];
 
             try {
-                net.signalStrength = std::stoi(fields[2]);
-            } catch (...) {
-                net.signalStrength = 0;
-            }
-
-            net.security = fields[3];
-            net.secured = !net.security.empty() && net.security != "--";
-
-            try {
-                net.frequency = std::stoi(fields[4]);
+                net.frequency = std::stoi(fields[1]);
             } catch (...) {
                 net.frequency = 2400;
             }
 
-            if (fields.size() > 5) {
-                net.connected = (fields[5] == "yes");
+            try {
+                net.signalStrength = std::stoi(fields[2]);
+            } catch (...) {
+                net.signalStrength = -100;
             }
 
+            // Parse flags for security
+            std::string flags = fields[3];
+            net.secured = (flags.find("WPA") != std::string::npos ||
+                          flags.find("WEP") != std::string::npos);
+
+            if (flags.find("WPA2") != std::string::npos) {
+                net.security = "WPA2";
+            } else if (flags.find("WPA") != std::string::npos) {
+                net.security = "WPA";
+            } else if (flags.find("WEP") != std::string::npos) {
+                net.security = "WEP";
+            } else {
+                net.security = "";
+            }
+
+            net.ssid = fields[4];
+
+            // Skip networks with empty SSID (hidden networks)
+            if (net.ssid.empty()) continue;
+
+            net.connected = false;
             networks.push_back(net);
         }
     }
 
-    // Sort by signal strength (strongest first)
+    // Sort by signal strength (strongest first, remember dBm is negative)
     std::sort(networks.begin(), networks.end(),
               [](const WifiNetwork& a, const WifiNetwork& b) {
                   return a.signalStrength > b.signalStrength;
@@ -352,7 +358,10 @@ std::vector<WifiNetwork> NetworkManager::parseScanOutput(const std::string& outp
     return networks;
 }
 
-NetworkStatus NetworkManager::parseStatusOutput(const std::string& output) {
+void NetworkManager::updateStatus() {
+    std::string output = executeCommand(
+        "wpa_cli -i " + m_wifiInterface + " status");
+
     NetworkStatus status;
     status.state = ConnectionState::Disconnected;
 
@@ -360,47 +369,57 @@ NetworkStatus NetworkManager::parseStatusOutput(const std::string& output) {
     std::string line;
 
     while (std::getline(iss, line)) {
-        // Format: ACTIVE:SSID:SIGNAL
-        std::vector<std::string> fields;
-        std::string field;
+        size_t pos = line.find('=');
+        if (pos == std::string::npos) continue;
 
-        for (char c : line) {
-            if (c == ':') {
-                fields.push_back(field);
-                field.clear();
-            } else {
-                field += c;
-            }
-        }
-        fields.push_back(field);
+        std::string key = line.substr(0, pos);
+        std::string value = line.substr(pos + 1);
 
-        if (fields.size() >= 3 && fields[0] == "yes") {
-            status.state = ConnectionState::Connected;
-            status.ssid = fields[1];
-            try {
-                status.signalStrength = std::stoi(fields[2]);
-            } catch (...) {
-                status.signalStrength = 0;
+        if (key == "wpa_state") {
+            if (value == "COMPLETED") {
+                status.state = ConnectionState::Connected;
+            } else if (value == "SCANNING") {
+                status.state = ConnectionState::Scanning;
+            } else if (value == "ASSOCIATING" || value == "ASSOCIATED" ||
+                       value == "4WAY_HANDSHAKE" || value == "GROUP_HANDSHAKE") {
+                status.state = ConnectionState::Connecting;
+            } else if (value == "DISCONNECTED" || value == "INACTIVE") {
+                status.state = ConnectionState::Disconnected;
             }
-            break;
+        } else if (key == "ssid") {
+            status.ssid = value;
+        } else if (key == "ip_address") {
+            status.ipAddress = value;
         }
     }
 
-    // Get IP address if connected
-    if (status.state == ConnectionState::Connected && !m_wifiInterface.empty()) {
-        std::string ipOutput = executeCommand(
-            "nmcli -t -f IP4.ADDRESS dev show " + m_wifiInterface + " 2>/dev/null | head -1");
-        if (!ipOutput.empty()) {
-            size_t pos = ipOutput.find(':');
-            if (pos != std::string::npos) {
-                std::string ip = ipOutput.substr(pos + 1);
-                // Remove CIDR notation
-                size_t slashPos = ip.find('/');
-                if (slashPos != std::string::npos) {
-                    ip = ip.substr(0, slashPos);
-                }
-                status.ipAddress = ip;
-            }
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_status = status;
+    }
+}
+
+NetworkStatus NetworkManager::parseStatusOutput(const std::string& output) {
+    // This method is kept for compatibility but updateStatus() is preferred
+    NetworkStatus status;
+    status.state = ConnectionState::Disconnected;
+
+    std::istringstream iss(output);
+    std::string line;
+
+    while (std::getline(iss, line)) {
+        size_t pos = line.find('=');
+        if (pos == std::string::npos) continue;
+
+        std::string key = line.substr(0, pos);
+        std::string value = line.substr(pos + 1);
+
+        if (key == "wpa_state" && value == "COMPLETED") {
+            status.state = ConnectionState::Connected;
+        } else if (key == "ssid") {
+            status.ssid = value;
+        } else if (key == "ip_address") {
+            status.ipAddress = value;
         }
     }
 
@@ -410,20 +429,28 @@ NetworkStatus NetworkManager::parseStatusOutput(const std::string& output) {
 void NetworkManager::scanWorker(ScanCallback callback) {
     LOG_DEBUG("NetworkManager: Starting WiFi scan...");
 
-    // Request a fresh scan
-    executeCommand("nmcli device wifi rescan 2>/dev/null");
+    // Request a scan
+    executeCommand("wpa_cli -i " + m_wifiInterface + " scan");
 
-    // Wait a moment for scan to complete
-    std::this_thread::sleep_for(std::chrono::milliseconds(2000));
+    // Wait for scan to complete
+    std::this_thread::sleep_for(std::chrono::milliseconds(3000));
 
     // Get scan results
     std::string output = executeCommand(
-        "nmcli -t -f SSID,BSSID,SIGNAL,SECURITY,FREQ,ACTIVE dev wifi list 2>/dev/null");
+        "wpa_cli -i " + m_wifiInterface + " scan_results");
 
     std::vector<WifiNetwork> networks = parseScanOutput(output);
 
+    // Mark currently connected network
+    updateStatus();
     {
         std::lock_guard<std::mutex> lock(m_mutex);
+        for (auto& net : networks) {
+            if (m_status.state == ConnectionState::Connected &&
+                net.ssid == m_status.ssid) {
+                net.connected = true;
+            }
+        }
         m_scanResults = networks;
     }
 
@@ -441,63 +468,69 @@ void NetworkManager::connectWorker(const std::string& ssid,
 
     LOG_INFO("NetworkManager: Connecting to '%s'...", ssid.c_str());
 
-    std::string cmd;
-    if (password.empty()) {
-        // Open network
-        cmd = "nmcli device wifi connect \"" + ssid + "\" 2>&1";
-    } else {
-        // Secured network
-        cmd = "nmcli device wifi connect \"" + ssid + "\" password \"" + password + "\" 2>&1";
+    // Check if network already exists in saved networks
+    std::string listOutput = executeCommand(
+        "wpa_cli -i " + m_wifiInterface + " list_networks");
+
+    std::string networkId;
+    std::istringstream iss(listOutput);
+    std::string line;
+    std::getline(iss, line);  // Skip header
+
+    while (std::getline(iss, line)) {
+        std::istringstream lineStream(line);
+        std::string id, savedSsid;
+        lineStream >> id >> savedSsid;
+
+        if (savedSsid == ssid) {
+            networkId = id;
+            break;
+        }
     }
 
-    std::string output = executeCommand(cmd);
+    // If network doesn't exist, create it
+    if (networkId.empty()) {
+        std::string addOutput = executeCommand(
+            "wpa_cli -i " + m_wifiInterface + " add_network");
 
-    if (output.find("successfully") != std::string::npos) {
-        result.success = true;
-
-        // Get IP address
-        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-        NetworkStatus status = parseStatusOutput(
-            executeCommand("nmcli -t -f active,ssid,signal dev wifi 2>/dev/null"));
-
-        if (!m_wifiInterface.empty()) {
-            std::string ipOutput = executeCommand(
-                "nmcli -t -f IP4.ADDRESS dev show " + m_wifiInterface + " 2>/dev/null | head -1");
-            size_t pos = ipOutput.find(':');
-            if (pos != std::string::npos) {
-                std::string ip = ipOutput.substr(pos + 1);
-                size_t slashPos = ip.find('/');
-                if (slashPos != std::string::npos) {
-                    ip = ip.substr(0, slashPos);
-                }
-                result.ipAddress = ip;
-            }
+        // Parse network ID from output (just a number)
+        try {
+            networkId = addOutput;
+            // Trim whitespace
+            networkId.erase(0, networkId.find_first_not_of(" \t\n\r"));
+            networkId.erase(networkId.find_last_not_of(" \t\n\r") + 1);
+        } catch (...) {
+            result.success = false;
+            result.error = "Failed to create network";
+            if (callback) callback(result);
+            return;
         }
 
-        {
-            std::lock_guard<std::mutex> lock(m_mutex);
-            m_status.state = ConnectionState::Connected;
-            m_status.ssid = ssid;
-            m_status.ipAddress = result.ipAddress;
-            m_status.error.clear();
-        }
+        // Set SSID (must be quoted)
+        executeCommand("wpa_cli -i " + m_wifiInterface +
+                      " set_network " + networkId + " ssid '\"" + ssid + "\"'");
 
-        LOG_INFO("NetworkManager: Connected to '%s', IP: %s",
-                 ssid.c_str(), result.ipAddress.c_str());
-    } else {
-        result.success = false;
-
-        // Parse error message
-        if (output.find("Secrets were required") != std::string::npos ||
-            output.find("password") != std::string::npos) {
-            result.error = "Incorrect password";
-        } else if (output.find("No network with SSID") != std::string::npos) {
-            result.error = "Network not found";
-        } else if (output.find("timed out") != std::string::npos) {
-            result.error = "Connection timed out";
+        // Set password or key_mgmt for open networks
+        if (password.empty()) {
+            executeCommand("wpa_cli -i " + m_wifiInterface +
+                          " set_network " + networkId + " key_mgmt NONE");
         } else {
-            result.error = "Connection failed";
+            executeCommand("wpa_cli -i " + m_wifiInterface +
+                          " set_network " + networkId + " psk '\"" + password + "\"'");
         }
+    }
+
+    // Enable the network
+    executeCommand("wpa_cli -i " + m_wifiInterface +
+                  " enable_network " + networkId);
+
+    // Select the network (this triggers connection)
+    std::string selectResult = executeCommand(
+        "wpa_cli -i " + m_wifiInterface + " select_network " + networkId);
+
+    if (selectResult.find("OK") == std::string::npos) {
+        result.success = false;
+        result.error = "Failed to select network";
 
         {
             std::lock_guard<std::mutex> lock(m_mutex);
@@ -505,8 +538,63 @@ void NetworkManager::connectWorker(const std::string& ssid,
             m_status.error = result.error;
         }
 
-        LOG_WARN("NetworkManager: Failed to connect to '%s': %s",
-                 ssid.c_str(), result.error.c_str());
+        if (callback) callback(result);
+        return;
+    }
+
+    // Wait for connection with timeout
+    int attempts = 0;
+    const int maxAttempts = 30;  // 15 seconds total
+
+    while (attempts < maxAttempts) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+
+        updateStatus();
+
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            if (m_status.state == ConnectionState::Connected) {
+                break;
+            }
+        }
+
+        attempts++;
+    }
+
+    // Check final status
+    updateStatus();
+
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        if (m_status.state == ConnectionState::Connected) {
+            result.success = true;
+            result.ipAddress = m_status.ipAddress;
+
+            // Save config so it persists across reboots
+            executeCommand("wpa_cli -i " + m_wifiInterface + " save_config");
+
+            LOG_INFO("NetworkManager: Connected to '%s', IP: %s",
+                     ssid.c_str(), result.ipAddress.c_str());
+        } else {
+            result.success = false;
+
+            // Determine error reason
+            std::string statusOutput = executeCommand(
+                "wpa_cli -i " + m_wifiInterface + " status");
+
+            if (statusOutput.find("INACTIVE") != std::string::npos ||
+                statusOutput.find("DISCONNECTED") != std::string::npos) {
+                result.error = "Incorrect password or network unavailable";
+            } else {
+                result.error = "Connection timed out";
+            }
+
+            m_status.state = ConnectionState::Failed;
+            m_status.error = result.error;
+
+            LOG_WARN("NetworkManager: Failed to connect to '%s': %s",
+                     ssid.c_str(), result.error.c_str());
+        }
     }
 
     if (m_statusCallback) {
