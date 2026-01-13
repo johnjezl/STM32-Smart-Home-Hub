@@ -45,7 +45,7 @@ void Header::createLayout() {
 
     // Settings button (right of time)
     m_settingsBtn = lv_btn_create(m_container);
-    lv_obj_set_size(m_settingsBtn, 40, 40);
+    lv_obj_set_size(m_settingsBtn, 48, 48);
     lv_obj_align_to(m_settingsBtn, m_timeLabel, LV_ALIGN_OUT_LEFT_MID, -ThemeManager::SPACING_SM, 0);
     lv_obj_set_style_bg_opa(m_settingsBtn, LV_OPA_TRANSP, 0);
     lv_obj_set_style_shadow_width(m_settingsBtn, 0, 0);
@@ -58,7 +58,7 @@ void Header::createLayout() {
 
     // Notification button (left of settings)
     m_notificationBtn = lv_btn_create(m_container);
-    lv_obj_set_size(m_notificationBtn, 40, 40);
+    lv_obj_set_size(m_notificationBtn, 48, 48);
     lv_obj_align_to(m_notificationBtn, m_settingsBtn, LV_ALIGN_OUT_LEFT_MID, -ThemeManager::SPACING_SM, 0);
     lv_obj_set_style_bg_opa(m_notificationBtn, LV_OPA_TRANSP, 0);
     lv_obj_set_style_shadow_width(m_notificationBtn, 0, 0);

@@ -1,7 +1,7 @@
 /**
- * Device List Screen
+ * Room Detail Screen
  *
- * Shows all devices in a scrollable list with quick toggle controls.
+ * Shows devices in a specific room with controls.
  */
 #pragma once
 
@@ -17,21 +17,25 @@ class DeviceManager;
 namespace ui {
 
 class ThemeManager;
-class Header;
-class NavBar;
 
 /**
- * Device list screen showing all registered devices
+ * Room detail screen showing devices in a single room
  */
-class DeviceListScreen : public Screen {
+class RoomDetailScreen : public Screen {
 public:
-    DeviceListScreen(ScreenManager& screenManager,
+    RoomDetailScreen(ScreenManager& screenManager,
                      ThemeManager& theme,
                      DeviceManager& deviceManager);
-    ~DeviceListScreen() override;
+    ~RoomDetailScreen() override;
+
+    /**
+     * Set the room to display (call before showing screen)
+     */
+    void setRoom(const std::string& roomId, const std::string& roomName);
 
     void onCreate() override;
     void onShow() override;
+    void onHide() override;
     void onUpdate(uint32_t deltaMs) override;
     void onDestroy() override;
 
@@ -39,10 +43,7 @@ private:
 #ifdef SMARTHUB_ENABLE_LVGL
     void createHeader();
     void createContent();
-    void createNavBar();
-    void createDeviceList();
     void refreshDeviceList();
-    void createAddDeviceCard();
 
     lv_obj_t* createDeviceRow(lv_obj_t* parent, const std::string& deviceId,
                                const std::string& name, const std::string& type,
@@ -50,23 +51,28 @@ private:
 
     void onDeviceToggle(const std::string& deviceId, bool newState);
     void onDeviceClicked(const std::string& deviceId);
-    void onAddDeviceClicked();
     void onBackClicked();
-    void onNavTabSelected(const std::string& tabId);
+    void onEditRoom();
+    void onAddDeviceClicked();
 
     static void toggleHandler(lv_event_t* e);
     static void rowClickHandler(lv_event_t* e);
+    static void backButtonHandler(lv_event_t* e);
+    static void editButtonHandler(lv_event_t* e);
+    static void addDeviceButtonHandler(lv_event_t* e);
 
+    lv_obj_t* m_header = nullptr;
+    lv_obj_t* m_backBtn = nullptr;
+    lv_obj_t* m_addDeviceBtn = nullptr;
+    lv_obj_t* m_editBtn = nullptr;
+    lv_obj_t* m_titleLabel = nullptr;
     lv_obj_t* m_content = nullptr;
     lv_obj_t* m_deviceList = nullptr;
-
-    std::unique_ptr<Header> m_header;
-    std::unique_ptr<NavBar> m_navBar;
-
-    // Map device ID to row widget for updates
-    std::vector<std::pair<std::string, lv_obj_t*>> m_deviceRows;
+    lv_obj_t* m_emptyLabel = nullptr;
 #endif
 
+    std::string m_roomId;
+    std::string m_roomName;
     ThemeManager& m_theme;
     DeviceManager& m_deviceManager;
 };

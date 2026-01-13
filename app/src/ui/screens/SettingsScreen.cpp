@@ -66,7 +66,7 @@ void SettingsScreen::createHeader() {
 
     // Back button
     m_backBtn = lv_btn_create(header);
-    lv_obj_set_size(m_backBtn, 40, 40);
+    lv_obj_set_size(m_backBtn, 48, 48);
     lv_obj_align(m_backBtn, LV_ALIGN_LEFT_MID, ThemeManager::SPACING_SM, 0);
     lv_obj_set_style_bg_opa(m_backBtn, LV_OPA_TRANSP, 0);
     lv_obj_set_style_shadow_width(m_backBtn, 0, 0);
@@ -126,6 +126,9 @@ lv_obj_t* SettingsScreen::createCategoryItem(lv_obj_t* parent,
     char* idCopy = new char[category.id.length() + 1];
     strcpy(idCopy, category.id.c_str());
     lv_obj_set_user_data(item, idCopy);
+    lv_obj_add_event_cb(item, [](lv_event_t* e) {
+        delete[] static_cast<char*>(lv_obj_get_user_data(lv_event_get_target(e)));
+    }, LV_EVENT_DELETE, nullptr);
 
     // Icon
     lv_obj_t* icon = lv_label_create(item);
@@ -167,8 +170,7 @@ void SettingsScreen::onCategoryClicked(const std::string& categoryId) {
     } else if (categoryId == "devices") {
         m_screenManager.showScreen("devices");
     } else if (categoryId == "security") {
-        // Security settings - future implementation
-        LOG_DEBUG("Security settings not yet implemented");
+        m_screenManager.showScreen("security");
     } else if (categoryId == "about") {
         m_screenManager.showScreen("about");
     }

@@ -98,6 +98,36 @@ public:
      */
     std::vector<DevicePtr> getDevicesByRoom(const std::string& room) const;
 
+    // Room management
+
+    /**
+     * Get all rooms
+     */
+    std::vector<std::pair<std::string, std::string>> getAllRooms() const;
+
+    /**
+     * Add a new room
+     * @param id Unique room identifier
+     * @param name Room display name
+     * @return true if added successfully
+     */
+    bool addRoom(const std::string& id, const std::string& name);
+
+    /**
+     * Update room name
+     * @param id Room identifier
+     * @param name New display name
+     * @return true if updated successfully
+     */
+    bool updateRoom(const std::string& id, const std::string& name);
+
+    /**
+     * Delete a room
+     * @param id Room identifier
+     * @return true if deleted successfully
+     */
+    bool deleteRoom(const std::string& id);
+
     /**
      * Get devices by type
      */

@@ -155,6 +155,11 @@ public:
     void setTransitionDuration(uint32_t ms) { m_transitionDuration = ms; }
     uint32_t transitionDuration() const { return m_transitionDuration; }
 
+    /**
+     * Check if a screen transition is currently in progress
+     */
+    bool isTransitioning() const { return m_transitionInProgress; }
+
 private:
     void performTransition(Screen* from, Screen* to, TransitionType type);
 
@@ -164,6 +169,8 @@ private:
     std::string m_currentScreen;
     std::string m_homeScreen = "home";
     uint32_t m_transitionDuration = 300;  // ms
+    bool m_transitionInProgress = false;
+    uint32_t m_transitionRemainingMs = 0;
 };
 
 } // namespace ui

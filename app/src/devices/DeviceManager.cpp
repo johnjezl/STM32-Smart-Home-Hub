@@ -435,6 +435,95 @@ void DeviceManager::loadDevicesFromDatabase() {
     }
 }
 
+// Room management
+
+std::vector<std::pair<std::string, std::string>> DeviceManager::getAllRooms() const {
+    std::vector<std::pair<std::string, std::string>> rooms;
+
+    try {
+        auto stmt = m_database.prepare(
+            "SELECT id, name FROM rooms ORDER BY sort_order, name");
+
+        if (stmt && stmt->isValid()) {
+            while (stmt->step()) {
+                std::string id = stmt->getString(0);
+                std::string name = stmt->getString(1);
+                rooms.emplace_back(id, name);
+            }
+        }
+    } catch (const std::exception& e) {
+        LOG_ERROR("Failed to get rooms: %s", e.what());
+    }
+
+    return rooms;
+}
+
+bool DeviceManager::addRoom(const std::string& id, const std::string& name) {
+    try {
+        auto stmt = m_database.prepare(
+            "INSERT INTO rooms (id, name) VALUES (?, ?)");
+
+        if (stmt && stmt->isValid()) {
+            stmt->bind(1, id);
+            stmt->bind(2, name);
+            stmt->execute();
+            LOG_INFO("Added room: %s (%s)", name.c_str(), id.c_str());
+            return true;
+        }
+    } catch (const std::exception& e) {
+        LOG_ERROR("Failed to add room %s: %s", id.c_str(), e.what());
+    }
+
+    return false;
+}
+
+bool DeviceManager::updateRoom(const std::string& id, const std::string& name) {
+    try {
+        auto stmt = m_database.prepare(
+            "UPDATE rooms SET name = ? WHERE id = ?");
+
+        if (stmt && stmt->isValid()) {
+            stmt->bind(1, name);
+            stmt->bind(2, id);
+            stmt->execute();
+            LOG_INFO("Updated room: %s -> %s", id.c_str(), name.c_str());
+            return true;
+        }
+    } catch (const std::exception& e) {
+        LOG_ERROR("Failed to update room %s: %s", id.c_str(), e.what());
+    }
+
+    return false;
+}
+
+bool DeviceManager::deleteRoom(const std::string& id) {
+    try {
+        // First, unassign devices from this room
+        auto updateStmt = m_database.prepare(
+            "UPDATE devices SET room = '' WHERE room = ?");
+
+        if (updateStmt && updateStmt->isValid()) {
+            updateStmt->bind(1, id);
+            updateStmt->execute();
+        }
+
+        // Delete the room
+        auto stmt = m_database.prepare(
+            "DELETE FROM rooms WHERE id = ?");
+
+        if (stmt && stmt->isValid()) {
+            stmt->bind(1, id);
+            stmt->execute();
+            LOG_INFO("Deleted room: %s", id.c_str());
+            return true;
+        }
+    } catch (const std::exception& e) {
+        LOG_ERROR("Failed to delete room %s: %s", id.c_str(), e.what());
+    }
+
+    return false;
+}
+
 void DeviceManager::setupEventHandlers() {
     // Subscribe to MQTT messages for device updates
     m_eventBus.subscribe("mqtt.message", [this](const Event& event) {

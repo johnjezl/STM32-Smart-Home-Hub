@@ -9,6 +9,7 @@
 #include <memory>
 #include <vector>
 #include <string>
+#include <map>
 
 namespace smarthub {
 
@@ -62,12 +63,15 @@ private:
     void onNavTabSelected(const std::string& tabId);
     void onSettingsClicked();
     void onNotificationClicked();
+    void onAddRoomClicked();
+    void refreshRoomCards();
 
     lv_obj_t* m_content = nullptr;
 
     std::unique_ptr<Header> m_header;
     std::unique_ptr<NavBar> m_navBar;
     std::vector<std::unique_ptr<RoomCard>> m_roomCards;
+    std::map<std::string, std::string> m_roomNames;  // roomId -> roomName
 #endif
 
     ThemeManager& m_theme;

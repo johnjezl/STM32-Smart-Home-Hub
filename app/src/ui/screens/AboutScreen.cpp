@@ -83,7 +83,7 @@ void AboutScreen::createHeader() {
 
     // Back button
     m_backBtn = lv_btn_create(header);
-    lv_obj_set_size(m_backBtn, 40, 40);
+    lv_obj_set_size(m_backBtn, 48, 48);
     lv_obj_align(m_backBtn, LV_ALIGN_LEFT_MID, ThemeManager::SPACING_SM, 0);
     lv_obj_set_style_bg_opa(m_backBtn, LV_OPA_TRANSP, 0);
     lv_obj_set_style_shadow_width(m_backBtn, 0, 0);

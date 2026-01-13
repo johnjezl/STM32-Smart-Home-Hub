@@ -16,6 +16,10 @@ namespace smarthub {
 class EventBus;
 class DeviceManager;
 
+namespace network {
+class NetworkManager;
+}
+
 namespace ui {
 class ScreenManager;
 class ThemeManager;
@@ -95,6 +99,7 @@ private:
 
     std::unique_ptr<ui::ThemeManager> m_themeManager;
     std::unique_ptr<ui::ScreenManager> m_screenManager;
+    std::unique_ptr<network::NetworkManager> m_networkManager;
 };
 
 } // namespace smarthub
