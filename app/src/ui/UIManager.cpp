@@ -13,7 +13,14 @@
 #include "smarthub/ui/screens/SensorListScreen.hpp"
 #include "smarthub/ui/screens/SettingsScreen.hpp"
 #include "smarthub/ui/screens/LightControlScreen.hpp"
+#include "smarthub/ui/screens/RoomDetailScreen.hpp"
+#include "smarthub/ui/screens/SecuritySettingsScreen.hpp"
 #include "smarthub/ui/screens/AboutScreen.hpp"
+#include "smarthub/ui/screens/AddDeviceScreen.hpp"
+#include "smarthub/ui/screens/EditDeviceScreen.hpp"
+#include "smarthub/ui/screens/WifiSetupScreen.hpp"
+#include "smarthub/ui/screens/NotificationScreen.hpp"
+#include "smarthub/network/NetworkManager.hpp"
 #include "smarthub/core/EventBus.hpp"
 #include "smarthub/core/Logger.hpp"
 #include "smarthub/devices/DeviceManager.hpp"
@@ -477,6 +484,13 @@ bool UIManager::initialize(const std::string& drmDevice, const std::string& touc
         }
     }
 
+    // Clear both buffers to black before displaying
+    for (int i = 0; i < 2; i++) {
+        if (s_drm.buffers[i].map) {
+            memset(s_drm.buffers[i].map, 0, s_drm.buffers[i].size);
+        }
+    }
+
     // Set initial mode
     if (drmModeSetCrtc(s_drm.fd, s_drm.crtc_id, s_drm.buffers[0].fb_id, 0, 0,
                        &s_drm.connector_id, 1, &s_drm.mode) != 0) {
@@ -522,7 +536,8 @@ bool UIManager::initialize(const std::string& drmDevice, const std::string& touc
     s_disp_drv.ver_res = m_height;
     s_disp_drv.flush_cb = drm_flush_cb;
     s_disp_drv.draw_buf = &s_draw_buf;
-    s_disp_drv.full_refresh = 0;  // Partial updates work with DRM
+    // Force full refresh when rotated to avoid partial update artifacts
+    s_disp_drv.full_refresh = needs_rotation ? 1 : 0;
     // Note: We handle rotation manually in drm_flush_cb, not using sw_rotate
 
     lv_disp_drv_register(&s_disp_drv);
@@ -535,6 +550,11 @@ bool UIManager::initialize(const std::string& drmDevice, const std::string& touc
 
     // Set up screens and show dashboard
     setupScreens();
+
+    // Force immediate render to display the dashboard on startup
+    // This ensures the screen is visible before we return from initialize()
+    lv_refr_now(NULL);
+    lv_timer_handler();
 
     m_initialized = true;
     m_running = true;
@@ -645,6 +665,10 @@ void UIManager::setupScreens() {
     // Create theme manager
     m_themeManager = std::make_unique<ui::ThemeManager>();
 
+    // Create network manager for WiFi setup
+    m_networkManager = std::make_unique<network::NetworkManager>();
+    m_networkManager->initialize();
+
     // Create screen manager
     m_screenManager = std::make_unique<ui::ScreenManager>(*this);
 
@@ -664,11 +688,26 @@ void UIManager::setupScreens() {
     m_screenManager->registerScreen("lights",
         std::make_unique<ui::LightControlScreen>(*m_screenManager, *m_themeManager, m_deviceManager));
 
+    m_screenManager->registerScreen("room_detail",
+        std::make_unique<ui::RoomDetailScreen>(*m_screenManager, *m_themeManager, m_deviceManager));
+
+    m_screenManager->registerScreen("security",
+        std::make_unique<ui::SecuritySettingsScreen>(*m_screenManager, *m_themeManager));
+
     m_screenManager->registerScreen("about",
         std::make_unique<ui::AboutScreen>(*m_screenManager, *m_themeManager));
 
-    // Note: WifiSetupScreen and DisplaySettingsScreen require NetworkManager and DisplayManager
-    // which are not currently available in UIManager. Add them when those managers are integrated.
+    m_screenManager->registerScreen("add_device",
+        std::make_unique<ui::AddDeviceScreen>(*m_screenManager, *m_themeManager, m_deviceManager));
+
+    m_screenManager->registerScreen("edit_device",
+        std::make_unique<ui::EditDeviceScreen>(*m_screenManager, *m_themeManager, m_deviceManager));
+
+    m_screenManager->registerScreen("wifi_setup",
+        std::make_unique<ui::WifiSetupScreen>(*m_screenManager, *m_themeManager, *m_networkManager));
+
+    m_screenManager->registerScreen("notifications",
+        std::make_unique<ui::NotificationScreen>(*m_screenManager, *m_themeManager, m_deviceManager));
 
     // Set home screen and show it
     m_screenManager->setHomeScreen("dashboard");

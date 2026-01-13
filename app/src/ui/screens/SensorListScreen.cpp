@@ -76,6 +76,14 @@ void SensorListScreen::onDestroy() {
 void SensorListScreen::createHeader() {
     m_header = std::make_unique<Header>(m_container, m_theme);
     m_header->setTitle("Sensors");
+
+    m_header->onSettingsClick([this]() {
+        m_screenManager.showScreen("settings");
+    });
+
+    m_header->onNotificationClick([this]() {
+        m_screenManager.showScreen("notifications");
+    });
 }
 
 void SensorListScreen::createContent() {
@@ -103,7 +111,6 @@ void SensorListScreen::createNavBar() {
     m_navBar->addTab({"home", "Home", LV_SYMBOL_HOME});
     m_navBar->addTab({"devices", "Devices", LV_SYMBOL_POWER});
     m_navBar->addTab({"sensors", "Sensors", LV_SYMBOL_CHARGE});
-    m_navBar->addTab({"settings", "Settings", LV_SYMBOL_SETTINGS});
 
     m_navBar->setActiveTab("sensors");
 
@@ -169,6 +176,9 @@ void SensorListScreen::createSensorCards() {
         char* idCopy = new char[device->id().size() + 1];
         strcpy(idCopy, device->id().c_str());
         lv_obj_set_user_data(card, idCopy);
+        lv_obj_add_event_cb(card, [](lv_event_t* e) {
+            delete[] static_cast<char*>(lv_obj_get_user_data(lv_event_get_target(e)));
+        }, LV_EVENT_DELETE, nullptr);
         lv_obj_add_event_cb(card, sensorCardClickHandler, LV_EVENT_CLICKED, this);
 
         // Icon

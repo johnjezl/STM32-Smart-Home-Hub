@@ -42,6 +42,7 @@ private:
     void createNavBar();
     void createDeviceList();
     void refreshDeviceList();
+    void createAddDeviceCard();
 
     lv_obj_t* createDeviceRow(lv_obj_t* parent, const std::string& deviceId,
                                const std::string& name, const std::string& type,
@@ -49,6 +50,7 @@ private:
 
     void onDeviceToggle(const std::string& deviceId, bool newState);
     void onDeviceClicked(const std::string& deviceId);
+    void onAddDeviceClicked();
     void onBackClicked();
     void onNavTabSelected(const std::string& tabId);
 

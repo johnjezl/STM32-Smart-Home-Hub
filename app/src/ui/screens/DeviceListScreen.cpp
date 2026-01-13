@@ -3,6 +3,9 @@
  */
 
 #include "smarthub/ui/screens/DeviceListScreen.hpp"
+#include "smarthub/ui/screens/LightControlScreen.hpp"
+#include "smarthub/ui/screens/AddDeviceScreen.hpp"
+#include "smarthub/ui/screens/EditDeviceScreen.hpp"
 #include "smarthub/ui/ScreenManager.hpp"
 #include "smarthub/ui/ThemeManager.hpp"
 #include "smarthub/ui/widgets/Header.hpp"
@@ -67,6 +70,14 @@ void DeviceListScreen::onDestroy() {
 void DeviceListScreen::createHeader() {
     m_header = std::make_unique<Header>(m_container, m_theme);
     m_header->setTitle("Devices");
+
+    m_header->onSettingsClick([this]() {
+        m_screenManager.showScreen("settings");
+    });
+
+    m_header->onNotificationClick([this]() {
+        m_screenManager.showScreen("notifications");
+    });
 }
 
 void DeviceListScreen::createContent() {
@@ -99,7 +110,6 @@ void DeviceListScreen::createNavBar() {
     m_navBar->addTab({"home", "Home", LV_SYMBOL_HOME});
     m_navBar->addTab({"devices", "Devices", LV_SYMBOL_POWER});
     m_navBar->addTab({"sensors", "Sensors", LV_SYMBOL_CHARGE});
-    m_navBar->addTab({"settings", "Settings", LV_SYMBOL_SETTINGS});
 
     m_navBar->setActiveTab("devices");
 
@@ -156,6 +166,36 @@ void DeviceListScreen::refreshDeviceList() {
                                          isOn);
         m_deviceRows.emplace_back(device->id(), row);
     }
+
+    // Add "Add Device" card at the end
+    createAddDeviceCard();
+}
+
+void DeviceListScreen::createAddDeviceCard() {
+    lv_obj_t* addCard = lv_obj_create(m_deviceList);
+    lv_obj_set_size(addCard, LV_PCT(100), 60);
+    lv_obj_set_style_bg_color(addCard, m_theme.surface(), 0);
+    lv_obj_set_style_radius(addCard, ThemeManager::CARD_RADIUS, 0);
+    lv_obj_add_flag(addCard, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(addCard, LV_OBJ_FLAG_SCROLLABLE);
+
+    // Plus icon and text
+    lv_obj_t* content = lv_label_create(addCard);
+    lv_label_set_text(content, LV_SYMBOL_PLUS " Add Device");
+    lv_obj_set_style_text_color(content, m_theme.primary(), 0);
+    lv_obj_center(content);
+
+    lv_obj_add_event_cb(addCard, [](lv_event_t* e) {
+        auto* self = static_cast<DeviceListScreen*>(lv_event_get_user_data(e));
+        if (self) {
+            self->onAddDeviceClicked();
+        }
+    }, LV_EVENT_CLICKED, this);
+}
+
+void DeviceListScreen::onAddDeviceClicked() {
+    LOG_DEBUG("Add device clicked");
+    m_screenManager.showScreen("add_device");
 }
 
 lv_obj_t* DeviceListScreen::createDeviceRow(lv_obj_t* parent,
@@ -171,10 +211,14 @@ lv_obj_t* DeviceListScreen::createDeviceRow(lv_obj_t* parent,
     lv_obj_set_style_pad_hor(row, ThemeManager::SPACING_MD, 0);
     lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
 
-    // Store device ID
+    // Store device ID (cleanup on object deletion)
     char* idCopy = new char[deviceId.size() + 1];
     strcpy(idCopy, deviceId.c_str());
     lv_obj_set_user_data(row, idCopy);
+    lv_obj_add_event_cb(row, [](lv_event_t* e) {
+        char* data = static_cast<char*>(lv_obj_get_user_data(lv_event_get_target(e)));
+        delete[] data;
+    }, LV_EVENT_DELETE, nullptr);
 
     // Make row clickable
     lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
@@ -210,6 +254,9 @@ lv_obj_t* DeviceListScreen::createDeviceRow(lv_obj_t* parent,
     char* swIdCopy = new char[deviceId.size() + 1];
     strcpy(swIdCopy, deviceId.c_str());
     lv_obj_set_user_data(sw, swIdCopy);
+    lv_obj_add_event_cb(sw, [](lv_event_t* e) {
+        delete[] static_cast<char*>(lv_obj_get_user_data(lv_event_get_target(e)));
+    }, LV_EVENT_DELETE, nullptr);
     lv_obj_add_event_cb(sw, toggleHandler, LV_EVENT_VALUE_CHANGED, this);
 
     return row;
@@ -230,16 +277,18 @@ void DeviceListScreen::onDeviceClicked(const std::string& deviceId) {
     auto device = m_deviceManager.getDevice(deviceId);
     if (!device) return;
 
-    // Navigate to appropriate control screen based on device type
-    switch (device->type()) {
-        case DeviceType::Dimmer:
-        case DeviceType::ColorLight:
-            // Navigate to light control screen
-            // m_screenManager.showScreen("light_control");
-            break;
-        default:
-            // No detailed control screen for this device type
-            break;
+    // Navigate to edit screen for device configuration
+    auto* editScreen = dynamic_cast<EditDeviceScreen*>(
+        m_screenManager.getScreen("edit_device"));
+    if (editScreen) {
+        editScreen->setDeviceId(deviceId);
+        editScreen->onDeviceUpdated([this]() {
+            refreshDeviceList();
+        });
+        editScreen->onDeviceDeleted([this]() {
+            refreshDeviceList();
+        });
+        m_screenManager.showScreen("edit_device");
     }
 }
 

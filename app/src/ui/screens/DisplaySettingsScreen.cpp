@@ -82,7 +82,7 @@ void DisplaySettingsScreen::createHeader() {
 
     // Back button
     m_backBtn = lv_btn_create(header);
-    lv_obj_set_size(m_backBtn, 40, 40);
+    lv_obj_set_size(m_backBtn, 48, 48);
     lv_obj_align(m_backBtn, LV_ALIGN_LEFT_MID, ThemeManager::SPACING_SM, 0);
     lv_obj_set_style_bg_opa(m_backBtn, LV_OPA_TRANSP, 0);
     lv_obj_set_style_shadow_width(m_backBtn, 0, 0);
@@ -147,7 +147,7 @@ void DisplaySettingsScreen::createTimeoutSection() {
 
     for (int i = 0; i < 5; i++) {
         m_timeoutButtons[i] = lv_btn_create(section);
-        lv_obj_set_size(m_timeoutButtons[i], btnWidth, 35);
+        lv_obj_set_size(m_timeoutButtons[i], btnWidth, 48);
         lv_obj_align(m_timeoutButtons[i], LV_ALIGN_BOTTOM_LEFT, startX, -5);
         lv_obj_set_style_radius(m_timeoutButtons[i], 5, 0);
 
@@ -184,7 +184,7 @@ void DisplaySettingsScreen::createThemeSection() {
 
     for (int i = 0; i < 3; i++) {
         m_themeButtons[i] = lv_btn_create(section);
-        lv_obj_set_size(m_themeButtons[i], btnWidth, 35);
+        lv_obj_set_size(m_themeButtons[i], btnWidth, 48);
         lv_obj_align(m_themeButtons[i], LV_ALIGN_BOTTOM_LEFT, startX, -5);
         lv_obj_set_style_radius(m_themeButtons[i], 5, 0);
 

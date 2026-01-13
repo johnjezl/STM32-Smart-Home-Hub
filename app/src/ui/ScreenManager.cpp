@@ -48,6 +48,7 @@ void ScreenManager::registerScreen(const std::string& name, std::unique_ptr<Scre
     lv_obj_t* container = lv_obj_create(nullptr);
     lv_obj_set_size(container, LV_HOR_RES, LV_VER_RES);
     lv_obj_set_style_bg_opa(container, LV_OPA_COVER, 0);
+    lv_obj_clear_flag(container, LV_OBJ_FLAG_SCROLLABLE);  // Prevent screen-level scrolling
     scr->setContainer(container);
 #endif
 
@@ -99,6 +100,12 @@ bool ScreenManager::unregisterScreen(const std::string& name) {
 }
 
 bool ScreenManager::showScreen(const std::string& name, TransitionType transition, bool pushToStack) {
+    // Block navigation during transitions to prevent touch interference
+    if (m_transitionInProgress) {
+        LOG_DEBUG("Ignoring navigation to %s - transition in progress", name.c_str());
+        return false;
+    }
+
     auto it = m_screens.find(name);
     if (it == m_screens.end()) {
         LOG_ERROR("Screen not found: %s", name.c_str());
@@ -138,6 +145,12 @@ bool ScreenManager::showScreen(const std::string& name, TransitionType transitio
 }
 
 bool ScreenManager::goBack(TransitionType transition) {
+    // Block during transitions
+    if (m_transitionInProgress) {
+        LOG_DEBUG("Ignoring goBack - transition in progress");
+        return false;
+    }
+
     if (m_history.empty()) {
         LOG_DEBUG("Navigation history empty, cannot go back");
         return false;
@@ -151,6 +164,12 @@ bool ScreenManager::goBack(TransitionType transition) {
 }
 
 void ScreenManager::goHome(TransitionType transition) {
+    // Block during transitions
+    if (m_transitionInProgress) {
+        LOG_DEBUG("Ignoring goHome - transition in progress");
+        return;
+    }
+
     if (m_homeScreen.empty() || !hasScreen(m_homeScreen)) {
         LOG_WARN("Home screen not set or not found");
         return;
@@ -185,6 +204,17 @@ void ScreenManager::clearHistory() {
 }
 
 void ScreenManager::update(uint32_t deltaMs) {
+    // Track transition completion
+    if (m_transitionInProgress) {
+        if (deltaMs >= m_transitionRemainingMs) {
+            m_transitionInProgress = false;
+            m_transitionRemainingMs = 0;
+            LOG_DEBUG("Screen transition completed");
+        } else {
+            m_transitionRemainingMs -= deltaMs;
+        }
+    }
+
     Screen* screen = currentScreen();
     if (screen && screen->isVisible()) {
         screen->onUpdate(deltaMs);
@@ -220,6 +250,12 @@ void ScreenManager::performTransition(Screen* from, Screen* to, TransitionType t
         case TransitionType::SlideDown:
             animType = LV_SCR_LOAD_ANIM_MOVE_BOTTOM;
             break;
+    }
+
+    // Start transition timer to block input during animation
+    if (duration > 0) {
+        m_transitionInProgress = true;
+        m_transitionRemainingMs = duration;
     }
 
     // Load the new screen with animation

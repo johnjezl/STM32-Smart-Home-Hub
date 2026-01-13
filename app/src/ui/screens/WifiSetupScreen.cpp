@@ -82,7 +82,7 @@ void WifiSetupScreen::createHeader() {
 
     // Back button
     m_backBtn = lv_btn_create(header);
-    lv_obj_set_size(m_backBtn, 40, 40);
+    lv_obj_set_size(m_backBtn, 48, 48);
     lv_obj_align(m_backBtn, LV_ALIGN_LEFT_MID, ThemeManager::SPACING_SM, 0);
     lv_obj_set_style_bg_opa(m_backBtn, LV_OPA_TRANSP, 0);
     lv_obj_set_style_shadow_width(m_backBtn, 0, 0);
@@ -101,7 +101,7 @@ void WifiSetupScreen::createHeader() {
 
     // Refresh button
     m_refreshBtn = lv_btn_create(header);
-    lv_obj_set_size(m_refreshBtn, 40, 40);
+    lv_obj_set_size(m_refreshBtn, 48, 48);
     lv_obj_align(m_refreshBtn, LV_ALIGN_RIGHT_MID, -ThemeManager::SPACING_SM, 0);
     lv_obj_set_style_bg_opa(m_refreshBtn, LV_OPA_TRANSP, 0);
     lv_obj_set_style_shadow_width(m_refreshBtn, 0, 0);
@@ -333,6 +333,9 @@ void WifiSetupScreen::updateNetworkList() {
         char* ssidCopy = new char[network.ssid.length() + 1];
         strcpy(ssidCopy, network.ssid.c_str());
         lv_obj_set_user_data(item, ssidCopy);
+        lv_obj_add_event_cb(item, [](lv_event_t* e) {
+            delete[] static_cast<char*>(lv_obj_get_user_data(lv_event_get_target(e)));
+        }, LV_EVENT_DELETE, nullptr);
 
         // Signal icon
         int signalLevel = network::NetworkManager::signalToIconIndex(network.signalStrength);
