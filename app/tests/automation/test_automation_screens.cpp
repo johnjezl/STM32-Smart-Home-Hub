@@ -52,7 +52,7 @@ protected:
             *eventBus, *database, *deviceManager);
         automationManager->initialize();
         themeManager = std::make_unique<ThemeManager>();
-        uiManager = std::make_unique<UIManager>(*eventBus, *deviceManager);
+        uiManager = std::make_unique<UIManager>(*eventBus, *deviceManager, *database);
 
         // Note: We don't initialize UIManager (no display in CI)
         // but screens can still be constructed for testing

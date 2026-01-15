@@ -61,7 +61,7 @@ protected:
         database->initialize();
         deviceManager = std::make_unique<DeviceManager>(*eventBus, *database);
         deviceManager->initialize();
-        uiManager = std::make_unique<UIManager>(*eventBus, *deviceManager);
+        uiManager = std::make_unique<UIManager>(*eventBus, *deviceManager, *database);
 
         // Note: We don't initialize UIManager (no display in CI)
         // but ScreenManager should still work for navigation logic

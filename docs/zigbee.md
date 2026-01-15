@@ -389,6 +389,36 @@ protocols:
     panId: 0x1A62  # Optional, default random
 ```
 
+## UI Integration Notes
+
+### Thread Safety with LVGL
+
+The Zigbee handler callbacks run on background threads (from the ZnpTransport read loop). When updating LVGL UI elements from these callbacks, you **must** use `lv_async_call()` to schedule the update on the main thread:
+
+```cpp
+// WRONG - will cause intermittent UI glitches
+handler.setDeviceDiscoveredCallback([](DevicePtr device) {
+    lv_label_set_text(statusLabel, "Device found!");  // Not thread-safe!
+});
+
+// CORRECT - defers UI update to main thread
+handler.setDeviceDiscoveredCallback([this](DevicePtr device) {
+    // Store data for async callback
+    m_discoveredDevice = device;
+
+    // Schedule UI update on main thread
+    lv_async_call([](void* userData) {
+        auto* self = static_cast<MyScreen*>(userData);
+        lv_label_set_text(self->m_statusLabel, "Device found!");
+    }, this);
+});
+```
+
+This applies to all Zigbee callbacks including:
+- `setDeviceDiscoveredCallback` - Device pairing complete
+- `setDeviceStateCallback` - Device state updates
+- EventBus handlers for Zigbee events
+
 ## Troubleshooting
 
 ### Device Won't Pair

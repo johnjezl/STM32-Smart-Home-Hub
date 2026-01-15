@@ -11,6 +11,7 @@
 #include <smarthub/web/WebServer.hpp>
 #include <smarthub/protocols/mqtt/MqttClient.hpp>
 #include <smarthub/rpmsg/RpmsgClient.hpp>
+#include <nlohmann/json.hpp>
 
 #ifdef SMARTHUB_ENABLE_LVGL
 #include <smarthub/ui/UIManager.hpp>
@@ -53,6 +54,27 @@ bool Application::initialize() {
     if (!initializeDeviceManager()) {
         LOG_ERROR("Failed to initialize device manager");
         return false;
+    }
+
+    // Initialize Zigbee if enabled
+    LOG_INFO("Zigbee config: enabled=%d port=%s baud=%d",
+             m_config->zigbeeEnabled(),
+             m_config->zigbeePort().c_str(),
+             m_config->zigbeeBaudRate());
+
+    if (m_config->zigbeeEnabled()) {
+        nlohmann::json zigbeeConfig;
+        zigbeeConfig["port"] = m_config->zigbeePort();
+        zigbeeConfig["baudRate"] = m_config->zigbeeBaudRate();
+
+        LOG_INFO("Loading Zigbee protocol handler...");
+        if (!m_deviceManager->loadProtocol("zigbee", zigbeeConfig)) {
+            LOG_WARN("Zigbee initialization failed, check coordinator connection");
+        } else {
+            LOG_INFO("Zigbee protocol loaded successfully");
+        }
+    } else {
+        LOG_INFO("Zigbee disabled in config");
     }
 
     if (!initializeMqtt()) {

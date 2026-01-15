@@ -107,7 +107,8 @@ void EditDeviceScreen::createHeader() {
 
 void EditDeviceScreen::createContent() {
     constexpr int HEADER_HEIGHT = 50;
-    constexpr int CONTENT_HEIGHT = 480 - HEADER_HEIGHT;
+    constexpr int BOTTOM_MARGIN = 8;  // Small margin to prevent display edge clipping
+    constexpr int CONTENT_HEIGHT = 480 - HEADER_HEIGHT - BOTTOM_MARGIN;
 
     m_content = lv_obj_create(m_container);
     lv_obj_set_size(m_content, LV_PCT(100), CONTENT_HEIGHT);

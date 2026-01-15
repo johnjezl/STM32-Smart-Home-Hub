@@ -127,7 +127,8 @@ void RoomDetailScreen::createHeader() {
 void RoomDetailScreen::createContent() {
     // Content area
     constexpr int HEADER_HEIGHT = 50;
-    constexpr int CONTENT_HEIGHT = 480 - HEADER_HEIGHT;
+    constexpr int BOTTOM_MARGIN = 8;  // Small margin to prevent display edge clipping
+    constexpr int CONTENT_HEIGHT = 480 - HEADER_HEIGHT - BOTTOM_MARGIN;
 
     m_content = lv_obj_create(m_container);
     lv_obj_set_size(m_content, LV_PCT(100), CONTENT_HEIGHT);
@@ -318,13 +319,15 @@ void RoomDetailScreen::onEditRoom() {
 
     // Create the dialog centered
     lv_obj_t* modal = lv_obj_create(overlay);
-    lv_obj_set_size(modal, 420, 200);
+    lv_obj_set_size(modal, 420, 220);
     lv_obj_align(modal, LV_ALIGN_CENTER, 0, 0);
     lv_obj_set_style_bg_color(modal, m_theme.surface(), 0);
+    lv_obj_set_style_bg_opa(modal, LV_OPA_COVER, 0);
     lv_obj_set_style_radius(modal, ThemeManager::CARD_RADIUS, 0);
     lv_obj_set_style_shadow_width(modal, 20, 0);
     lv_obj_set_style_shadow_opa(modal, LV_OPA_30, 0);
-    lv_obj_set_style_pad_all(modal, 0, 0);  // No default padding
+    lv_obj_set_style_pad_all(modal, 20, 0);
+    lv_obj_set_style_border_width(modal, 0, 0);
     lv_obj_clear_flag(modal, LV_OBJ_FLAG_SCROLLABLE);
 
     // Title
@@ -332,12 +335,12 @@ void RoomDetailScreen::onEditRoom() {
     lv_label_set_text(title, "Edit Room");
     lv_obj_set_style_text_color(title, m_theme.textPrimary(), 0);
     lv_obj_set_style_text_font(title, &lv_font_montserrat_20, 0);
-    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 15);
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 0);
 
     // Text input for room name (use USB keyboard)
     lv_obj_t* textarea = lv_textarea_create(modal);
-    lv_obj_set_size(textarea, 380, 44);
-    lv_obj_align(textarea, LV_ALIGN_TOP_MID, 0, 50);
+    lv_obj_set_size(textarea, LV_PCT(100), 44);
+    lv_obj_align(textarea, LV_ALIGN_TOP_MID, 0, 40);
     lv_textarea_set_text(textarea, m_roomName.c_str());
     lv_textarea_set_one_line(textarea, true);
     lv_obj_set_style_bg_color(textarea, m_theme.background(), 0);
@@ -346,8 +349,8 @@ void RoomDetailScreen::onEditRoom() {
 
     // Button row - use flex layout for proper spacing
     lv_obj_t* btnRow = lv_obj_create(modal);
-    lv_obj_set_size(btnRow, 380, 50);
-    lv_obj_align(btnRow, LV_ALIGN_BOTTOM_MID, 0, -15);
+    lv_obj_set_size(btnRow, LV_PCT(100), 50);
+    lv_obj_align(btnRow, LV_ALIGN_BOTTOM_MID, 0, 0);
     lv_obj_set_style_bg_opa(btnRow, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(btnRow, 0, 0);
     lv_obj_set_style_pad_all(btnRow, 0, 0);
@@ -459,12 +462,15 @@ void RoomDetailScreen::onEditRoom() {
 
         // Confirmation dialog centered
         lv_obj_t* confirmModal = lv_obj_create(confirmOverlay);
-        lv_obj_set_size(confirmModal, 350, 180);
+        lv_obj_set_size(confirmModal, 380, 200);
         lv_obj_align(confirmModal, LV_ALIGN_CENTER, 0, 0);
         lv_obj_set_style_bg_color(confirmModal, ctx->screen->m_theme.surface(), 0);
+        lv_obj_set_style_bg_opa(confirmModal, LV_OPA_COVER, 0);
         lv_obj_set_style_radius(confirmModal, ThemeManager::CARD_RADIUS, 0);
         lv_obj_set_style_shadow_width(confirmModal, 20, 0);
         lv_obj_set_style_shadow_opa(confirmModal, LV_OPA_50, 0);
+        lv_obj_set_style_pad_all(confirmModal, 24, 0);
+        lv_obj_set_style_border_width(confirmModal, 0, 0);
         lv_obj_clear_flag(confirmModal, LV_OBJ_FLAG_SCROLLABLE);
 
         // Title
@@ -472,7 +478,7 @@ void RoomDetailScreen::onEditRoom() {
         lv_label_set_text(confirmTitle, "Delete Room?");
         lv_obj_set_style_text_color(confirmTitle, ctx->screen->m_theme.textPrimary(), 0);
         lv_obj_set_style_text_font(confirmTitle, &lv_font_montserrat_20, 0);
-        lv_obj_align(confirmTitle, LV_ALIGN_TOP_MID, 0, 20);
+        lv_obj_align(confirmTitle, LV_ALIGN_TOP_MID, 0, 0);
 
         // Message
         lv_obj_t* message = lv_label_create(confirmModal);
@@ -483,8 +489,8 @@ void RoomDetailScreen::onEditRoom() {
 
         // Cancel button
         lv_obj_t* cancelConfirmBtn = lv_btn_create(confirmModal);
-        lv_obj_set_size(cancelConfirmBtn, 120, 44);
-        lv_obj_align(cancelConfirmBtn, LV_ALIGN_BOTTOM_LEFT, 30, -20);
+        lv_obj_set_size(cancelConfirmBtn, 130, 44);
+        lv_obj_align(cancelConfirmBtn, LV_ALIGN_BOTTOM_LEFT, 0, 0);
         lv_obj_set_style_bg_color(cancelConfirmBtn, ctx->screen->m_theme.surface(), 0);
         lv_obj_set_style_border_width(cancelConfirmBtn, 1, 0);
         lv_obj_set_style_border_color(cancelConfirmBtn, ctx->screen->m_theme.textSecondary(), 0);
@@ -508,8 +514,8 @@ void RoomDetailScreen::onEditRoom() {
 
         // Confirm delete button
         lv_obj_t* confirmDeleteBtn = lv_btn_create(confirmModal);
-        lv_obj_set_size(confirmDeleteBtn, 120, 44);
-        lv_obj_align(confirmDeleteBtn, LV_ALIGN_BOTTOM_RIGHT, -30, -20);
+        lv_obj_set_size(confirmDeleteBtn, 130, 44);
+        lv_obj_align(confirmDeleteBtn, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
         lv_obj_set_style_bg_color(confirmDeleteBtn, ctx->screen->m_theme.error(), 0);
 
         lv_obj_t* confirmDeleteLabel = lv_label_create(confirmDeleteBtn);

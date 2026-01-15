@@ -87,6 +87,7 @@ bool Config::load(const std::string& path) {
     setDefaults();
 
 #if HAVE_YAML_CPP
+    LOG_INFO("Using yaml-cpp parser for config");
     try {
         YAML::Node config = YAML::LoadFile(path);
 
@@ -160,6 +161,25 @@ bool Config::load(const std::string& path) {
             }
         }
 
+        // Zigbee
+        if (config["zigbee"]) {
+            LOG_DEBUG("Found zigbee section in config");
+            if (config["zigbee"]["enabled"]) {
+                m_zigbeeEnabled = config["zigbee"]["enabled"].as<bool>();
+                LOG_DEBUG("Zigbee enabled parsed as: %d", m_zigbeeEnabled);
+            } else {
+                LOG_DEBUG("No 'enabled' key in zigbee section");
+            }
+            if (config["zigbee"]["port"]) {
+                m_zigbeePort = config["zigbee"]["port"].as<std::string>();
+            }
+            if (config["zigbee"]["baud"]) {
+                m_zigbeeBaudRate = config["zigbee"]["baud"].as<int>();
+            }
+        } else {
+            LOG_DEBUG("No zigbee section in config");
+        }
+
         // Logging
         if (config["logging"]) {
             if (config["logging"]["level"]) {
@@ -180,6 +200,7 @@ bool Config::load(const std::string& path) {
 
 #else
     // Fallback: simple INI-style parsing
+    LOG_INFO("Using fallback INI parser for config (yaml-cpp not available)");
     auto settings = parseSimpleConfig(path);
 
     if (settings.empty()) {
@@ -204,11 +225,28 @@ bool Config::load(const std::string& path) {
     if (settings.count("web.root")) {
         m_webRoot = settings["web.root"];
     }
+    if (settings.count("web.tls.cert")) {
+        m_tlsCertPath = settings["web.tls.cert"];
+    }
+    if (settings.count("web.tls.key")) {
+        m_tlsKeyPath = settings["web.tls.key"];
+    }
     if (settings.count("display.device")) {
         m_displayDevice = settings["display.device"];
     }
     if (settings.count("rpmsg.device")) {
         m_rpmsgDevice = settings["rpmsg.device"];
+    }
+    if (settings.count("zigbee.enabled")) {
+        std::string val = settings["zigbee.enabled"];
+        std::transform(val.begin(), val.end(), val.begin(), ::tolower);
+        m_zigbeeEnabled = (val == "true" || val == "yes" || val == "1");
+    }
+    if (settings.count("zigbee.port")) {
+        m_zigbeePort = settings["zigbee.port"];
+    }
+    if (settings.count("zigbee.baud")) {
+        m_zigbeeBaudRate = std::stoi(settings["zigbee.baud"]);
     }
     if (settings.count("logging.level")) {
         m_logLevel = settings["logging.level"];
@@ -277,6 +315,9 @@ void Config::setDefaults() {
     m_displayBrightness = 100;
     m_screenTimeout = 60;
     m_rpmsgDevice = "/dev/ttyRPMSG0";
+    m_zigbeeEnabled = false;
+    m_zigbeePort = "/dev/ttyUSB0";
+    m_zigbeeBaudRate = 115200;
     m_logLevel = "info";
     m_logFile = "/var/log/smarthub.log";
 }
