@@ -8,6 +8,7 @@
 #include "smarthub/ui/screens/EditDeviceScreen.hpp"
 #include "smarthub/ui/ScreenManager.hpp"
 #include "smarthub/ui/ThemeManager.hpp"
+#include "smarthub/ui/UIManager.hpp"
 #include "smarthub/ui/widgets/Header.hpp"
 #include "smarthub/devices/DeviceManager.hpp"
 #include "smarthub/devices/Device.hpp"
@@ -302,6 +303,9 @@ void RoomDetailScreen::onBackClicked() {
 void RoomDetailScreen::onEditRoom() {
     LOG_DEBUG("Edit room: %s", m_roomName.c_str());
 
+    // Create modal focus group for keyboard navigation containment
+    lv_group_t* modalGroup = pushModalFocusGroup();
+
     // Create modal background overlay to block clicks on background
     lv_obj_t* overlay = lv_obj_create(lv_layer_top());
     lv_obj_set_size(overlay, LV_PCT(100), LV_PCT(100));
@@ -383,6 +387,14 @@ void RoomDetailScreen::onEditRoom() {
     lv_obj_set_style_text_color(saveLabel, lv_color_white(), 0);
     lv_obj_center(saveLabel);
 
+    // Add interactive widgets to modal group for keyboard navigation
+    if (modalGroup) {
+        lv_group_add_obj(modalGroup, textarea);
+        lv_group_add_obj(modalGroup, deleteBtn);
+        lv_group_add_obj(modalGroup, cancelBtn);
+        lv_group_add_obj(modalGroup, saveBtn);
+    }
+
     // Store context for handlers
     struct EditRoomCtx {
         RoomDetailScreen* screen;
@@ -400,6 +412,7 @@ void RoomDetailScreen::onEditRoom() {
         lv_obj_t* btn = lv_event_get_target(e);
         auto* ctx = static_cast<EditRoomCtx*>(lv_obj_get_user_data(btn));
         if (!ctx) return;
+        popModalFocusGroup();  // Restore focus to main group
         lv_obj_del(ctx->overlay);
         delete ctx;
     }, LV_EVENT_CLICKED, nullptr);
@@ -421,6 +434,7 @@ void RoomDetailScreen::onEditRoom() {
             }
         }
 
+        popModalFocusGroup();  // Restore focus to main group
         lv_obj_del(ctx->overlay);
         delete ctx;
     }, LV_EVENT_CLICKED, nullptr);
@@ -430,6 +444,9 @@ void RoomDetailScreen::onEditRoom() {
         lv_obj_t* btn = lv_event_get_target(e);
         auto* ctx = static_cast<EditRoomCtx*>(lv_obj_get_user_data(btn));
         if (!ctx) return;
+
+        // Create nested modal focus group for confirmation dialog
+        lv_group_t* confirmGroup = pushModalFocusGroup();
 
         // Create confirmation dialog overlay
         lv_obj_t* confirmOverlay = lv_obj_create(lv_layer_top());
@@ -477,9 +494,15 @@ void RoomDetailScreen::onEditRoom() {
         lv_obj_set_style_text_color(cancelConfirmLabel, ctx->screen->m_theme.textPrimary(), 0);
         lv_obj_center(cancelConfirmLabel);
 
+        // Add cancel button to confirm group for keyboard navigation
+        if (confirmGroup) {
+            lv_group_add_obj(confirmGroup, cancelConfirmBtn);
+        }
+
         lv_obj_set_user_data(cancelConfirmBtn, confirmOverlay);
         lv_obj_add_event_cb(cancelConfirmBtn, [](lv_event_t* ce) {
             lv_obj_t* overlay = static_cast<lv_obj_t*>(lv_obj_get_user_data(lv_event_get_target(ce)));
+            popModalFocusGroup();  // Pop confirmation group, restore to edit modal group
             if (overlay) lv_obj_del(overlay);
         }, LV_EVENT_CLICKED, nullptr);
 
@@ -493,6 +516,11 @@ void RoomDetailScreen::onEditRoom() {
         lv_label_set_text(confirmDeleteLabel, "Delete");
         lv_obj_set_style_text_color(confirmDeleteLabel, lv_color_white(), 0);
         lv_obj_center(confirmDeleteLabel);
+
+        // Add delete button to confirm group for keyboard navigation
+        if (confirmGroup) {
+            lv_group_add_obj(confirmGroup, confirmDeleteBtn);
+        }
 
         // Context for confirm button
         struct ConfirmDeleteCtx {
@@ -509,6 +537,10 @@ void RoomDetailScreen::onEditRoom() {
             if (!cctx) return;
 
             cctx->screen->m_deviceManager.deleteRoom(cctx->roomId);
+
+            // Pop both modal groups (confirmation + edit room)
+            popModalFocusGroup();  // Pop confirmation group
+            popModalFocusGroup();  // Pop edit room group
 
             lv_obj_del(cctx->confirmOverlay);
             lv_obj_del(cctx->editOverlay);

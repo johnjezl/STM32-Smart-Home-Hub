@@ -11,6 +11,10 @@
 #include <memory>
 #include <cstdint>
 
+// Forward declare LVGL types for modal focus management
+struct _lv_group_t;
+typedef struct _lv_group_t lv_group_t;
+
 namespace smarthub {
 
 class EventBus;
@@ -25,6 +29,22 @@ class NetworkManager;
 namespace ui {
 class ScreenManager;
 class ThemeManager;
+
+/**
+ * Push a new focus group for a modal dialog.
+ * Creates a new group, sets it as active for keyboard input, and returns it.
+ * Add the modal's interactive widgets to this group using lv_group_add_obj().
+ * Call popModalFocusGroup() when the modal is closed.
+ * @return The new modal group, or nullptr if no keyboard is available
+ */
+lv_group_t* pushModalFocusGroup();
+
+/**
+ * Pop the current modal focus group and restore the previous one.
+ * Call this when closing a modal dialog.
+ */
+void popModalFocusGroup();
+
 }
 
 /**

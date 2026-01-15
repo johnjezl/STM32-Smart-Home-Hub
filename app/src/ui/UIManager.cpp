@@ -43,6 +43,7 @@
 #include <chrono>
 #include <cstring>
 #include <cerrno>
+#include <vector>
 
 namespace smarthub {
 
@@ -106,6 +107,11 @@ static struct {
 } s_keyboard;
 
 static lv_indev_drv_t s_keyboard_drv;
+static lv_indev_t* s_keyboard_indev = nullptr;
+
+// Modal focus group stack (for nested modals)
+static std::vector<lv_group_t*> s_modal_group_stack;
+static lv_group_t* s_main_group = nullptr;
 
 // Forward declarations
 static bool drm_create_buffer(int fd, DrmBuffer* buf, uint32_t width, uint32_t height);
@@ -379,6 +385,60 @@ static void keyboard_read_cb(lv_indev_drv_t* drv, lv_indev_data_t* data) {
     data->key = s_keyboard.last_key;
     data->state = s_keyboard.state;
 }
+
+} // namespace smarthub (close temporarily for global functions)
+
+namespace smarthub::ui {
+
+/**
+ * Push a new focus group for a modal dialog.
+ * Creates a new group, sets it as active for keyboard input, and returns it.
+ * Add the modal's interactive widgets to this group.
+ * Call popModalFocusGroup() when the modal is closed.
+ */
+lv_group_t* pushModalFocusGroup() {
+    if (!smarthub::s_keyboard_indev) {
+        return nullptr;  // No keyboard, nothing to do
+    }
+
+    lv_group_t* modal_group = lv_group_create();
+    smarthub::s_modal_group_stack.push_back(modal_group);
+    lv_indev_set_group(smarthub::s_keyboard_indev, modal_group);
+
+    return modal_group;
+}
+
+/**
+ * Pop the current modal focus group and restore the previous one.
+ * Call this when closing a modal dialog.
+ */
+void popModalFocusGroup() {
+    if (!smarthub::s_keyboard_indev) {
+        return;  // No keyboard, nothing to do
+    }
+
+    if (smarthub::s_modal_group_stack.empty()) {
+        return;  // No modal group to pop
+    }
+
+    // Get and remove the current modal group
+    lv_group_t* modal_group = smarthub::s_modal_group_stack.back();
+    smarthub::s_modal_group_stack.pop_back();
+
+    // Delete the modal group
+    lv_group_del(modal_group);
+
+    // Restore the previous group (either another modal or the main group)
+    if (!smarthub::s_modal_group_stack.empty()) {
+        lv_indev_set_group(smarthub::s_keyboard_indev, smarthub::s_modal_group_stack.back());
+    } else {
+        lv_indev_set_group(smarthub::s_keyboard_indev, smarthub::s_main_group);
+    }
+}
+
+} // namespace smarthub::ui
+
+namespace smarthub {
 
 // Create a DRM dumb buffer
 static bool drm_create_buffer(int fd, DrmBuffer* buf, uint32_t width, uint32_t height) {
@@ -658,16 +718,45 @@ bool UIManager::initialize(const std::string& drmDevice, const std::string& touc
                 return (keybit[idx] & bit) != 0;
             };
 
-            bool has_key_a = has_key(KEY_A);
-            bool has_key_z = has_key(KEY_Z);
-            bool has_key_enter = has_key(KEY_ENTER);
-            bool is_full_keyboard = has_key_a && has_key_z && has_key_enter;
+            // A real QWERTY keyboard must have most letter keys
+            // Consumer Control devices don't have the full alphabet
+            int letter_key_count = 0;
+            if (has_key(KEY_Q)) letter_key_count++;
+            if (has_key(KEY_W)) letter_key_count++;
+            if (has_key(KEY_E)) letter_key_count++;
+            if (has_key(KEY_R)) letter_key_count++;
+            if (has_key(KEY_T)) letter_key_count++;
+            if (has_key(KEY_Y)) letter_key_count++;
+            if (has_key(KEY_U)) letter_key_count++;
+            if (has_key(KEY_I)) letter_key_count++;
+            if (has_key(KEY_O)) letter_key_count++;
+            if (has_key(KEY_P)) letter_key_count++;
+            if (has_key(KEY_A)) letter_key_count++;
+            if (has_key(KEY_S)) letter_key_count++;
+            if (has_key(KEY_D)) letter_key_count++;
+            if (has_key(KEY_F)) letter_key_count++;
+            if (has_key(KEY_G)) letter_key_count++;
+            if (has_key(KEY_H)) letter_key_count++;
+            if (has_key(KEY_J)) letter_key_count++;
+            if (has_key(KEY_K)) letter_key_count++;
+            if (has_key(KEY_L)) letter_key_count++;
+            if (has_key(KEY_Z)) letter_key_count++;
+            if (has_key(KEY_X)) letter_key_count++;
+            if (has_key(KEY_C)) letter_key_count++;
+            if (has_key(KEY_V)) letter_key_count++;
+            if (has_key(KEY_B)) letter_key_count++;
+            if (has_key(KEY_N)) letter_key_count++;
+            if (has_key(KEY_M)) letter_key_count++;
 
-            LOG_INFO("Checking %s: evbit=0x%lx LED=%d KEY_A=%d KEY_Z=%d ENTER=%d full=%d",
-                      kbdPath.c_str(), evbit, has_ev_led, has_key_a, has_key_z, has_key_enter, is_full_keyboard);
+            // Require at least 20 letter keys (full QWERTY has 26)
+            bool is_full_keyboard = (letter_key_count >= 20) && has_key(KEY_SPACE) && has_key(KEY_ENTER);
 
-            // Require LED support to distinguish main keyboard from G-keys keypad
-            if (ev_ret >= 0 && has_ev_key && has_ev_led && is_full_keyboard) {
+            LOG_INFO("Checking %s: evbit=0x%lx LED=%d letters=%d space=%d enter=%d full=%d",
+                      kbdPath.c_str(), evbit, has_ev_led, letter_key_count,
+                      has_key(KEY_SPACE), has_key(KEY_ENTER), is_full_keyboard);
+
+            // Require full keyboard to avoid consumer control devices
+            if (ev_ret >= 0 && has_ev_key && is_full_keyboard) {
                 s_keyboard.fd = fd;
                 LOG_INFO("Keyboard found and opened: %s", kbdPath.c_str());
             } else {
@@ -721,12 +810,12 @@ bool UIManager::initialize(const std::string& drmDevice, const std::string& touc
         lv_indev_drv_init(&s_keyboard_drv);
         s_keyboard_drv.type = LV_INDEV_TYPE_KEYPAD;
         s_keyboard_drv.read_cb = keyboard_read_cb;
-        lv_indev_t* kb_indev = lv_indev_drv_register(&s_keyboard_drv);
+        s_keyboard_indev = lv_indev_drv_register(&s_keyboard_drv);
 
         // Create a group for keyboard navigation and set it as default
-        lv_group_t* g = lv_group_create();
-        lv_group_set_default(g);
-        lv_indev_set_group(kb_indev, g);
+        s_main_group = lv_group_create();
+        lv_group_set_default(s_main_group);
+        lv_indev_set_group(s_keyboard_indev, s_main_group);
     }
 
     // Set up screens and show dashboard
