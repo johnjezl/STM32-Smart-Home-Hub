@@ -5,6 +5,7 @@
 #include "smarthub/ui/screens/EditAutomationScreen.hpp"
 #include "smarthub/ui/ScreenManager.hpp"
 #include "smarthub/ui/ThemeManager.hpp"
+#include "smarthub/ui/UIManager.hpp"
 #include "smarthub/ui/widgets/Header.hpp"
 #include "smarthub/automation/AutomationManager.hpp"
 #include "smarthub/automation/Automation.hpp"
@@ -327,6 +328,9 @@ void EditAutomationScreen::onDeleteClicked() {
 }
 
 void EditAutomationScreen::showDeleteConfirmation() {
+    // Create modal focus group for keyboard navigation containment
+    lv_group_t* modalGroup = pushModalFocusGroup();
+
     // Create overlay
     lv_obj_t* overlay = lv_obj_create(lv_layer_top());
     lv_obj_set_size(overlay, LV_PCT(100), LV_PCT(100));
@@ -369,9 +373,15 @@ void EditAutomationScreen::showDeleteConfirmation() {
     lv_obj_set_style_text_color(cancelLabel, m_theme.textPrimary(), 0);
     lv_obj_center(cancelLabel);
 
+    // Add cancel button to modal group for keyboard navigation
+    if (modalGroup) {
+        lv_group_add_obj(modalGroup, cancelBtn);
+    }
+
     lv_obj_add_event_cb(cancelBtn, [](lv_event_t* e) {
         auto* data = static_cast<CallbackData*>(lv_event_get_user_data(e));
         if (data) {
+            popModalFocusGroup();  // Restore focus to main group
             lv_obj_del(data->overlay);
             delete data;
         }
@@ -388,6 +398,11 @@ void EditAutomationScreen::showDeleteConfirmation() {
     lv_obj_set_style_text_color(deleteLabel, lv_color_white(), 0);
     lv_obj_center(deleteLabel);
 
+    // Add delete button to modal group for keyboard navigation
+    if (modalGroup) {
+        lv_group_add_obj(modalGroup, deleteBtn);
+    }
+
     lv_obj_add_event_cb(deleteBtn, [](lv_event_t* e) {
         auto* data = static_cast<CallbackData*>(lv_event_get_user_data(e));
         if (data && data->screen) {
@@ -397,6 +412,7 @@ void EditAutomationScreen::showDeleteConfirmation() {
                 data->screen->m_onDeleted();
             }
 
+            popModalFocusGroup();  // Restore focus to main group
             lv_obj_del(data->overlay);
             data->screen->m_screenManager.goBack();
             delete data;

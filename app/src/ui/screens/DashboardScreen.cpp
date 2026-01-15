@@ -6,6 +6,7 @@
 #include "smarthub/ui/screens/RoomDetailScreen.hpp"
 #include "smarthub/ui/ScreenManager.hpp"
 #include "smarthub/ui/ThemeManager.hpp"
+#include "smarthub/ui/UIManager.hpp"
 #include "smarthub/ui/widgets/Header.hpp"
 #include "smarthub/ui/widgets/NavBar.hpp"
 #include "smarthub/ui/widgets/RoomCard.hpp"
@@ -289,6 +290,9 @@ void DashboardScreen::onNotificationClicked() {
 void DashboardScreen::onAddRoomClicked() {
     LOG_DEBUG("Add room clicked");
 
+    // Create modal focus group for keyboard navigation containment
+    lv_group_t* modalGroup = pushModalFocusGroup();
+
     // Create modal background overlay to block clicks on background
     lv_obj_t* overlay = lv_obj_create(lv_layer_top());
     lv_obj_set_size(overlay, LV_PCT(100), LV_PCT(100));
@@ -328,11 +332,6 @@ void DashboardScreen::onAddRoomClicked() {
     lv_obj_set_style_border_color(textarea, m_theme.primary(), LV_STATE_FOCUSED);
     // Disable scroll-on-focus to prevent screen shifting
     lv_obj_clear_flag(textarea, LV_OBJ_FLAG_SCROLL_ON_FOCUS);
-    // Add to keyboard input group for keyboard navigation and focus it
-    if (lv_group_get_default()) {
-        lv_group_add_obj(lv_group_get_default(), textarea);
-        lv_group_focus_obj(textarea);
-    }
 
     // Button row - use flex layout for proper spacing
     lv_obj_t* btnRow = lv_obj_create(modal);
@@ -367,6 +366,14 @@ void DashboardScreen::onAddRoomClicked() {
     lv_obj_set_style_text_color(saveLabel, lv_color_white(), 0);
     lv_obj_center(saveLabel);
 
+    // Add interactive widgets to modal group for keyboard navigation
+    if (modalGroup) {
+        lv_group_add_obj(modalGroup, textarea);
+        lv_group_add_obj(modalGroup, cancelBtn);
+        lv_group_add_obj(modalGroup, saveBtn);
+        lv_group_focus_obj(textarea);  // Focus the text area
+    }
+
     // Store context for handlers
     struct AddRoomCtx {
         DashboardScreen* screen;
@@ -382,6 +389,7 @@ void DashboardScreen::onAddRoomClicked() {
         lv_obj_t* btn = lv_event_get_target(e);
         auto* ctx = static_cast<AddRoomCtx*>(lv_obj_get_user_data(btn));
         if (!ctx) return;
+        popModalFocusGroup();  // Restore focus to main group
         lv_obj_del(ctx->overlay);
         delete ctx;
     }, LV_EVENT_CLICKED, nullptr);
@@ -407,6 +415,7 @@ void DashboardScreen::onAddRoomClicked() {
             ctx->screen->refreshRoomCards();
         }
 
+        popModalFocusGroup();  // Restore focus to main group
         lv_obj_del(ctx->overlay);
         delete ctx;
     }, LV_EVENT_CLICKED, nullptr);
