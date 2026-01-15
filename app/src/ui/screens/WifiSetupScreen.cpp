@@ -186,6 +186,13 @@ void WifiSetupScreen::createPasswordDialog() {
     lv_obj_set_style_border_color(m_passwordInput, m_theme.divider(), 0);
     lv_obj_set_style_border_width(m_passwordInput, 1, 0);
     lv_obj_set_style_bg_color(m_passwordInput, m_theme.surface(), 0);
+    lv_obj_set_style_text_color(m_passwordInput, m_theme.textPrimary(), 0);
+    // Disable scroll-on-focus to prevent screen shifting
+    lv_obj_clear_flag(m_passwordInput, LV_OBJ_FLAG_SCROLL_ON_FOCUS);
+    // Add to keyboard input group
+    if (lv_group_get_default()) {
+        lv_group_add_obj(lv_group_get_default(), m_passwordInput);
+    }
 
     // Show password checkbox
     m_showPasswordCheckbox = lv_checkbox_create(m_dialog);

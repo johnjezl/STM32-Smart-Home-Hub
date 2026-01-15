@@ -176,6 +176,12 @@ set(NETWORK_SOURCES
     src/network/NetworkManager.cpp
 )
 
+# Source files - Automation
+set(AUTOMATION_SOURCES
+    src/automation/Automation.cpp
+    src/automation/AutomationManager.cpp
+)
+
 # Source files - Security
 set(SECURITY_SOURCES
     src/security/CertManager.cpp
@@ -226,6 +232,9 @@ if(SMARTHUB_ENABLE_LVGL)
         src/ui/screens/AddDeviceScreen.cpp
         src/ui/screens/EditDeviceScreen.cpp
         src/ui/screens/NotificationScreen.cpp
+        src/ui/screens/AutomationListScreen.cpp
+        src/ui/screens/AddAutomationScreen.cpp
+        src/ui/screens/EditAutomationScreen.cpp
     )
 else()
     set(UI_SOURCES "")
@@ -239,6 +248,7 @@ set(SOURCES
     ${DEVICES_SOURCES}
     ${PROTOCOLS_SOURCES}
     ${NETWORK_SOURCES}
+    ${AUTOMATION_SOURCES}
     ${SECURITY_SOURCES}
     ${RPMSG_SOURCES}
     ${WEB_SOURCES}

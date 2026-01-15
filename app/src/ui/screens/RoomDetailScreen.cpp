@@ -314,12 +314,13 @@ void RoomDetailScreen::onEditRoom() {
 
     // Create the dialog centered
     lv_obj_t* modal = lv_obj_create(overlay);
-    lv_obj_set_size(modal, 420, 180);
+    lv_obj_set_size(modal, 420, 200);
     lv_obj_align(modal, LV_ALIGN_CENTER, 0, 0);
     lv_obj_set_style_bg_color(modal, m_theme.surface(), 0);
     lv_obj_set_style_radius(modal, ThemeManager::CARD_RADIUS, 0);
     lv_obj_set_style_shadow_width(modal, 20, 0);
     lv_obj_set_style_shadow_opa(modal, LV_OPA_30, 0);
+    lv_obj_set_style_pad_all(modal, 0, 0);  // No default padding
     lv_obj_clear_flag(modal, LV_OBJ_FLAG_SCROLLABLE);
 
     // Title
@@ -336,6 +337,7 @@ void RoomDetailScreen::onEditRoom() {
     lv_textarea_set_text(textarea, m_roomName.c_str());
     lv_textarea_set_one_line(textarea, true);
     lv_obj_set_style_bg_color(textarea, m_theme.background(), 0);
+    lv_obj_set_style_text_color(textarea, m_theme.textPrimary(), 0);
     lv_obj_set_style_border_color(textarea, m_theme.primary(), LV_STATE_FOCUSED);
 
     // Button row - use flex layout for proper spacing

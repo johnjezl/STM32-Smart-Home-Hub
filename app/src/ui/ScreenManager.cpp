@@ -48,6 +48,9 @@ void ScreenManager::registerScreen(const std::string& name, std::unique_ptr<Scre
     lv_obj_t* container = lv_obj_create(nullptr);
     lv_obj_set_size(container, LV_HOR_RES, LV_VER_RES);
     lv_obj_set_style_bg_opa(container, LV_OPA_COVER, 0);
+    // Set a default dark background to prevent black screen flash
+    // Individual screens may override this in onCreate()
+    lv_obj_set_style_bg_color(container, lv_color_hex(0x121212), 0);
     lv_obj_clear_flag(container, LV_OBJ_FLAG_SCROLLABLE);  // Prevent screen-level scrolling
     scr->setContainer(container);
 #endif

@@ -20,10 +20,15 @@
 #include "smarthub/ui/screens/EditDeviceScreen.hpp"
 #include "smarthub/ui/screens/WifiSetupScreen.hpp"
 #include "smarthub/ui/screens/NotificationScreen.hpp"
+#include "smarthub/ui/screens/AutomationListScreen.hpp"
+#include "smarthub/ui/screens/AddAutomationScreen.hpp"
+#include "smarthub/ui/screens/EditAutomationScreen.hpp"
 #include "smarthub/network/NetworkManager.hpp"
+#include "smarthub/automation/AutomationManager.hpp"
 #include "smarthub/core/EventBus.hpp"
 #include "smarthub/core/Logger.hpp"
 #include "smarthub/devices/DeviceManager.hpp"
+#include "smarthub/database/Database.hpp"
 
 #include <lvgl.h>
 
@@ -70,6 +75,9 @@ static lv_disp_draw_buf_t s_draw_buf;
 static lv_color_t* s_lvgl_buf1 = nullptr;
 static lv_color_t* s_lvgl_buf2 = nullptr;
 
+// Touch release debounce time (ms) - prevents spurious release events
+static constexpr uint32_t TOUCH_RELEASE_DEBOUNCE_MS = 50;
+
 // Evdev touch input state
 static struct {
     int fd = -1;
@@ -84,9 +92,20 @@ static struct {
     int logical_width = 0;
     int logical_height = 0;
     bool rotated = false;  // True if display is rotated 90° (portrait->landscape)
+    // Debouncing to prevent spurious release events
+    uint32_t last_event_time = 0;  // Time of last touch event (ms)
 } s_touch;
 
 static lv_indev_drv_t s_indev_drv;
+
+// Keyboard input state
+static struct {
+    int fd = -1;
+    uint32_t last_key = 0;
+    lv_indev_state_t state = LV_INDEV_STATE_RELEASED;
+} s_keyboard;
+
+static lv_indev_drv_t s_keyboard_drv;
 
 // Forward declarations
 static bool drm_create_buffer(int fd, DrmBuffer* buf, uint32_t width, uint32_t height);
@@ -170,6 +189,13 @@ static void drm_flush_cb(lv_disp_drv_t* drv, const lv_area_t* area, lv_color_t* 
             s_drm.page_flip_pending = true;
             s_drm.front_buffer = back;
         }
+
+        // Also copy to the other buffer to keep both in sync
+        // This prevents flashing when the buffers have different content
+        DrmBuffer* other = &s_drm.buffers[s_drm.front_buffer];
+        if (other->map && buf->map && other != buf) {
+            memcpy(other->map, buf->map, buf->height * buf->stride);
+        }
     }
 
     lv_disp_flush_ready(drv);
@@ -189,9 +215,11 @@ static void touch_read_cb(lv_indev_drv_t* drv, lv_indev_data_t* data) {
         return;
     }
 
+    uint32_t now = lv_tick_get();
+
     // Track if we got any events this poll
     bool got_events = false;
-    bool got_sync = false;
+    bool explicit_release = false;
 
     // Read available events
     struct input_event ev;
@@ -205,28 +233,42 @@ static void touch_read_cb(lv_indev_drv_t* drv, lv_indev_data_t* data) {
                 got_events = true;
             } else if (ev.code == ABS_MT_TRACKING_ID) {
                 // MT protocol B: tracking_id >= 0 means touch, -1 means release
-                s_touch.pressed = (ev.value >= 0);
-                got_events = true;
+                if (ev.value >= 0) {
+                    s_touch.pressed = true;
+                    got_events = true;
+                } else {
+                    explicit_release = true;
+                }
             }
         } else if (ev.type == EV_KEY && ev.code == BTN_TOUCH) {
-            s_touch.pressed = (ev.value != 0);
-            got_events = true;
-        } else if (ev.type == EV_SYN && ev.code == SYN_REPORT) {
-            got_sync = true;
+            if (ev.value != 0) {
+                s_touch.pressed = true;
+                got_events = true;
+            } else {
+                explicit_release = true;
+            }
         }
     }
 
-    // If we got coordinate events, consider it a touch
-    // Many touchscreens just send coords when touched, nothing when released
+    // Update state with debouncing
     if (got_events) {
+        // We received touch events - definitely pressed
         s_touch.got_coords = true;
-        s_touch.pressed = true;  // Assume pressed if we got events
-    } else if (got_sync || !s_touch.got_coords) {
-        // No events but got sync, or never got coords - consider released
-        // (we keep pressed state until we poll with no events)
-    } else {
-        // No events read at all - touch may have been released
-        s_touch.pressed = false;
+        s_touch.pressed = true;
+        s_touch.last_event_time = now;
+    } else if (explicit_release) {
+        // Explicit release event (BTN_TOUCH=0 or MT_TRACKING_ID=-1)
+        // Apply debounce: only release if some time has passed since last event
+        if (now - s_touch.last_event_time >= TOUCH_RELEASE_DEBOUNCE_MS) {
+            s_touch.pressed = false;
+        }
+        // If within debounce window, keep pressed state
+    } else if (s_touch.pressed && s_touch.got_coords) {
+        // No events read, but we were pressed - check debounce timeout
+        // Some touchscreens just stop sending events when released
+        if (now - s_touch.last_event_time >= TOUCH_RELEASE_DEBOUNCE_MS) {
+            s_touch.pressed = false;
+        }
     }
 
     // If no valid coordinates yet, report (0,0) as released
@@ -261,6 +303,81 @@ static void touch_read_cb(lv_indev_drv_t* drv, lv_indev_data_t* data) {
     data->point.x = lx;
     data->point.y = ly;
     data->state = s_touch.pressed ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
+}
+
+// Map Linux key codes to LVGL key codes
+static uint32_t linux_key_to_lvgl(uint16_t code) {
+    switch (code) {
+        case KEY_UP:        return LV_KEY_UP;
+        case KEY_DOWN:      return LV_KEY_DOWN;
+        case KEY_LEFT:      return LV_KEY_LEFT;
+        case KEY_RIGHT:     return LV_KEY_RIGHT;
+        case KEY_ENTER:     return LV_KEY_ENTER;
+        case KEY_ESC:       return LV_KEY_ESC;
+        case KEY_BACKSPACE: return LV_KEY_BACKSPACE;
+        case KEY_DELETE:    return LV_KEY_DEL;
+        case KEY_HOME:      return LV_KEY_HOME;
+        case KEY_END:       return LV_KEY_END;
+        case KEY_TAB:       return LV_KEY_NEXT;
+        default:
+            // For printable characters, return the ASCII code
+            // This is a simplified mapping - a full implementation would use XKB
+            if (code >= KEY_1 && code <= KEY_0) {
+                // Number keys: 1-9, 0
+                if (code == KEY_0) return '0';
+                return '1' + (code - KEY_1);
+            }
+            if (code >= KEY_Q && code <= KEY_P) {
+                // Top row: q-p
+                static const char top_row[] = "qwertyuiop";
+                return top_row[code - KEY_Q];
+            }
+            if (code >= KEY_A && code <= KEY_L) {
+                // Middle row: a-l
+                static const char mid_row[] = "asdfghjkl";
+                return mid_row[code - KEY_A];
+            }
+            if (code >= KEY_Z && code <= KEY_M) {
+                // Bottom row: z-m
+                static const char bot_row[] = "zxcvbnm";
+                return bot_row[code - KEY_Z];
+            }
+            if (code == KEY_SPACE) return ' ';
+            if (code == KEY_MINUS) return '-';
+            if (code == KEY_EQUAL) return '=';
+            if (code == KEY_LEFTBRACE) return '[';
+            if (code == KEY_RIGHTBRACE) return ']';
+            if (code == KEY_SEMICOLON) return ';';
+            if (code == KEY_APOSTROPHE) return '\'';
+            if (code == KEY_COMMA) return ',';
+            if (code == KEY_DOT) return '.';
+            if (code == KEY_SLASH) return '/';
+            return 0;
+    }
+}
+
+// Keyboard input read callback
+static void keyboard_read_cb(lv_indev_drv_t* drv, lv_indev_data_t* data) {
+    (void)drv;
+
+    if (s_keyboard.fd < 0) {
+        data->state = LV_INDEV_STATE_RELEASED;
+        return;
+    }
+
+    struct input_event ev;
+    while (read(s_keyboard.fd, &ev, sizeof(ev)) == sizeof(ev)) {
+        if (ev.type == EV_KEY) {
+            uint32_t lvgl_key = linux_key_to_lvgl(ev.code);
+            if (lvgl_key != 0) {
+                s_keyboard.last_key = lvgl_key;
+                s_keyboard.state = (ev.value != 0) ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
+            }
+        }
+    }
+
+    data->key = s_keyboard.last_key;
+    data->state = s_keyboard.state;
 }
 
 // Create a DRM dumb buffer
@@ -337,9 +454,10 @@ static void drm_destroy_buffer(int fd, DrmBuffer* buf) {
     }
 }
 
-UIManager::UIManager(EventBus& eventBus, DeviceManager& deviceManager)
+UIManager::UIManager(EventBus& eventBus, DeviceManager& deviceManager, Database& database)
     : m_eventBus(eventBus)
     , m_deviceManager(deviceManager)
+    , m_database(database)
 {
 }
 
@@ -515,11 +633,59 @@ bool UIManager::initialize(const std::string& drmDevice, const std::string& touc
         LOG_INFO("UIManager", "Touch input initialized: " + touchDevice);
     }
 
+    // Try to find and open a keyboard device
+    // We look for a full keyboard (has KEY_A, KEY_Z, and KEY_ENTER) rather than
+    // just KEY_A to avoid opening G-key/macro keypads
+    s_keyboard.fd = -1;
+    LOG_INFO("Scanning for keyboard devices...");
+    for (int i = 0; i < 10 && s_keyboard.fd < 0; i++) {
+        std::string kbdPath = "/dev/input/event" + std::to_string(i);
+        int fd = open(kbdPath.c_str(), O_RDONLY | O_NONBLOCK);
+        if (fd >= 0) {
+            unsigned long evbit = 0;
+            unsigned long keybit[(KEY_MAX + 8 * sizeof(long) - 1) / (8 * sizeof(long))] = {0};
+
+            int ev_ret = ioctl(fd, EVIOCGBIT(0, sizeof(evbit)), &evbit);
+            bool has_ev_key = (evbit & (1UL << EV_KEY)) != 0;
+            bool has_ev_led = (evbit & (1UL << EV_LED)) != 0;  // Full keyboards have LEDs
+            int key_ret = ioctl(fd, EVIOCGBIT(EV_KEY, sizeof(keybit)), keybit);
+
+            // Check for multiple keys to identify a full keyboard
+            auto has_key = [&keybit, key_ret](int key) -> bool {
+                if (key_ret < 0) return false;
+                size_t idx = key / (8 * sizeof(long));
+                unsigned long bit = 1UL << (key % (8 * sizeof(long)));
+                return (keybit[idx] & bit) != 0;
+            };
+
+            bool has_key_a = has_key(KEY_A);
+            bool has_key_z = has_key(KEY_Z);
+            bool has_key_enter = has_key(KEY_ENTER);
+            bool is_full_keyboard = has_key_a && has_key_z && has_key_enter;
+
+            LOG_INFO("Checking %s: evbit=0x%lx LED=%d KEY_A=%d KEY_Z=%d ENTER=%d full=%d",
+                      kbdPath.c_str(), evbit, has_ev_led, has_key_a, has_key_z, has_key_enter, is_full_keyboard);
+
+            // Require LED support to distinguish main keyboard from G-keys keypad
+            if (ev_ret >= 0 && has_ev_key && has_ev_led && is_full_keyboard) {
+                s_keyboard.fd = fd;
+                LOG_INFO("Keyboard found and opened: %s", kbdPath.c_str());
+            } else {
+                close(fd);
+            }
+        }
+    }
+    if (s_keyboard.fd < 0) {
+        LOG_WARN("No keyboard device found after scanning");
+    }
+
     // Initialize LVGL
     lv_init();
 
-    // Allocate LVGL draw buffers
-    size_t buf_size = m_width * m_height / 10;  // 1/10 of screen
+    // Allocate LVGL draw buffers - full screen size for single-flush rendering
+    // This ensures the entire frame is rendered before any page flip occurs,
+    // preventing partial-update flashing artifacts
+    size_t buf_size = m_width * m_height;  // Full screen
     s_lvgl_buf1 = new lv_color_t[buf_size];
     s_lvgl_buf2 = new lv_color_t[buf_size];
 
@@ -536,25 +702,69 @@ bool UIManager::initialize(const std::string& drmDevice, const std::string& touc
     s_disp_drv.ver_res = m_height;
     s_disp_drv.flush_cb = drm_flush_cb;
     s_disp_drv.draw_buf = &s_draw_buf;
-    // Force full refresh when rotated to avoid partial update artifacts
-    s_disp_drv.full_refresh = needs_rotation ? 1 : 0;
+    // Always use full refresh with DRM double-buffering to ensure both buffers
+    // stay synchronized. Without this, partial updates to one buffer could leave
+    // stale content that appears as black regions when buffers are swapped.
+    s_disp_drv.full_refresh = 1;
     // Note: We handle rotation manually in drm_flush_cb, not using sw_rotate
 
     lv_disp_drv_register(&s_disp_drv);
 
-    // Initialize input driver
+    // Initialize touch input driver
     lv_indev_drv_init(&s_indev_drv);
     s_indev_drv.type = LV_INDEV_TYPE_POINTER;
     s_indev_drv.read_cb = touch_read_cb;
     lv_indev_drv_register(&s_indev_drv);
 
+    // Initialize keyboard input driver
+    if (s_keyboard.fd >= 0) {
+        lv_indev_drv_init(&s_keyboard_drv);
+        s_keyboard_drv.type = LV_INDEV_TYPE_KEYPAD;
+        s_keyboard_drv.read_cb = keyboard_read_cb;
+        lv_indev_t* kb_indev = lv_indev_drv_register(&s_keyboard_drv);
+
+        // Create a group for keyboard navigation and set it as default
+        lv_group_t* g = lv_group_create();
+        lv_group_set_default(g);
+        lv_indev_set_group(kb_indev, g);
+    }
+
     // Set up screens and show dashboard
     setupScreens();
 
-    // Force immediate render to display the dashboard on startup
-    // This ensures the screen is visible before we return from initialize()
+    // Clear any stale objects from the top layer to prevent overlay issues
+    // This ensures no leftover modal dialogs or overlays are visible at startup
+    lv_obj_clean(lv_layer_top());
+
+    // Force immediate render to BOTH buffers to ensure double-buffering is properly initialized
+    // Without this, one buffer may contain stale/black content causing flickering on first interaction
+    // Render 1: Renders to back buffer (buffer 1), then flips (buffer 1 becomes front)
     lv_refr_now(NULL);
     lv_timer_handler();
+
+    // Wait for first page flip to complete
+    while (s_drm.page_flip_pending) {
+        drmEventContext ev = {};
+        ev.version = 2;
+        ev.page_flip_handler = page_flip_handler;
+        drmHandleEvent(s_drm.fd, &ev);
+    }
+
+    // Render 2: Force another full refresh to populate the other buffer
+    // This marks the entire screen dirty and renders to the now-back buffer (buffer 0)
+    lv_obj_invalidate(lv_scr_act());
+    lv_refr_now(NULL);
+    lv_timer_handler();
+
+    // Wait for second page flip to complete
+    while (s_drm.page_flip_pending) {
+        drmEventContext ev = {};
+        ev.version = 2;
+        ev.page_flip_handler = page_flip_handler;
+        drmHandleEvent(s_drm.fd, &ev);
+    }
+
+    LOG_DEBUG("UIManager", "Both DRM buffers initialized with rendered content");
 
     m_initialized = true;
     m_running = true;
@@ -586,6 +796,11 @@ void UIManager::update() {
     // Update screen manager (for screen animations and updates)
     if (m_screenManager) {
         m_screenManager->update(elapsed);
+    }
+
+    // Poll automation manager for time-based triggers
+    if (m_automationManager) {
+        m_automationManager->poll(currentTick);
     }
 
     // Handle LVGL tasks
@@ -647,9 +862,16 @@ void UIManager::shutdown() {
         s_touch.fd = -1;
     }
 
+    // Close keyboard device
+    if (s_keyboard.fd >= 0) {
+        close(s_keyboard.fd);
+        s_keyboard.fd = -1;
+    }
+
     // Clean up screen manager before LVGL buffers
     m_screenManager.reset();
     m_themeManager.reset();
+    m_automationManager.reset();
 
     // Free LVGL buffers
     delete[] s_lvgl_buf1;
@@ -668,6 +890,11 @@ void UIManager::setupScreens() {
     // Create network manager for WiFi setup
     m_networkManager = std::make_unique<network::NetworkManager>();
     m_networkManager->initialize();
+
+    // Create automation manager
+    m_automationManager = std::make_unique<AutomationManager>(
+        m_eventBus, m_database, m_deviceManager);
+    m_automationManager->initialize();
 
     // Create screen manager
     m_screenManager = std::make_unique<ui::ScreenManager>(*this);
@@ -708,6 +935,16 @@ void UIManager::setupScreens() {
 
     m_screenManager->registerScreen("notifications",
         std::make_unique<ui::NotificationScreen>(*m_screenManager, *m_themeManager, m_deviceManager));
+
+    m_screenManager->registerScreen("automations",
+        std::make_unique<ui::AutomationListScreen>(*m_screenManager, *m_themeManager, *m_automationManager));
+
+    m_screenManager->registerScreen("add_automation",
+        std::make_unique<ui::AddAutomationScreen>(*m_screenManager, *m_themeManager,
+            *m_automationManager, m_deviceManager));
+
+    m_screenManager->registerScreen("edit_automation",
+        std::make_unique<ui::EditAutomationScreen>(*m_screenManager, *m_themeManager, *m_automationManager));
 
     // Set home screen and show it
     m_screenManager->setHomeScreen("dashboard");
