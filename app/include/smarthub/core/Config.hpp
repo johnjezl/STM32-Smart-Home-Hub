@@ -66,6 +66,11 @@ public:
     // RPMsg settings
     std::string rpmsgDevice() const { return m_rpmsgDevice; }
 
+    // Zigbee settings
+    bool zigbeeEnabled() const { return m_zigbeeEnabled; }
+    std::string zigbeePort() const { return m_zigbeePort; }
+    int zigbeeBaudRate() const { return m_zigbeeBaudRate; }
+
     // Logging settings
     std::string logLevel() const { return m_logLevel; }
     std::string logFile() const { return m_logFile; }
@@ -110,6 +115,11 @@ private:
 
     // RPMsg
     std::string m_rpmsgDevice = "/dev/ttyRPMSG0";
+
+    // Zigbee
+    bool m_zigbeeEnabled = false;
+    std::string m_zigbeePort = "/dev/ttyUSB0";
+    int m_zigbeeBaudRate = 115200;
 
     // Logging
     std::string m_logLevel = "info";

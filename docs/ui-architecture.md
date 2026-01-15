@@ -299,6 +299,53 @@ Dashboard (Home)
 **Tab Navigation**: Direct screen switch without history push
 **Detail Navigation**: Pushes to history stack, enables back button
 
+## Thread Safety
+
+LVGL is **not thread-safe**. All LVGL API calls must be made from the main thread (the thread running `lv_timer_handler()`). This is critical when integrating with protocol handlers like Zigbee that run background threads.
+
+### Using lv_async_call()
+
+When callbacks from background threads need to update the UI, use `lv_async_call()` to schedule the update on the main thread:
+
+```cpp
+// WRONG - Called from background thread, causes intermittent UI glitches
+void MyScreen::onDeviceDiscovered(DevicePtr device) {
+    lv_label_set_text(m_statusLabel, "Device found!");  // Not thread-safe!
+}
+
+// CORRECT - Defers UI update to main thread
+void MyScreen::onDeviceDiscovered(DevicePtr device) {
+    // Store data for async callback
+    m_discoveredDevice = device;
+
+    // Schedule UI update on main thread
+    lv_async_call([](void* userData) {
+        auto* self = static_cast<MyScreen*>(userData);
+        if (!self) return;
+
+        lv_label_set_text(self->m_statusLabel, "Device found!");
+        lv_obj_clear_flag(self->m_spinner, LV_OBJ_FLAG_HIDDEN);
+    }, this);
+}
+```
+
+### Common Sources of Background Threads
+
+These subsystems invoke callbacks from background threads:
+- **ZigbeeHandler**: Device discovery, state changes
+- **MQTTHandler**: Message reception
+- **EventBus**: Async event delivery
+- **NetworkManager**: WiFi scan results, connection status
+
+Always wrap UI updates from these callbacks in `lv_async_call()`.
+
+### Best Practices
+
+1. Store callback data in member variables before calling `lv_async_call()`
+2. Always check the `userData` pointer for nullptr in the async callback
+3. Keep async callbacks short - just update UI state
+4. Use `lv_obj_clear_flag(obj, LV_OBJ_FLAG_HIDDEN)` / `lv_obj_add_flag()` for show/hide
+
 ## Conditional Compilation
 
 All LVGL-dependent code is wrapped with:

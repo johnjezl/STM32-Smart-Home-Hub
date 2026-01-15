@@ -332,6 +332,106 @@ The Device base class uses mutex protection for state access. All state operatio
 - `setState()` - Thread-safe write with callback invocation
 - `getProperty()` - Thread-safe read
 
+## Device Persistence
+
+The DeviceManager automatically persists devices to the SQLite database.
+
+### Automatic Persistence
+
+Devices are automatically saved and loaded:
+
+```cpp
+DeviceManager manager(eventBus, database);
+manager.initialize();  // Loads all devices from database
+
+// Adding a device automatically saves it to the database
+auto device = std::make_shared<SwitchDevice>("sw1", "Kitchen Switch", "zigbee", "0x1234");
+manager.addDevice(device);  // Persists to database
+
+// Removing a device automatically deletes it from the database
+manager.removeDevice("sw1");  // Deletes from database
+```
+
+### Database Schema
+
+Devices are stored in the `devices` table:
+
+```sql
+CREATE TABLE devices (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    type TEXT NOT NULL,
+    protocol TEXT,
+    protocol_address TEXT,
+    room TEXT,
+    config TEXT  -- JSON blob
+);
+
+CREATE TABLE device_states (
+    device_id TEXT PRIMARY KEY,
+    state TEXT NOT NULL,  -- JSON blob
+    updated_at INTEGER
+);
+```
+
+### Manual Persistence Operations
+
+For special cases, manual persistence methods are available:
+
+```cpp
+// Save all devices to database
+manager.saveAllDevices();
+
+// Save a single device
+manager.saveDevice(device);
+
+// Delete a device from database only (does not remove from memory)
+manager.deleteDeviceFromDatabase("device_id");
+
+// Load all devices from database
+manager.loadDevicesFromDatabase();
+```
+
+### State Persistence
+
+Device states are persisted separately from device metadata:
+
+```cpp
+// Set device state (automatically persists if device has protocol)
+manager.setDeviceState("sw1", "on", true);
+
+// Explicitly save all device states
+manager.saveAllDevices();
+```
+
+When the DeviceManager shuts down, all device states are saved:
+
+```cpp
+manager.shutdown();  // Saves all devices and states
+```
+
+### Cross-Session Persistence
+
+Devices persist across application restarts:
+
+```cpp
+// First run - add devices
+{
+    DeviceManager manager(eventBus, database);
+    manager.initialize();
+    manager.addDevice(std::make_shared<SwitchDevice>("sw1", "Switch 1", "local", ""));
+    manager.shutdown();
+}
+
+// Second run - devices are automatically loaded
+{
+    DeviceManager manager(eventBus, database);
+    manager.initialize();
+    auto device = manager.getDevice("sw1");  // Device is available
+    assert(device != nullptr);
+}
+```
+
 ## See Also
 
 - [Protocol Handlers](protocols.md) - Protocol integration

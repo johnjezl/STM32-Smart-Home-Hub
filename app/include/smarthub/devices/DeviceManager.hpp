@@ -160,6 +160,28 @@ public:
      */
     bool isDiscovering() const;
 
+    /**
+     * Set callback for pending devices discovered during pairing
+     * When set, discovered devices will be passed to this callback instead of auto-added.
+     * The UI can then show the device info and let the user complete setup.
+     * @param protocol Protocol name (e.g., "zigbee")
+     * @param callback Callback to receive discovered devices (pass nullptr to clear)
+     */
+    void setPendingDeviceCallback(const std::string& protocol, DeviceDiscoveredCallback callback);
+
+    /**
+     * Get the pending device from a protocol (if any)
+     * @param protocol Protocol name (e.g., "zigbee")
+     * @return The pending device, or nullptr if none
+     */
+    DevicePtr getPendingDevice(const std::string& protocol);
+
+    /**
+     * Clear the pending device for a protocol
+     * @param protocol Protocol name (e.g., "zigbee")
+     */
+    void clearPendingDevice(const std::string& protocol);
+
     // State management
 
     /**
@@ -174,6 +196,16 @@ public:
      * Save all devices to database
      */
     bool saveAllDevices();
+
+    /**
+     * Save a single device to database
+     */
+    bool saveDevice(const DevicePtr& device);
+
+    /**
+     * Delete a device from database
+     */
+    bool deleteDeviceFromDatabase(const std::string& id);
 
     /**
      * Load all devices from database

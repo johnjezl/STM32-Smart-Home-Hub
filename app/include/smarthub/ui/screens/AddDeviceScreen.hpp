@@ -10,10 +10,12 @@
 #include <string>
 #include <vector>
 #include <functional>
+#include <cstdint>
 
 namespace smarthub {
 
 class DeviceManager;
+class EventBus;
 
 namespace ui {
 
@@ -34,7 +36,8 @@ public:
 
     AddDeviceScreen(ScreenManager& screenManager,
                     ThemeManager& theme,
-                    DeviceManager& deviceManager);
+                    DeviceManager& deviceManager,
+                    EventBus& eventBus);
     ~AddDeviceScreen() override;
 
     /**
@@ -78,6 +81,11 @@ private:
     void createHttpConfig();
     void createZigbeeConfig();
 
+    // Zigbee pairing
+    void startZigbeePairing();
+    void stopZigbeePairing();
+    void onZigbeeDeviceDiscovered(DevicePtr device);
+
     // Step 4: Room selection
     void createStep4_RoomSelection();
 
@@ -113,6 +121,12 @@ private:
     lv_obj_t* m_zigbeeAddressInput = nullptr;
     lv_obj_t* m_zigbeeEndpointInput = nullptr;
 
+    // Zigbee pairing elements
+    lv_obj_t* m_pairBtn = nullptr;
+    lv_obj_t* m_pairStatusLabel = nullptr;
+    lv_obj_t* m_pairSpinner = nullptr;
+    lv_obj_t* m_discoveredDeviceLabel = nullptr;
+
     // Step 4 elements
     lv_obj_t* m_roomDropdown = nullptr;
 
@@ -138,9 +152,18 @@ private:
     std::vector<std::string> m_protocols = {"local", "mqtt", "http", "zigbee"};
     std::vector<std::pair<std::string, std::string>> m_rooms;  // id, name
 
+    // Zigbee pairing state
+    bool m_isPairing = false;
+    std::string m_discoveredIeeeAddress;
+    std::string m_discoveredManufacturer;
+    std::string m_discoveredModel;
+    DevicePtr m_pendingDevice;  // Device discovered but not yet added
+
     ThemeManager& m_theme;
     DeviceManager& m_deviceManager;
+    EventBus& m_eventBus;
     DeviceAddedCallback m_onDeviceAdded;
+    uint64_t m_eventSubscriptionId = 0;
 
     static constexpr int TOTAL_STEPS = 4;
 };

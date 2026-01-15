@@ -59,6 +59,22 @@ public:
     void setDeviceStateCallback(DeviceStateCallback cb) override;
     void setDeviceAvailabilityCallback(DeviceAvailabilityCallback cb) override;
 
+    /**
+     * Set callback for devices discovered during pairing (not auto-added)
+     * This is called instead of DeviceDiscoveredCallback when in discovery mode
+     */
+    void setPendingDeviceCallback(DeviceDiscoveredCallback cb);
+
+    /**
+     * Get pending device discovered during pairing (if any)
+     */
+    DevicePtr getPendingDevice() const;
+
+    /**
+     * Clear pending device
+     */
+    void clearPendingDevice();
+
     nlohmann::json getStatus() const override;
     std::vector<std::string> getKnownDeviceAddresses() const override;
 
@@ -115,8 +131,12 @@ private:
 
     // Callbacks
     DeviceDiscoveredCallback m_discoveredCb;
+    DeviceDiscoveredCallback m_pendingDeviceCb;
     DeviceStateCallback m_stateCb;
     DeviceAvailabilityCallback m_availabilityCb;
+
+    // Pending device during discovery (not auto-added)
+    DevicePtr m_pendingDevice;
 
     // Device mappings
     std::map<uint64_t, std::string> m_ieeeToDeviceId;

@@ -6,6 +6,7 @@
 #include <smarthub/devices/Device.hpp>
 #include <smarthub/devices/DeviceTypeRegistry.hpp>
 #include <smarthub/protocols/ProtocolFactory.hpp>
+#include <smarthub/protocols/zigbee/ZigbeeHandler.hpp>
 #include <smarthub/core/EventBus.hpp>
 #include <smarthub/database/Database.hpp>
 #include <smarthub/core/Logger.hpp>
@@ -133,25 +134,44 @@ IProtocolHandler* DeviceManager::getProtocol(const std::string& name) {
 
 bool DeviceManager::addDevice(DevicePtr device) {
     if (!device) {
+        LOG_ERROR("addDevice called with null device");
         return false;
     }
 
+    LOG_DEBUG("addDevice: acquiring mutex");
     std::lock_guard<std::mutex> lock(m_mutex);
+    LOG_DEBUG("addDevice: mutex acquired");
 
-    if (m_devices.count(device->id()) > 0) {
-        LOG_WARN("Device %s already exists", device->id().c_str());
+    std::string deviceId = device->id();
+    LOG_DEBUG("addDevice: device id = %s", deviceId.c_str());
+
+    if (m_devices.count(deviceId) > 0) {
+        LOG_WARN("Device %s already exists", deviceId.c_str());
         return false;
     }
 
-    m_devices[device->id()] = device;
-    LOG_INFO("Added device: %s (%s)", device->name().c_str(), device->id().c_str());
+    m_devices[deviceId] = device;
+    LOG_INFO("Added device: %s (%s)", device->name().c_str(), deviceId.c_str());
+
+    // Save to database
+    saveDevice(device);
 
     // Publish device added event
-    DeviceStateEvent event;
-    event.deviceId = device->id();
-    event.property = "_added";
-    event.value = device->toJson();
-    m_eventBus.publish(event);
+    LOG_DEBUG("addDevice: publishing event");
+    try {
+        DeviceStateEvent event;
+        event.deviceId = deviceId;
+        event.property = "_added";
+        LOG_DEBUG("addDevice: calling toJson");
+        event.value = device->toJson();
+        LOG_DEBUG("addDevice: calling eventBus.publish");
+        m_eventBus.publish(event);
+        LOG_DEBUG("addDevice: event published");
+    } catch (const std::exception& e) {
+        LOG_ERROR("Exception publishing device event: %s", e.what());
+    } catch (...) {
+        LOG_ERROR("Unknown exception publishing device event");
+    }
 
     return true;
 }
@@ -165,6 +185,9 @@ bool DeviceManager::removeDevice(const std::string& id) {
     }
 
     LOG_INFO("Removing device: %s", id.c_str());
+
+    // Delete from database
+    deleteDeviceFromDatabase(id);
 
     // Publish device removed event
     DeviceStateEvent event;
@@ -287,6 +310,61 @@ bool DeviceManager::isDiscovering() const {
     return m_discovering;
 }
 
+void DeviceManager::setPendingDeviceCallback(const std::string& protocol, DeviceDiscoveredCallback callback) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+
+    auto it = m_protocols.find(protocol);
+    if (it == m_protocols.end()) {
+        LOG_WARN("Protocol %s not loaded", protocol.c_str());
+        return;
+    }
+
+    // For Zigbee protocol, use the pending device callback mechanism
+    if (protocol == "zigbee") {
+        auto* zigbee = dynamic_cast<zigbee::ZigbeeHandler*>(it->second.get());
+        if (zigbee) {
+            zigbee->setPendingDeviceCallback(std::move(callback));
+            LOG_DEBUG("Set pending device callback for Zigbee");
+        }
+    }
+    // Other protocols can be added here in the future
+}
+
+DevicePtr DeviceManager::getPendingDevice(const std::string& protocol) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+
+    auto it = m_protocols.find(protocol);
+    if (it == m_protocols.end()) {
+        return nullptr;
+    }
+
+    if (protocol == "zigbee") {
+        auto* zigbee = dynamic_cast<zigbee::ZigbeeHandler*>(it->second.get());
+        if (zigbee) {
+            return zigbee->getPendingDevice();
+        }
+    }
+
+    return nullptr;
+}
+
+void DeviceManager::clearPendingDevice(const std::string& protocol) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+
+    auto it = m_protocols.find(protocol);
+    if (it == m_protocols.end()) {
+        return;
+    }
+
+    if (protocol == "zigbee") {
+        auto* zigbee = dynamic_cast<zigbee::ZigbeeHandler*>(it->second.get());
+        if (zigbee) {
+            zigbee->clearPendingDevice();
+            LOG_DEBUG("Cleared pending device for Zigbee");
+        }
+    }
+}
+
 bool DeviceManager::setDeviceState(const std::string& deviceId, const std::string& property,
                                    const nlohmann::json& value) {
     DevicePtr device;
@@ -339,7 +417,9 @@ bool DeviceManager::saveAllDevices() {
                 stmt->bind(4, device->protocol());
                 stmt->bind(5, device->protocolAddress());
                 stmt->bind(6, device->room());
-                stmt->bind(7, device->getConfig().dump());
+                // Ensure config is valid JSON object
+                auto config = device->getConfig();
+                stmt->bind(7, config.is_object() ? config.dump() : "{}");
                 stmt->execute();
             }
 
@@ -366,6 +446,83 @@ bool DeviceManager::saveAllDevices() {
     return true;
 }
 
+bool DeviceManager::saveDevice(const DevicePtr& device) {
+    if (!device) {
+        return false;
+    }
+
+    try {
+        // Save device info
+        auto stmt = m_database.prepare(
+            "INSERT OR REPLACE INTO devices "
+            "(id, name, type, protocol, protocol_address, room, config) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)");
+
+        if (stmt && stmt->isValid()) {
+            stmt->bind(1, device->id());
+            stmt->bind(2, device->name());
+            stmt->bind(3, device->typeString());
+            stmt->bind(4, device->protocol());
+            stmt->bind(5, device->protocolAddress());
+            stmt->bind(6, device->room());
+            // Ensure config is valid JSON object
+            auto config = device->getConfig();
+            stmt->bind(7, config.is_object() ? config.dump() : "{}");
+            stmt->execute();
+        }
+
+        // Save current state
+        nlohmann::json state = device->getState();
+        for (auto& [prop, val] : state.items()) {
+            auto stateStmt = m_database.prepare(
+                "INSERT OR REPLACE INTO device_state "
+                "(device_id, property, value, updated_at) "
+                "VALUES (?, ?, ?, strftime('%s', 'now'))");
+
+            if (stateStmt && stateStmt->isValid()) {
+                stateStmt->bind(1, device->id());
+                stateStmt->bind(2, prop);
+                stateStmt->bind(3, val.dump());
+                stateStmt->execute();
+            }
+        }
+
+        LOG_DEBUG("Saved device to database: %s", device->id().c_str());
+        return true;
+
+    } catch (const std::exception& e) {
+        LOG_ERROR("Failed to save device %s: %s", device->id().c_str(), e.what());
+        return false;
+    }
+}
+
+bool DeviceManager::deleteDeviceFromDatabase(const std::string& id) {
+    try {
+        // Delete device state
+        auto stateStmt = m_database.prepare(
+            "DELETE FROM device_state WHERE device_id = ?");
+        if (stateStmt && stateStmt->isValid()) {
+            stateStmt->bind(1, id);
+            stateStmt->execute();
+        }
+
+        // Delete device
+        auto stmt = m_database.prepare(
+            "DELETE FROM devices WHERE id = ?");
+        if (stmt && stmt->isValid()) {
+            stmt->bind(1, id);
+            stmt->execute();
+        }
+
+        LOG_DEBUG("Deleted device from database: %s", id.c_str());
+        return true;
+
+    } catch (const std::exception& e) {
+        LOG_ERROR("Failed to delete device %s from database: %s", id.c_str(), e.what());
+        return false;
+    }
+}
+
 void DeviceManager::loadDevicesFromDatabase() {
     LOG_INFO("Loading devices from database");
 
@@ -390,6 +547,10 @@ void DeviceManager::loadDevicesFromDatabase() {
             nlohmann::json config;
             try {
                 config = nlohmann::json::parse(configStr);
+                // Ensure config is an object, not null or other type
+                if (!config.is_object()) {
+                    config = nlohmann::json::object();
+                }
             } catch (...) {
                 config = nlohmann::json::object();
             }

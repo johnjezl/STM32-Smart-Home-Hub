@@ -104,6 +104,8 @@ static struct {
     int fd = -1;
     uint32_t last_key = 0;
     lv_indev_state_t state = LV_INDEV_STATE_RELEASED;
+    bool shift_pressed = false;
+    bool caps_lock = false;
 } s_keyboard;
 
 static lv_indev_drv_t s_keyboard_drv;
@@ -312,7 +314,7 @@ static void touch_read_cb(lv_indev_drv_t* drv, lv_indev_data_t* data) {
 }
 
 // Map Linux key codes to LVGL key codes
-static uint32_t linux_key_to_lvgl(uint16_t code) {
+static uint32_t linux_key_to_lvgl(uint16_t code, bool shift, bool caps) {
     switch (code) {
         case KEY_UP:        return LV_KEY_UP;
         case KEY_DOWN:      return LV_KEY_DOWN;
@@ -326,40 +328,55 @@ static uint32_t linux_key_to_lvgl(uint16_t code) {
         case KEY_END:       return LV_KEY_END;
         case KEY_TAB:       return LV_KEY_NEXT;
         default:
-            // For printable characters, return the ASCII code
-            // This is a simplified mapping - a full implementation would use XKB
-            if (code >= KEY_1 && code <= KEY_0) {
-                // Number keys: 1-9, 0
-                if (code == KEY_0) return '0';
-                return '1' + (code - KEY_1);
-            }
-            if (code >= KEY_Q && code <= KEY_P) {
-                // Top row: q-p
-                static const char top_row[] = "qwertyuiop";
-                return top_row[code - KEY_Q];
-            }
-            if (code >= KEY_A && code <= KEY_L) {
-                // Middle row: a-l
-                static const char mid_row[] = "asdfghjkl";
-                return mid_row[code - KEY_A];
-            }
-            if (code >= KEY_Z && code <= KEY_M) {
-                // Bottom row: z-m
-                static const char bot_row[] = "zxcvbnm";
-                return bot_row[code - KEY_Z];
-            }
-            if (code == KEY_SPACE) return ' ';
-            if (code == KEY_MINUS) return '-';
-            if (code == KEY_EQUAL) return '=';
-            if (code == KEY_LEFTBRACE) return '[';
-            if (code == KEY_RIGHTBRACE) return ']';
-            if (code == KEY_SEMICOLON) return ';';
-            if (code == KEY_APOSTROPHE) return '\'';
-            if (code == KEY_COMMA) return ',';
-            if (code == KEY_DOT) return '.';
-            if (code == KEY_SLASH) return '/';
-            return 0;
+            break;
     }
+
+    // For letter keys, caps lock XOR shift determines case
+    bool upper = caps != shift;  // XOR: caps+shift = lower, caps or shift alone = upper
+
+    // Number row with shift symbols
+    if (code >= KEY_1 && code <= KEY_0) {
+        if (shift) {
+            static const char shifted_nums[] = "!@#$%^&*()";
+            if (code == KEY_0) return ')';
+            return shifted_nums[code - KEY_1];
+        }
+        if (code == KEY_0) return '0';
+        return '1' + (code - KEY_1);
+    }
+
+    // Letter keys
+    if (code >= KEY_Q && code <= KEY_P) {
+        static const char top_row[] = "qwertyuiop";
+        char c = top_row[code - KEY_Q];
+        return upper ? (c - 'a' + 'A') : c;
+    }
+    if (code >= KEY_A && code <= KEY_L) {
+        static const char mid_row[] = "asdfghjkl";
+        char c = mid_row[code - KEY_A];
+        return upper ? (c - 'a' + 'A') : c;
+    }
+    if (code >= KEY_Z && code <= KEY_M) {
+        static const char bot_row[] = "zxcvbnm";
+        char c = bot_row[code - KEY_Z];
+        return upper ? (c - 'a' + 'A') : c;
+    }
+
+    // Punctuation with shift variants
+    if (code == KEY_SPACE) return ' ';
+    if (code == KEY_MINUS) return shift ? '_' : '-';
+    if (code == KEY_EQUAL) return shift ? '+' : '=';
+    if (code == KEY_LEFTBRACE) return shift ? '{' : '[';
+    if (code == KEY_RIGHTBRACE) return shift ? '}' : ']';
+    if (code == KEY_SEMICOLON) return shift ? ':' : ';';
+    if (code == KEY_APOSTROPHE) return shift ? '"' : '\'';
+    if (code == KEY_COMMA) return shift ? '<' : ',';
+    if (code == KEY_DOT) return shift ? '>' : '.';
+    if (code == KEY_SLASH) return shift ? '?' : '/';
+    if (code == KEY_BACKSLASH) return shift ? '|' : '\\';
+    if (code == KEY_GRAVE) return shift ? '~' : '`';
+
+    return 0;
 }
 
 // Keyboard input read callback
@@ -374,7 +391,19 @@ static void keyboard_read_cb(lv_indev_drv_t* drv, lv_indev_data_t* data) {
     struct input_event ev;
     while (read(s_keyboard.fd, &ev, sizeof(ev)) == sizeof(ev)) {
         if (ev.type == EV_KEY) {
-            uint32_t lvgl_key = linux_key_to_lvgl(ev.code);
+            // Track modifier keys
+            if (ev.code == KEY_LEFTSHIFT || ev.code == KEY_RIGHTSHIFT) {
+                s_keyboard.shift_pressed = (ev.value != 0);
+                continue;
+            }
+            if (ev.code == KEY_CAPSLOCK && ev.value == 1) {
+                // Toggle caps lock on key press (not release)
+                s_keyboard.caps_lock = !s_keyboard.caps_lock;
+                continue;
+            }
+
+            // Convert regular keys with shift/caps state
+            uint32_t lvgl_key = linux_key_to_lvgl(ev.code, s_keyboard.shift_pressed, s_keyboard.caps_lock);
             if (lvgl_key != 0) {
                 s_keyboard.last_key = lvgl_key;
                 s_keyboard.state = (ev.value != 0) ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
@@ -1014,7 +1043,7 @@ void UIManager::setupScreens() {
         std::make_unique<ui::AboutScreen>(*m_screenManager, *m_themeManager));
 
     m_screenManager->registerScreen("add_device",
-        std::make_unique<ui::AddDeviceScreen>(*m_screenManager, *m_themeManager, m_deviceManager));
+        std::make_unique<ui::AddDeviceScreen>(*m_screenManager, *m_themeManager, m_deviceManager, m_eventBus));
 
     m_screenManager->registerScreen("edit_device",
         std::make_unique<ui::EditDeviceScreen>(*m_screenManager, *m_themeManager, m_deviceManager));

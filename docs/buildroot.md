@@ -381,6 +381,106 @@ ls output/target/etc/init.d/S40network
 
 ---
 
+## Runtime Configuration
+
+This section documents runtime services and configurations that are set up on the device after initial deployment.
+
+### Time Synchronization
+
+The device uses HTTP-based time synchronization since NTP may be blocked on some networks. Time is synced on boot and hourly via cron.
+
+**Scripts installed:**
+
+`/usr/bin/timesync`:
+```bash
+#!/bin/sh
+# Sync time from HTTP header
+HTTP_DATE=$(wget -qSO /dev/null http://google.com 2>&1 | grep -i "^  Date:" | sed "s/^  Date: //")
+if [ -n "$HTTP_DATE" ]; then
+  YEAR=$(echo $HTTP_DATE | awk "{print \$4}")
+  MONTH=$(echo $HTTP_DATE | awk "{print \$3}")
+  DAY=$(echo $HTTP_DATE | awk "{print \$2}")
+  TIME=$(echo $HTTP_DATE | awk "{print \$5}")
+  case $MONTH in
+    Jan) MONTH=01;; Feb) MONTH=02;; Mar) MONTH=03;; Apr) MONTH=04;;
+    May) MONTH=05;; Jun) MONTH=06;; Jul) MONTH=07;; Aug) MONTH=08;;
+    Sep) MONTH=09;; Oct) MONTH=10;; Nov) MONTH=11;; Dec) MONTH=12;;
+  esac
+  date -u -s "$YEAR-$MONTH-$DAY $TIME" > /dev/null 2>&1
+  logger "Time synced: $(date)"
+fi
+```
+
+`/etc/init.d/S45timesync`:
+```bash
+#!/bin/sh
+case "$1" in
+  start)
+    echo "Syncing time..."
+    /usr/bin/timesync &
+    ;;
+  *)
+    ;;
+esac
+```
+
+**Cron configuration** (`/var/spool/cron/crontabs/root`):
+```
+0 * * * * /usr/bin/timesync
+```
+
+### USB Keyboard Support
+
+SmartHub automatically detects USB keyboards on startup. The UIManager scans `/dev/input/event*` devices looking for full keyboards (devices with LED support, letter keys, space, and enter).
+
+**Detection criteria:**
+- EV_KEY and EV_LED capability bits set
+- Has all 26 letter keys (A-Z)
+- Has space and enter keys
+
+**Configuration:** No manual configuration needed. Connect a USB keyboard before or after boot.
+
+**Keyboard events** are forwarded to the LVGL UI for text input in forms, search fields, etc.
+
+### Zigbee Coordinator (CC2652P)
+
+The Zigbee coordinator connects via USB serial and appears as `/dev/ttyUSB0`.
+
+**Hardware:** SONOFF Zigbee 3.0 USB Dongle Plus (CC2652P) or compatible
+
+**Firmware:** Z-Stack coordinator firmware from [Koenkk/Z-Stack-firmware](https://github.com/Koenkk/Z-Stack-firmware)
+
+**Configuration** (`/etc/smarthub/config.yaml`):
+```yaml
+protocols:
+  zigbee:
+    enabled: true
+    port: /dev/ttyUSB0
+    baudRate: 115200
+```
+
+**Note:** The USB serial device must be present before SmartHub starts. If the coordinator is unplugged and replugged, restart SmartHub.
+
+### Service Management
+
+SmartHub runs as a background process. To manage it:
+
+```bash
+# Start
+nohup smarthub > /var/log/smarthub.log 2>&1 &
+
+# Stop
+killall smarthub
+
+# Check status
+ps aux | grep smarthub
+
+# View logs
+tail -f /var/log/smarthub.log
+```
+
+---
+
 ## References
 
 - [Buildroot Manual](https://buildroot.org/downloads/manual/manual.html)
@@ -390,3 +490,4 @@ ls output/target/etc/init.d/S40network
 ---
 
 *Created: 28 December 2025*
+*Updated: 15 January 2026 - Added runtime configuration section*

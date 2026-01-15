@@ -53,7 +53,7 @@ protected:
         deviceManager->initialize();
         themeManager = std::make_unique<ThemeManager>();
         networkManager = std::make_unique<network::NetworkManager>();
-        uiManager = std::make_unique<UIManager>(*eventBus, *deviceManager);
+        uiManager = std::make_unique<UIManager>(*eventBus, *deviceManager, *database);
 
         // Note: We don't initialize UIManager (no display in CI)
         // but screens can still be constructed for testing

@@ -60,20 +60,20 @@ protected:
 // Test: UIManager can be constructed
 TEST_F(UIManagerTest, Construction) {
     ASSERT_NO_THROW({
-        uiManager = std::make_unique<smarthub::UIManager>(*eventBus, *deviceManager);
+        uiManager = std::make_unique<smarthub::UIManager>(*eventBus, *deviceManager, *database);
     });
     EXPECT_NE(uiManager, nullptr);
 }
 
 // Test: UIManager reports not running before initialization
 TEST_F(UIManagerTest, InitialStateNotRunning) {
-    uiManager = std::make_unique<smarthub::UIManager>(*eventBus, *deviceManager);
+    uiManager = std::make_unique<smarthub::UIManager>(*eventBus, *deviceManager, *database);
     EXPECT_FALSE(uiManager->isRunning());
 }
 
 // Test: Initialize fails gracefully with non-existent DRM device
 TEST_F(UIManagerTest, InitializeFailsWithInvalidDevice) {
-    uiManager = std::make_unique<smarthub::UIManager>(*eventBus, *deviceManager);
+    uiManager = std::make_unique<smarthub::UIManager>(*eventBus, *deviceManager, *database);
 
     // Try to initialize with a non-existent device
     bool result = uiManager->initialize("/dev/dri/nonexistent_card", "/dev/input/event99");
@@ -84,7 +84,7 @@ TEST_F(UIManagerTest, InitializeFailsWithInvalidDevice) {
 
 // Test: Initialize fails gracefully with invalid path
 TEST_F(UIManagerTest, InitializeFailsWithInvalidPath) {
-    uiManager = std::make_unique<smarthub::UIManager>(*eventBus, *deviceManager);
+    uiManager = std::make_unique<smarthub::UIManager>(*eventBus, *deviceManager, *database);
 
     // Try to initialize with an invalid path
     bool result = uiManager->initialize("/invalid/path/to/device", "/invalid/touch");
@@ -95,7 +95,7 @@ TEST_F(UIManagerTest, InitializeFailsWithInvalidPath) {
 
 // Test: Default dimensions before initialization
 TEST_F(UIManagerTest, DefaultDimensions) {
-    uiManager = std::make_unique<smarthub::UIManager>(*eventBus, *deviceManager);
+    uiManager = std::make_unique<smarthub::UIManager>(*eventBus, *deviceManager, *database);
 
     // Default dimensions should be set (800x480 landscape)
     EXPECT_EQ(uiManager->getWidth(), 800);
@@ -104,7 +104,7 @@ TEST_F(UIManagerTest, DefaultDimensions) {
 
 // Test: Shutdown is safe to call without initialization
 TEST_F(UIManagerTest, ShutdownWithoutInit) {
-    uiManager = std::make_unique<smarthub::UIManager>(*eventBus, *deviceManager);
+    uiManager = std::make_unique<smarthub::UIManager>(*eventBus, *deviceManager, *database);
 
     // Shutdown should be safe even if not initialized
     ASSERT_NO_THROW({
@@ -115,7 +115,7 @@ TEST_F(UIManagerTest, ShutdownWithoutInit) {
 
 // Test: Multiple shutdown calls are safe
 TEST_F(UIManagerTest, MultipleShutdownCalls) {
-    uiManager = std::make_unique<smarthub::UIManager>(*eventBus, *deviceManager);
+    uiManager = std::make_unique<smarthub::UIManager>(*eventBus, *deviceManager, *database);
 
     // Multiple shutdown calls should be safe
     ASSERT_NO_THROW({
@@ -127,7 +127,7 @@ TEST_F(UIManagerTest, MultipleShutdownCalls) {
 
 // Test: Update is safe to call without initialization
 TEST_F(UIManagerTest, UpdateWithoutInit) {
-    uiManager = std::make_unique<smarthub::UIManager>(*eventBus, *deviceManager);
+    uiManager = std::make_unique<smarthub::UIManager>(*eventBus, *deviceManager, *database);
 
     // Update should be safe even if not initialized
     ASSERT_NO_THROW({
@@ -138,7 +138,7 @@ TEST_F(UIManagerTest, UpdateWithoutInit) {
 // Test: Destructor handles uninitialized state
 TEST_F(UIManagerTest, DestructorUninitialized) {
     {
-        auto tempUi = std::make_unique<smarthub::UIManager>(*eventBus, *deviceManager);
+        auto tempUi = std::make_unique<smarthub::UIManager>(*eventBus, *deviceManager, *database);
         // Let it go out of scope without initialization
     }
     // If we get here without crash, the test passes
@@ -148,7 +148,7 @@ TEST_F(UIManagerTest, DestructorUninitialized) {
 // Test: Destructor handles failed initialization
 TEST_F(UIManagerTest, DestructorAfterFailedInit) {
     {
-        auto tempUi = std::make_unique<smarthub::UIManager>(*eventBus, *deviceManager);
+        auto tempUi = std::make_unique<smarthub::UIManager>(*eventBus, *deviceManager, *database);
         tempUi->initialize("/dev/dri/nonexistent", "/dev/input/event99");
         // Let it go out of scope after failed init
     }
@@ -159,7 +159,7 @@ TEST_F(UIManagerTest, DestructorAfterFailedInit) {
 #ifdef __linux__
 // Test: Initialize with /dev/dri/card0 if it exists (hardware-dependent)
 TEST_F(UIManagerTest, InitializeWithRealDRM) {
-    uiManager = std::make_unique<smarthub::UIManager>(*eventBus, *deviceManager);
+    uiManager = std::make_unique<smarthub::UIManager>(*eventBus, *deviceManager, *database);
 
     // Check if DRM device exists
     if (access("/dev/dri/card0", R_OK | W_OK) != 0) {

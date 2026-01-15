@@ -8,6 +8,7 @@
 #include "smarthub/devices/DeviceManager.hpp"
 #include "smarthub/devices/DeviceTypeRegistry.hpp"
 #include "smarthub/core/Logger.hpp"
+#include "smarthub/core/EventBus.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -35,10 +36,12 @@ static const std::vector<DeviceTypeInfo> DEVICE_TYPES = {
 
 AddDeviceScreen::AddDeviceScreen(ScreenManager& screenManager,
                                  ThemeManager& theme,
-                                 DeviceManager& deviceManager)
+                                 DeviceManager& deviceManager,
+                                 EventBus& eventBus)
     : Screen(screenManager, "add_device")
     , m_theme(theme)
     , m_deviceManager(deviceManager)
+    , m_eventBus(eventBus)
 {
 }
 
@@ -85,6 +88,16 @@ void AddDeviceScreen::onShow() {
 
 void AddDeviceScreen::onHide() {
 #ifdef SMARTHUB_ENABLE_LVGL
+    // Stop pairing if active
+    if (m_isPairing) {
+        stopZigbeePairing();
+    }
+
+    // Clear pending device callback and any pending device
+    m_deviceManager.setPendingDeviceCallback("zigbee", nullptr);
+    m_deviceManager.clearPendingDevice("zigbee");
+    m_pendingDevice.reset();
+
     // Hide keyboard if visible
     if (m_keyboard) {
         lv_obj_add_flag(m_keyboard, LV_OBJ_FLAG_HIDDEN);
@@ -132,23 +145,30 @@ void AddDeviceScreen::createHeader() {
 
 void AddDeviceScreen::createContent() {
     constexpr int HEADER_HEIGHT = 50;
-    constexpr int CONTENT_HEIGHT = 480 - HEADER_HEIGHT;
+    constexpr int BOTTOM_MARGIN = 8;  // Small margin to prevent display edge clipping
+    constexpr int CONTENT_HEIGHT = 480 - HEADER_HEIGHT - BOTTOM_MARGIN;
+    constexpr int CONTENT_PADDING = ThemeManager::SPACING_MD;  // 16px
+    constexpr int NAV_BUTTON_HEIGHT = 48;
+    constexpr int NAV_MARGIN = 8;
+    // Step container height: content minus padding, minus nav buttons area
+    constexpr int STEP_HEIGHT = CONTENT_HEIGHT - (CONTENT_PADDING * 2) - NAV_BUTTON_HEIGHT - NAV_MARGIN;
 
     m_content = lv_obj_create(m_container);
     lv_obj_set_size(m_content, LV_PCT(100), CONTENT_HEIGHT);
     lv_obj_align(m_content, LV_ALIGN_TOP_MID, 0, HEADER_HEIGHT);
     lv_obj_set_style_bg_opa(m_content, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(m_content, 0, 0);
-    lv_obj_set_style_pad_all(m_content, ThemeManager::SPACING_MD, 0);
+    lv_obj_set_style_pad_all(m_content, CONTENT_PADDING, 0);
     lv_obj_clear_flag(m_content, LV_OBJ_FLAG_SCROLLABLE);
 
     // Step container (changes based on current step)
     m_stepContainer = lv_obj_create(m_content);
-    lv_obj_set_size(m_stepContainer, LV_PCT(100), LV_PCT(100) - 60);
+    lv_obj_set_size(m_stepContainer, LV_PCT(100), STEP_HEIGHT);
     lv_obj_align(m_stepContainer, LV_ALIGN_TOP_MID, 0, 0);
     lv_obj_set_style_bg_opa(m_stepContainer, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(m_stepContainer, 0, 0);
     lv_obj_set_style_pad_all(m_stepContainer, 0, 0);
+    lv_obj_add_flag(m_stepContainer, LV_OBJ_FLAG_SCROLLABLE);  // Allow scrolling if content overflows
 
     // Navigation buttons at bottom
     m_prevBtn = lv_btn_create(m_content);
@@ -391,7 +411,7 @@ void AddDeviceScreen::createStep3_ProtocolConfig() {
     lv_label_set_text(label, title);
 
     m_configContainer = lv_obj_create(m_stepContainer);
-    lv_obj_set_size(m_configContainer, LV_PCT(100), 200);
+    lv_obj_set_size(m_configContainer, LV_PCT(100), LV_SIZE_CONTENT);  // Auto-size to content
     lv_obj_align(m_configContainer, LV_ALIGN_TOP_MID, 0, 30);
     lv_obj_set_style_bg_opa(m_configContainer, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(m_configContainer, 0, 0);
@@ -468,27 +488,83 @@ void AddDeviceScreen::createHttpConfig() {
 }
 
 void AddDeviceScreen::createZigbeeConfig() {
+    // Pairing section
+    m_pairBtn = lv_btn_create(m_configContainer);
+    lv_obj_set_size(m_pairBtn, 160, 44);
+    lv_obj_align(m_pairBtn, LV_ALIGN_TOP_LEFT, 0, 0);
+    lv_obj_set_style_bg_color(m_pairBtn, m_theme.primary(), 0);
+
+    lv_obj_t* pairBtnLabel = lv_label_create(m_pairBtn);
+    lv_label_set_text(pairBtnLabel, LV_SYMBOL_WIFI " Start Pairing");
+    lv_obj_set_style_text_color(pairBtnLabel, lv_color_white(), 0);
+    lv_obj_center(pairBtnLabel);
+
+    lv_obj_add_event_cb(m_pairBtn, [](lv_event_t* e) {
+        auto* self = static_cast<AddDeviceScreen*>(lv_event_get_user_data(e));
+        if (self->m_isPairing) {
+            self->stopZigbeePairing();
+        } else {
+            self->startZigbeePairing();
+        }
+    }, LV_EVENT_CLICKED, this);
+
+    // Pairing spinner (hidden initially) - next to button
+    m_pairSpinner = lv_spinner_create(m_configContainer, 1000, 60);
+    lv_obj_set_size(m_pairSpinner, 32, 32);
+    lv_obj_align(m_pairSpinner, LV_ALIGN_TOP_LEFT, 170, 6);
+    lv_obj_add_flag(m_pairSpinner, LV_OBJ_FLAG_HIDDEN);
+
+    // Status label - to the right of spinner with larger font
+    m_pairStatusLabel = lv_label_create(m_configContainer);
+    lv_label_set_text(m_pairStatusLabel, "Tap Start, then put device in pairing mode");
+    lv_obj_set_style_text_color(m_pairStatusLabel, m_theme.textSecondary(), 0);
+    lv_obj_set_style_text_font(m_pairStatusLabel, &lv_font_montserrat_16, 0);
+    lv_obj_set_width(m_pairStatusLabel, 500);  // Plenty of space for long status messages
+    lv_label_set_long_mode(m_pairStatusLabel, LV_LABEL_LONG_WRAP);
+    lv_obj_align(m_pairStatusLabel, LV_ALIGN_TOP_LEFT, 212, 12);
+
+    // Discovered device info (below button row)
+    m_discoveredDeviceLabel = lv_label_create(m_configContainer);
+    lv_label_set_text(m_discoveredDeviceLabel, "");
+    lv_obj_set_style_text_color(m_discoveredDeviceLabel, m_theme.success(), 0);
+    lv_obj_set_style_text_font(m_discoveredDeviceLabel, &lv_font_montserrat_16, 0);
+    lv_obj_set_width(m_discoveredDeviceLabel, 600);
+    lv_label_set_long_mode(m_discoveredDeviceLabel, LV_LABEL_LONG_WRAP);
+    lv_obj_align(m_discoveredDeviceLabel, LV_ALIGN_TOP_LEFT, 0, 55);
+    lv_obj_add_flag(m_discoveredDeviceLabel, LV_OBJ_FLAG_HIDDEN);
+
+    // Manual entry section (below pairing)
+    lv_obj_t* orLabel = lv_label_create(m_configContainer);
+    lv_label_set_text(orLabel, "- OR enter manually -");
+    lv_obj_set_style_text_color(orLabel, m_theme.textSecondary(), 0);
+    lv_obj_align(orLabel, LV_ALIGN_TOP_MID, 0, 90);
+
     lv_obj_t* addrLabel = lv_label_create(m_configContainer);
     lv_label_set_text(addrLabel, "IEEE Address:");
     lv_obj_set_style_text_color(addrLabel, m_theme.textPrimary(), 0);
-    lv_obj_align(addrLabel, LV_ALIGN_TOP_LEFT, 0, 0);
+    lv_obj_align(addrLabel, LV_ALIGN_TOP_LEFT, 0, 115);
 
     m_zigbeeAddressInput = lv_textarea_create(m_configContainer);
-    lv_obj_set_size(m_zigbeeAddressInput, LV_PCT(100), 50);
-    lv_obj_align(m_zigbeeAddressInput, LV_ALIGN_TOP_LEFT, 0, 25);
+    lv_obj_set_size(m_zigbeeAddressInput, 220, 44);
+    lv_obj_align(m_zigbeeAddressInput, LV_ALIGN_TOP_LEFT, 0, 137);
     lv_textarea_set_placeholder_text(m_zigbeeAddressInput, "0x1234567890abcdef");
     lv_textarea_set_one_line(m_zigbeeAddressInput, true);
     lv_obj_set_style_bg_color(m_zigbeeAddressInput, m_theme.surface(), 0);
     lv_obj_set_style_text_color(m_zigbeeAddressInput, m_theme.textPrimary(), 0);
 
+    // Pre-fill if we discovered a device
+    if (!m_discoveredIeeeAddress.empty()) {
+        lv_textarea_set_text(m_zigbeeAddressInput, m_discoveredIeeeAddress.c_str());
+    }
+
     lv_obj_t* epLabel = lv_label_create(m_configContainer);
     lv_label_set_text(epLabel, "Endpoint:");
     lv_obj_set_style_text_color(epLabel, m_theme.textPrimary(), 0);
-    lv_obj_align(epLabel, LV_ALIGN_TOP_LEFT, 0, 85);
+    lv_obj_align(epLabel, LV_ALIGN_TOP_LEFT, 235, 115);
 
     m_zigbeeEndpointInput = lv_textarea_create(m_configContainer);
-    lv_obj_set_size(m_zigbeeEndpointInput, 100, 50);
-    lv_obj_align(m_zigbeeEndpointInput, LV_ALIGN_TOP_LEFT, 0, 110);
+    lv_obj_set_size(m_zigbeeEndpointInput, 80, 44);
+    lv_obj_align(m_zigbeeEndpointInput, LV_ALIGN_TOP_LEFT, 235, 137);
     lv_textarea_set_placeholder_text(m_zigbeeEndpointInput, "1");
     lv_textarea_set_text(m_zigbeeEndpointInput, "1");
     lv_textarea_set_one_line(m_zigbeeEndpointInput, true);
@@ -518,6 +594,150 @@ void AddDeviceScreen::createZigbeeConfig() {
 
     lv_obj_add_event_cb(m_zigbeeAddressInput, defocusHandler, LV_EVENT_DEFOCUSED, this);
     lv_obj_add_event_cb(m_zigbeeEndpointInput, defocusHandler, LV_EVENT_DEFOCUSED, this);
+}
+
+void AddDeviceScreen::startZigbeePairing() {
+    LOG_INFO("Starting Zigbee pairing mode");
+    m_isPairing = true;
+
+    // Update UI
+    lv_obj_t* btnLabel = lv_obj_get_child(m_pairBtn, 0);
+    lv_label_set_text(btnLabel, LV_SYMBOL_CLOSE " Stop");
+    lv_obj_set_style_bg_color(m_pairBtn, m_theme.warning(), 0);
+    lv_obj_clear_flag(m_pairSpinner, LV_OBJ_FLAG_HIDDEN);
+    lv_label_set_text(m_pairStatusLabel, "Searching for devices...");
+
+    // Clear previous discovery
+    m_discoveredIeeeAddress.clear();
+    m_discoveredManufacturer.clear();
+    m_discoveredModel.clear();
+    m_pendingDevice.reset();
+    lv_obj_add_flag(m_discoveredDeviceLabel, LV_OBJ_FLAG_HIDDEN);
+
+    // Subscribe to device detection events for status updates
+    m_eventSubscriptionId = m_eventBus.subscribe("device.state",
+        [this](const Event& evt) {
+            const auto& event = static_cast<const DeviceStateEvent&>(evt);
+            if (event.property == "_detecting" && m_isPairing) {
+                // Device detected, waiting for details - update UI on main thread
+                LOG_INFO("Device detected, retrieving info...");
+                lv_async_call([](void* userData) {
+                    auto* self = static_cast<AddDeviceScreen*>(userData);
+                    if (self && self->m_pairStatusLabel && self->m_isPairing) {
+                        lv_label_set_text(self->m_pairStatusLabel, "Device found! Getting details...");
+                        lv_obj_set_style_text_color(self->m_pairStatusLabel, self->m_theme.textPrimary(), 0);
+                    }
+                }, this);
+            } else if (event.property == "_pairing_error" && m_isPairing) {
+                // Pairing failed - update UI on main thread
+                LOG_ERROR("Pairing error received");
+                lv_async_call([](void* userData) {
+                    auto* self = static_cast<AddDeviceScreen*>(userData);
+                    if (self && self->m_isPairing) {
+                        self->stopZigbeePairing();
+                        if (self->m_pairStatusLabel) {
+                            lv_label_set_text(self->m_pairStatusLabel, "Pairing failed. Try again.");
+                            lv_obj_set_style_text_color(self->m_pairStatusLabel, self->m_theme.error(), 0);
+                        }
+                    }
+                }, this);
+            }
+        });
+
+    // Set up pending device callback to receive discovered devices
+    // This prevents auto-adding and lets us show device in wizard
+    m_deviceManager.setPendingDeviceCallback("zigbee",
+        [this](DevicePtr device) {
+            LOG_INFO("Pending device callback: received device %s", device->id().c_str());
+            onZigbeeDeviceDiscovered(device);
+        });
+
+    // Start discovery via device manager
+    m_deviceManager.startDiscovery("zigbee");
+}
+
+void AddDeviceScreen::stopZigbeePairing() {
+    LOG_INFO("Stopping Zigbee pairing mode");
+    m_isPairing = false;
+
+    // Unsubscribe from events
+    if (m_eventSubscriptionId != 0) {
+        m_eventBus.unsubscribe(m_eventSubscriptionId);
+        m_eventSubscriptionId = 0;
+    }
+
+    // Update UI
+    lv_obj_t* btnLabel = lv_obj_get_child(m_pairBtn, 0);
+    lv_label_set_text(btnLabel, LV_SYMBOL_WIFI " Start Pairing");
+    lv_obj_set_style_bg_color(m_pairBtn, m_theme.primary(), 0);
+    lv_obj_add_flag(m_pairSpinner, LV_OBJ_FLAG_HIDDEN);
+
+    if (m_discoveredIeeeAddress.empty()) {
+        lv_label_set_text(m_pairStatusLabel, "Pairing stopped. No device found.");
+    }
+
+    // Stop discovery
+    m_deviceManager.stopDiscovery();
+}
+
+void AddDeviceScreen::onZigbeeDeviceDiscovered(DevicePtr device) {
+    if (!device || !m_isPairing) return;
+
+    LOG_INFO("Zigbee device discovered: %s", device->id().c_str());
+
+    // Store the pending device - it won't be added until the user completes the wizard
+    m_pendingDevice = device;
+
+    // Extract IEEE address from device ID (format: zigbee_XXXXXXXXXXXXXXXX)
+    std::string deviceId = device->id();
+    if (deviceId.substr(0, 7) == "zigbee_") {
+        m_discoveredIeeeAddress = "0x" + deviceId.substr(7);
+    }
+
+    // Get device info from properties
+    auto manufacturer = device->getProperty("manufacturer");
+    if (manufacturer.is_string()) {
+        m_discoveredManufacturer = manufacturer.get<std::string>();
+    }
+    auto model = device->getProperty("model");
+    if (model.is_string()) {
+        m_discoveredModel = model.get<std::string>();
+    }
+
+    // Auto-fill device name if empty (do this before async call)
+    if (m_deviceName.empty() && !m_discoveredModel.empty()) {
+        m_deviceName = m_discoveredModel;
+    }
+
+    // Schedule UI updates on main thread - LVGL is not thread-safe
+    lv_async_call([](void* userData) {
+        auto* self = static_cast<AddDeviceScreen*>(userData);
+        if (!self) return;
+
+        // Stop pairing mode and update UI
+        self->stopZigbeePairing();
+
+        // Show discovered device info
+        char infoText[128];
+        snprintf(infoText, sizeof(infoText), "Found: %s %s",
+                 self->m_discoveredManufacturer.c_str(), self->m_discoveredModel.c_str());
+        lv_label_set_text(self->m_discoveredDeviceLabel, infoText);
+        lv_obj_clear_flag(self->m_discoveredDeviceLabel, LV_OBJ_FLAG_HIDDEN);
+
+        lv_label_set_text(self->m_pairStatusLabel, "Device found! Complete setup to add it.");
+        lv_obj_set_style_text_color(self->m_pairStatusLabel, self->m_theme.success(), 0);
+
+        // Auto-fill the address field
+        if (self->m_zigbeeAddressInput) {
+            lv_textarea_set_text(self->m_zigbeeAddressInput, self->m_discoveredIeeeAddress.c_str());
+        }
+    }, this);
+
+    // Auto-select device type based on discovered device
+    if (m_selectedType == DeviceType::Unknown && m_pendingDevice) {
+        m_selectedType = m_pendingDevice->type();
+        LOG_INFO("Auto-selected device type: %d", static_cast<int>(m_selectedType));
+    }
 }
 
 void AddDeviceScreen::createStep4_RoomSelection() {
@@ -605,40 +825,66 @@ void AddDeviceScreen::onCreateDevice() {
         }
     }
 
-    // Generate unique ID
-    std::string id = generateDeviceId(m_deviceName);
+    DevicePtr device;
 
-    LOG_INFO("Creating device: %s (type=%d, protocol=%s, address=%s, room=%s)",
-             m_deviceName.c_str(),
-             static_cast<int>(m_selectedType),
-             m_selectedProtocol.c_str(),
-             m_protocolAddress.c_str(),
-             m_selectedRoomId.c_str());
+    // If we have a pending device from Zigbee pairing, use it
+    if (m_pendingDevice && m_selectedProtocol == "zigbee") {
+        LOG_INFO("Using pending Zigbee device: %s", m_pendingDevice->id().c_str());
+        device = m_pendingDevice;
 
-    // Create device via registry
-    auto device = DeviceTypeRegistry::instance().create(
-        m_selectedType,
-        id,
-        m_deviceName,
-        m_selectedProtocol,
-        m_protocolAddress
-    );
+        // Update device name if user changed it
+        if (!m_deviceName.empty()) {
+            device->setName(m_deviceName);
+        }
 
-    if (device) {
         // Set room if selected
         if (!m_selectedRoomId.empty()) {
             device->setRoom(m_selectedRoomId);
         }
 
+        LOG_INFO("Adding paired device: %s (name=%s, room=%s)",
+                 device->id().c_str(),
+                 device->name().c_str(),
+                 m_selectedRoomId.c_str());
+    } else {
+        // Generate unique ID for manually configured device
+        std::string id = generateDeviceId(m_deviceName);
+
+        LOG_INFO("Creating device: %s (type=%d, protocol=%s, address=%s, room=%s)",
+                 m_deviceName.c_str(),
+                 static_cast<int>(m_selectedType),
+                 m_selectedProtocol.c_str(),
+                 m_protocolAddress.c_str(),
+                 m_selectedRoomId.c_str());
+
+        // Create device via registry
+        device = DeviceTypeRegistry::instance().create(
+            m_selectedType,
+            id,
+            m_deviceName,
+            m_selectedProtocol,
+            m_protocolAddress
+        );
+
+        if (device && !m_selectedRoomId.empty()) {
+            device->setRoom(m_selectedRoomId);
+        }
+    }
+
+    if (device) {
         // Add to manager
         m_deviceManager.addDevice(device);
+
+        // Clear pending device since it's now added
+        m_pendingDevice.reset();
+        m_deviceManager.clearPendingDevice("zigbee");
 
         // Callback
         if (m_onDeviceAdded) {
             m_onDeviceAdded(device);
         }
 
-        LOG_INFO("Device created successfully: %s", id.c_str());
+        LOG_INFO("Device added successfully: %s", device->id().c_str());
 
         // Go back
         m_screenManager.goBack();
@@ -654,6 +900,13 @@ void AddDeviceScreen::resetForm() {
     m_selectedProtocol = "local";
     m_protocolAddress.clear();
     m_selectedRoomId = m_preselectedRoomId;
+
+    // Reset pairing state
+    m_isPairing = false;
+    m_discoveredIeeeAddress.clear();
+    m_discoveredManufacturer.clear();
+    m_discoveredModel.clear();
+    m_pendingDevice.reset();
 }
 
 std::string AddDeviceScreen::generateDeviceId(const std::string& name) {

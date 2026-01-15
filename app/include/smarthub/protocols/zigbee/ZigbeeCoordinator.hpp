@@ -256,6 +256,8 @@ private:
     void handleDeviceLeave(const ZnpFrame& frame);
     void handleIncomingMessage(const ZnpFrame& frame);
     void handleTcDeviceInd(const ZnpFrame& frame);
+    void handleActiveEpRsp(const ZnpFrame& frame);
+    void handleSimpleDescRsp(const ZnpFrame& frame);
 
     // Internal helpers
     bool registerEndpoint(uint8_t endpoint, uint16_t profileId, uint16_t deviceId,
