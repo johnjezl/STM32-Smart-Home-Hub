@@ -229,7 +229,8 @@ void DashboardScreen::createRoomCards() {
 }
 
 void DashboardScreen::updateRoomCards() {
-    // TODO: Update room cards with actual device states
+    // Refresh room cards from database to pick up any changes
+    refreshRoomCards();
 }
 
 void DashboardScreen::updateClock() {
@@ -300,12 +301,13 @@ void DashboardScreen::onAddRoomClicked() {
 
     // Create the dialog centered
     lv_obj_t* modal = lv_obj_create(overlay);
-    lv_obj_set_size(modal, 400, 180);
+    lv_obj_set_size(modal, 400, 200);
     lv_obj_align(modal, LV_ALIGN_CENTER, 0, 0);
     lv_obj_set_style_bg_color(modal, m_theme.surface(), 0);
     lv_obj_set_style_radius(modal, ThemeManager::CARD_RADIUS, 0);
     lv_obj_set_style_shadow_width(modal, 20, 0);
     lv_obj_set_style_shadow_opa(modal, LV_OPA_30, 0);
+    lv_obj_set_style_pad_all(modal, 0, 0);  // No default padding
     lv_obj_clear_flag(modal, LV_OBJ_FLAG_SCROLLABLE);
 
     // Title
@@ -322,7 +324,15 @@ void DashboardScreen::onAddRoomClicked() {
     lv_textarea_set_placeholder_text(textarea, "Room name...");
     lv_textarea_set_one_line(textarea, true);
     lv_obj_set_style_bg_color(textarea, m_theme.background(), 0);
+    lv_obj_set_style_text_color(textarea, m_theme.textPrimary(), 0);
     lv_obj_set_style_border_color(textarea, m_theme.primary(), LV_STATE_FOCUSED);
+    // Disable scroll-on-focus to prevent screen shifting
+    lv_obj_clear_flag(textarea, LV_OBJ_FLAG_SCROLL_ON_FOCUS);
+    // Add to keyboard input group for keyboard navigation and focus it
+    if (lv_group_get_default()) {
+        lv_group_add_obj(lv_group_get_default(), textarea);
+        lv_group_focus_obj(textarea);
+    }
 
     // Button row - use flex layout for proper spacing
     lv_obj_t* btnRow = lv_obj_create(modal);

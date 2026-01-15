@@ -23,6 +23,7 @@ SettingsScreen::SettingsScreen(ScreenManager& screenManager,
         {"network", "Network", "WiFi, IP settings", LV_SYMBOL_WIFI},
         {"display", "Display", "Brightness, theme, timeout", LV_SYMBOL_IMAGE},
         {"devices", "Devices", "Manage paired devices", LV_SYMBOL_SETTINGS},
+        {"automations", "Automations", "Rules and triggers", LV_SYMBOL_REFRESH},
         {"security", "Security", "Password, API tokens", LV_SYMBOL_EYE_CLOSE},
         {"about", "About", "Version, system info", LV_SYMBOL_LIST}
     };
@@ -169,6 +170,8 @@ void SettingsScreen::onCategoryClicked(const std::string& categoryId) {
         m_screenManager.showScreen("display_settings");
     } else if (categoryId == "devices") {
         m_screenManager.showScreen("devices");
+    } else if (categoryId == "automations") {
+        m_screenManager.showScreen("automations");
     } else if (categoryId == "security") {
         m_screenManager.showScreen("security");
     } else if (categoryId == "about") {

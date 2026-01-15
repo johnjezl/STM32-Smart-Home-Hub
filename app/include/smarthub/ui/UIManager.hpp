@@ -15,6 +15,8 @@ namespace smarthub {
 
 class EventBus;
 class DeviceManager;
+class AutomationManager;
+class Database;
 
 namespace network {
 class NetworkManager;
@@ -30,7 +32,7 @@ class ThemeManager;
  */
 class UIManager {
 public:
-    UIManager(EventBus& eventBus, DeviceManager& deviceManager);
+    UIManager(EventBus& eventBus, DeviceManager& deviceManager, Database& database);
     ~UIManager();
 
     // Non-copyable
@@ -87,6 +89,7 @@ private:
 
     EventBus& m_eventBus;
     DeviceManager& m_deviceManager;
+    Database& m_database;
 
     std::string m_fbDevice;
     std::string m_touchDevice;
@@ -100,6 +103,7 @@ private:
     std::unique_ptr<ui::ThemeManager> m_themeManager;
     std::unique_ptr<ui::ScreenManager> m_screenManager;
     std::unique_ptr<network::NetworkManager> m_networkManager;
+    std::unique_ptr<AutomationManager> m_automationManager;
 };
 
 } // namespace smarthub

@@ -246,7 +246,7 @@ bool Application::initializeWebServer() {
 
 bool Application::initializeUI() {
 #ifdef SMARTHUB_ENABLE_LVGL
-    m_uiManager = std::make_unique<UIManager>(*m_eventBus, *m_deviceManager);
+    m_uiManager = std::make_unique<UIManager>(*m_eventBus, *m_deviceManager, *m_database);
 
     if (!m_uiManager->initialize()) {
         return false;

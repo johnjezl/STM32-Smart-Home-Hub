@@ -139,6 +139,22 @@ bool Database::createSchema() {
             value TEXT
         );
 
+        -- Automations
+        CREATE TABLE IF NOT EXISTS automations (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            description TEXT,
+            enabled INTEGER DEFAULT 1,
+            triggers TEXT NOT NULL,
+            condition TEXT,
+            actions TEXT NOT NULL,
+            created_at INTEGER DEFAULT (strftime('%s', 'now')),
+            updated_at INTEGER DEFAULT (strftime('%s', 'now')),
+            last_triggered_at INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS idx_automations_enabled
+            ON automations(enabled);
+
         -- Insert default settings
         INSERT OR IGNORE INTO settings (key, value) VALUES
             ('system.name', 'SmartHub'),

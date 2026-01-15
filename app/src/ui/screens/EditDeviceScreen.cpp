@@ -127,6 +127,13 @@ void EditDeviceScreen::createContent() {
     lv_obj_align(m_nameInput, LV_ALIGN_TOP_LEFT, 0, 25);
     lv_textarea_set_one_line(m_nameInput, true);
     lv_obj_set_style_bg_color(m_nameInput, m_theme.surface(), 0);
+    lv_obj_set_style_text_color(m_nameInput, m_theme.textPrimary(), 0);
+    // Disable scroll-on-focus to prevent screen shifting
+    lv_obj_clear_flag(m_nameInput, LV_OBJ_FLAG_SCROLL_ON_FOCUS);
+    // Add to keyboard input group
+    if (lv_group_get_default()) {
+        lv_group_add_obj(lv_group_get_default(), m_nameInput);
+    }
 
     // Room selection (editable)
     lv_obj_t* roomLabel = lv_label_create(m_content);

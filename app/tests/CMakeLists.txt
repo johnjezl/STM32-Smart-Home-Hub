@@ -65,6 +65,8 @@ if(GTEST_AVAILABLE)
         ${CMAKE_SOURCE_DIR}/src/protocols/wifi/WifiHandler.cpp
         ${CMAKE_SOURCE_DIR}/src/rpmsg/RpmsgClient.cpp
         ${CMAKE_SOURCE_DIR}/src/network/NetworkManager.cpp
+        ${CMAKE_SOURCE_DIR}/src/automation/Automation.cpp
+        ${CMAKE_SOURCE_DIR}/src/automation/AutomationManager.cpp
         ${CMAKE_SOURCE_DIR}/src/security/CertManager.cpp
         ${CMAKE_SOURCE_DIR}/src/security/UserManager.cpp
         ${CMAKE_SOURCE_DIR}/src/security/SessionManager.cpp
@@ -246,6 +248,38 @@ if(GTEST_AVAILABLE)
     target_link_libraries(test_integration PRIVATE smarthub_lib GTest::gtest GTest::gtest_main)
     add_test(NAME Integration COMMAND test_integration)
 
+    # ==== Automation Tests ====
+
+    add_executable(test_automation automation/test_automation.cpp)
+    target_link_libraries(test_automation PRIVATE smarthub_lib GTest::gtest GTest::gtest_main)
+    add_test(NAME Automation COMMAND test_automation)
+
+    # Automation UI tests (conditional on LVGL availability)
+    if(SMARTHUB_ENABLE_LVGL)
+        add_executable(test_automation_screens
+            automation/test_automation_screens.cpp
+            ${CMAKE_SOURCE_DIR}/src/ui/UIManager.cpp
+            ${CMAKE_SOURCE_DIR}/src/ui/Screen.cpp
+            ${CMAKE_SOURCE_DIR}/src/ui/ScreenManager.cpp
+            ${CMAKE_SOURCE_DIR}/src/ui/ThemeManager.cpp
+            ${CMAKE_SOURCE_DIR}/src/ui/screens/AutomationListScreen.cpp
+            ${CMAKE_SOURCE_DIR}/src/ui/screens/AddAutomationScreen.cpp
+            ${CMAKE_SOURCE_DIR}/src/ui/screens/EditAutomationScreen.cpp
+            ${CMAKE_SOURCE_DIR}/src/ui/screens/DashboardScreen.cpp
+            ${CMAKE_SOURCE_DIR}/src/ui/screens/SettingsScreen.cpp
+            ${CMAKE_SOURCE_DIR}/src/ui/widgets/Header.cpp
+            ${CMAKE_SOURCE_DIR}/src/ui/widgets/NavBar.cpp
+            ${CMAKE_SOURCE_DIR}/src/ui/widgets/RoomCard.cpp
+        )
+        target_link_libraries(test_automation_screens PRIVATE smarthub_lib GTest::gtest GTest::gtest_main)
+        target_link_libraries(test_automation_screens PRIVATE ${LVGL_LIBRARIES})
+        if(LIBDRM_FOUND)
+            target_link_libraries(test_automation_screens PRIVATE ${LIBDRM_LIBRARIES})
+        endif()
+        target_compile_definitions(test_automation_screens PRIVATE SMARTHUB_ENABLE_LVGL=1)
+        add_test(NAME AutomationScreens COMMAND test_automation_screens)
+    endif()
+
     # ==== All-in-one test runner ====
 
     set(ALL_TEST_SOURCES
@@ -267,6 +301,8 @@ if(GTEST_AVAILABLE)
         rpmsg/test_rpmsg.cpp
         network/test_network.cpp
         integration/test_integration.cpp
+        automation/test_automation.cpp
+        automation/test_automation_screens.cpp
         ui/test_ui.cpp
         ui/test_screen_manager.cpp
         ui/test_theme_manager.cpp

@@ -337,6 +337,7 @@ void AddDeviceScreen::createStep2_NameProtocol() {
     lv_textarea_set_one_line(m_nameInput, true);
     lv_textarea_set_text(m_nameInput, m_deviceName.c_str());
     lv_obj_set_style_bg_color(m_nameInput, m_theme.surface(), 0);
+    lv_obj_set_style_text_color(m_nameInput, m_theme.textPrimary(), 0);
 
     lv_obj_add_event_cb(m_nameInput, [](lv_event_t* e) {
         auto* self = static_cast<AddDeviceScreen*>(lv_event_get_user_data(e));
@@ -426,6 +427,7 @@ void AddDeviceScreen::createMqttConfig() {
     lv_textarea_set_placeholder_text(m_mqttTopicInput, "home/living_room/light1");
     lv_textarea_set_one_line(m_mqttTopicInput, true);
     lv_obj_set_style_bg_color(m_mqttTopicInput, m_theme.surface(), 0);
+    lv_obj_set_style_text_color(m_mqttTopicInput, m_theme.textPrimary(), 0);
 
     lv_obj_add_event_cb(m_mqttTopicInput, [](lv_event_t* e) {
         auto* self = static_cast<AddDeviceScreen*>(lv_event_get_user_data(e));
@@ -451,6 +453,7 @@ void AddDeviceScreen::createHttpConfig() {
     lv_textarea_set_placeholder_text(m_httpUrlInput, "192.168.1.100");
     lv_textarea_set_one_line(m_httpUrlInput, true);
     lv_obj_set_style_bg_color(m_httpUrlInput, m_theme.surface(), 0);
+    lv_obj_set_style_text_color(m_httpUrlInput, m_theme.textPrimary(), 0);
 
     lv_obj_add_event_cb(m_httpUrlInput, [](lv_event_t* e) {
         auto* self = static_cast<AddDeviceScreen*>(lv_event_get_user_data(e));
@@ -476,6 +479,7 @@ void AddDeviceScreen::createZigbeeConfig() {
     lv_textarea_set_placeholder_text(m_zigbeeAddressInput, "0x1234567890abcdef");
     lv_textarea_set_one_line(m_zigbeeAddressInput, true);
     lv_obj_set_style_bg_color(m_zigbeeAddressInput, m_theme.surface(), 0);
+    lv_obj_set_style_text_color(m_zigbeeAddressInput, m_theme.textPrimary(), 0);
 
     lv_obj_t* epLabel = lv_label_create(m_configContainer);
     lv_label_set_text(epLabel, "Endpoint:");
@@ -490,6 +494,7 @@ void AddDeviceScreen::createZigbeeConfig() {
     lv_textarea_set_one_line(m_zigbeeEndpointInput, true);
     lv_textarea_set_accepted_chars(m_zigbeeEndpointInput, "0123456789");
     lv_obj_set_style_bg_color(m_zigbeeEndpointInput, m_theme.surface(), 0);
+    lv_obj_set_style_text_color(m_zigbeeEndpointInput, m_theme.textPrimary(), 0);
 
     // Keyboard events
     lv_obj_add_event_cb(m_zigbeeAddressInput, [](lv_event_t* e) {
