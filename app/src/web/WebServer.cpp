@@ -9,9 +9,14 @@
 #include <smarthub/core/EventBus.hpp>
 #include <smarthub/devices/DeviceManager.hpp>
 #include <smarthub/devices/Device.hpp>
+#include <smarthub/devices/DeviceTypeRegistry.hpp>
+#include <smarthub/automation/AutomationManager.hpp>
+#include <smarthub/automation/Automation.hpp>
+#include <smarthub/protocols/zigbee/ZigbeeHandler.hpp>
 #include <smarthub/security/SessionManager.hpp>
 #include <smarthub/security/ApiTokenManager.hpp>
 #include <smarthub/core/Logger.hpp>
+#include <nlohmann/json.hpp>
 
 #include <chrono>
 #include <algorithm>
@@ -176,6 +181,14 @@ void WebServer::setRateLimit(int requestsPerMinute) {
     m_rateLimitPerMinute = requestsPerMinute;
 }
 
+void WebServer::setAutomationManager(AutomationManager* automationMgr) {
+    m_automationMgr = automationMgr;
+}
+
+void WebServer::setZigbeeHandler(zigbee::ZigbeeHandler* zigbeeHandler) {
+    m_zigbeeHandler = zigbeeHandler;
+}
+
 void WebServer::setPublicRoutes(const std::vector<std::string>& routes) {
     m_publicRoutes = routes;
 }
@@ -280,11 +293,6 @@ bool WebServer::isPublicRoute(const std::string& uri) const {
         return true;
     }
 
-    // For demo: allow device API without auth
-    if (uri == "/api/devices" || uri.rfind("/api/devices/", 0) == 0) {
-        return true;
-    }
-
     return false;
 }
 
@@ -375,6 +383,8 @@ void WebServer::handleHttpRequest(struct mg_connection* c, struct mg_http_messag
         // Route handling
         if (uri == "/api/devices" && mg_strcmp(hm->method, mg_str("GET")) == 0) {
             apiGetDevices(c);
+        } else if (uri == "/api/devices" && mg_strcmp(hm->method, mg_str("POST")) == 0) {
+            apiCreateDevice(c, hm);
         } else if (uri == "/api/system/status") {
             apiGetSystemStatus(c);
         } else if (uri == "/api/auth/login" && mg_strcmp(hm->method, mg_str("POST")) == 0) {
@@ -384,14 +394,91 @@ void WebServer::handleHttpRequest(struct mg_connection* c, struct mg_http_messag
             apiLogout(c, auth);
         } else if (uri == "/api/auth/me" && mg_strcmp(hm->method, mg_str("GET")) == 0) {
             apiGetCurrentUser(c, auth);
-        } else if (uri.rfind("/api/devices/", 0) == 0) {
-            std::string id = uri.substr(13);
-            if (mg_strcmp(hm->method, mg_str("GET")) == 0) {
-                apiGetDevice(c, id);
-            } else if (mg_strcmp(hm->method, mg_str("PUT")) == 0) {
-                apiSetDeviceState(c, id, hm);
+        }
+        // Room API
+        else if (uri == "/api/rooms" && mg_strcmp(hm->method, mg_str("GET")) == 0) {
+            apiGetRooms(c);
+        } else if (uri == "/api/rooms" && mg_strcmp(hm->method, mg_str("POST")) == 0) {
+            apiCreateRoom(c, hm);
+        } else if (uri.rfind("/api/rooms/", 0) == 0) {
+            std::string id = uri.substr(11);  // Remove "/api/rooms/"
+            if (mg_strcmp(hm->method, mg_str("PUT")) == 0) {
+                apiUpdateRoom(c, id, hm);
+            } else if (mg_strcmp(hm->method, mg_str("DELETE")) == 0) {
+                apiDeleteRoom(c, id);
+            } else {
+                sendError(c, 405, "Method not allowed");
             }
-        } else {
+        }
+        // Device API
+        else if (uri.rfind("/api/devices/", 0) == 0) {
+            std::string remainder = uri.substr(13);  // Remove "/api/devices/"
+            size_t slashPos = remainder.find('/');
+            if (slashPos == std::string::npos) {
+                // /api/devices/{id}
+                std::string id = remainder;
+                if (mg_strcmp(hm->method, mg_str("GET")) == 0) {
+                    apiGetDevice(c, id);
+                } else if (mg_strcmp(hm->method, mg_str("PUT")) == 0) {
+                    apiSetDeviceState(c, id, hm);
+                } else if (mg_strcmp(hm->method, mg_str("DELETE")) == 0) {
+                    apiDeleteDevice(c, id);
+                } else {
+                    sendError(c, 405, "Method not allowed");
+                }
+            } else {
+                // /api/devices/{id}/settings
+                std::string id = remainder.substr(0, slashPos);
+                std::string action = remainder.substr(slashPos + 1);
+                if (action == "settings" && mg_strcmp(hm->method, mg_str("PUT")) == 0) {
+                    apiUpdateDeviceSettings(c, id, hm);
+                } else {
+                    sendError(c, 404, "Not found");
+                }
+            }
+        }
+        // Zigbee pairing API
+        else if (uri == "/api/zigbee/permit-join" && mg_strcmp(hm->method, mg_str("POST")) == 0) {
+            apiZigbeePermitJoin(c, hm);
+        } else if (uri == "/api/zigbee/permit-join" && mg_strcmp(hm->method, mg_str("DELETE")) == 0) {
+            apiZigbeeStopPermitJoin(c);
+        } else if (uri == "/api/zigbee/pending-devices" && mg_strcmp(hm->method, mg_str("GET")) == 0) {
+            apiGetPendingDevices(c);
+        } else if (uri == "/api/zigbee/devices" && mg_strcmp(hm->method, mg_str("POST")) == 0) {
+            apiAddZigbeeDevice(c, hm);
+        }
+        // Automation API
+        else if (uri == "/api/automations" && mg_strcmp(hm->method, mg_str("GET")) == 0) {
+            apiGetAutomations(c);
+        } else if (uri == "/api/automations" && mg_strcmp(hm->method, mg_str("POST")) == 0) {
+            apiCreateAutomation(c, hm);
+        } else if (uri.rfind("/api/automations/", 0) == 0) {
+            std::string remainder = uri.substr(17);  // Remove "/api/automations/"
+            size_t slashPos = remainder.find('/');
+            if (slashPos == std::string::npos) {
+                // /api/automations/{id}
+                std::string id = remainder;
+                if (mg_strcmp(hm->method, mg_str("GET")) == 0) {
+                    apiGetAutomation(c, id);
+                } else if (mg_strcmp(hm->method, mg_str("PUT")) == 0) {
+                    apiUpdateAutomation(c, id, hm);
+                } else if (mg_strcmp(hm->method, mg_str("DELETE")) == 0) {
+                    apiDeleteAutomation(c, id);
+                } else {
+                    sendError(c, 405, "Method not allowed");
+                }
+            } else {
+                // /api/automations/{id}/enable
+                std::string id = remainder.substr(0, slashPos);
+                std::string action = remainder.substr(slashPos + 1);
+                if (action == "enable" && mg_strcmp(hm->method, mg_str("PUT")) == 0) {
+                    apiSetAutomationEnabled(c, id, hm);
+                } else {
+                    sendError(c, 404, "Not found");
+                }
+            }
+        }
+        else {
             sendError(c, 404, "Not found");
         }
     }
@@ -588,6 +675,475 @@ void WebServer::apiGetCurrentUser(struct mg_connection* c, const AuthInfo& auth)
     sendJson(c, 200, json);
 }
 
+// =============================================================================
+// Room API Handlers
+// =============================================================================
+
+void WebServer::apiGetRooms(struct mg_connection* c) {
+    auto rooms = m_deviceManager.getAllRooms();
+
+    std::string json = "[";
+    bool first = true;
+    for (const auto& [id, name] : rooms) {
+        if (!first) json += ",";
+        first = false;
+
+        // Count devices in this room (devices store room name, not id)
+        auto devices = m_deviceManager.getDevicesByRoom(name);
+        int activeCount = 0;
+        for (const auto& dev : devices) {
+            auto state = dev->getState();
+            if (state.contains("on") && state["on"].get<bool>()) {
+                activeCount++;
+            }
+        }
+
+        json += "{";
+        json += "\"id\":\"" + id + "\",";
+        json += "\"name\":\"" + name + "\",";
+        json += "\"deviceCount\":" + std::to_string(devices.size()) + ",";
+        json += "\"activeDevices\":" + std::to_string(activeCount);
+        json += "}";
+    }
+    json += "]";
+
+    sendJson(c, 200, json);
+}
+
+void WebServer::apiCreateRoom(struct mg_connection* c, struct mg_http_message* hm) {
+    std::string body(hm->body.buf, hm->body.len);
+
+    try {
+        auto data = nlohmann::json::parse(body);
+        std::string name = data.value("name", "");
+
+        if (name.empty()) {
+            sendError(c, 400, "name is required");
+            return;
+        }
+
+        // Generate ID from name if not provided
+        std::string id = data.value("id", "");
+        if (id.empty()) {
+            // Convert name to lowercase with hyphens
+            id = name;
+            std::transform(id.begin(), id.end(), id.begin(), ::tolower);
+            std::replace(id.begin(), id.end(), ' ', '-');
+            // Remove any non-alphanumeric chars except hyphen
+            id.erase(std::remove_if(id.begin(), id.end(), [](char c) {
+                return !std::isalnum(c) && c != '-';
+            }), id.end());
+        }
+
+        if (m_deviceManager.addRoom(id, name)) {
+            std::string json = "{\"success\":true,\"id\":\"" + id + "\",\"name\":\"" + name + "\"}";
+            sendJson(c, 201, json);
+        } else {
+            sendError(c, 409, "Room already exists");
+        }
+    } catch (const std::exception& e) {
+        LOG_ERROR("Failed to parse room create request: %s", e.what());
+        sendError(c, 400, "Invalid JSON");
+    }
+}
+
+void WebServer::apiUpdateRoom(struct mg_connection* c, const std::string& id,
+                               struct mg_http_message* hm) {
+    std::string body(hm->body.buf, hm->body.len);
+
+    try {
+        auto data = nlohmann::json::parse(body);
+        std::string name = data.value("name", "");
+
+        if (name.empty()) {
+            sendError(c, 400, "name is required");
+            return;
+        }
+
+        if (m_deviceManager.updateRoom(id, name)) {
+            std::string json = "{\"success\":true,\"id\":\"" + id + "\",\"name\":\"" + name + "\"}";
+            sendJson(c, 200, json);
+        } else {
+            sendError(c, 404, "Room not found");
+        }
+    } catch (const std::exception& e) {
+        LOG_ERROR("Failed to parse room update request: %s", e.what());
+        sendError(c, 400, "Invalid JSON");
+    }
+}
+
+void WebServer::apiDeleteRoom(struct mg_connection* c, const std::string& id) {
+    if (m_deviceManager.deleteRoom(id)) {
+        sendJson(c, 200, "{\"success\":true}");
+    } else {
+        sendError(c, 404, "Room not found");
+    }
+}
+
+// =============================================================================
+// Device CRUD API Handlers
+// =============================================================================
+
+void WebServer::apiCreateDevice(struct mg_connection* c, struct mg_http_message* hm) {
+    std::string body(hm->body.buf, hm->body.len);
+
+    try {
+        auto data = nlohmann::json::parse(body);
+
+        std::string id = data.value("id", "");
+        std::string name = data.value("name", "");
+        std::string type = data.value("type", "");
+        std::string protocol = data.value("protocol", "local");
+        std::string protocolAddress = data.value("protocolAddress", "");
+        std::string room = data.value("room", "");
+        nlohmann::json config = data.value("config", nlohmann::json::object());
+
+        if (name.empty() || type.empty()) {
+            sendError(c, 400, "name and type are required");
+            return;
+        }
+
+        // Generate ID from name if not provided
+        if (id.empty()) {
+            id = "device-";
+            std::string nameSlug = name;
+            std::transform(nameSlug.begin(), nameSlug.end(), nameSlug.begin(), ::tolower);
+            std::replace(nameSlug.begin(), nameSlug.end(), ' ', '-');
+            nameSlug.erase(std::remove_if(nameSlug.begin(), nameSlug.end(), [](char c) {
+                return !std::isalnum(c) && c != '-';
+            }), nameSlug.end());
+            id += nameSlug;
+        }
+
+        // Check if device already exists
+        if (m_deviceManager.getDevice(id)) {
+            sendError(c, 409, "Device already exists");
+            return;
+        }
+
+        // Create device using registry
+        auto& registry = DeviceTypeRegistry::instance();
+        auto device = registry.createFromTypeName(type, id, name, protocol, protocolAddress, config);
+
+        if (!device) {
+            sendError(c, 400, "Invalid device type: " + type);
+            return;
+        }
+
+        device->setRoom(room);
+
+        if (m_deviceManager.addDevice(device)) {
+            std::string json = "{\"success\":true,\"id\":\"" + id + "\"}";
+            sendJson(c, 201, json);
+        } else {
+            sendError(c, 500, "Failed to add device");
+        }
+    } catch (const std::exception& e) {
+        LOG_ERROR("Failed to parse device create request: %s", e.what());
+        sendError(c, 400, "Invalid JSON");
+    }
+}
+
+void WebServer::apiUpdateDeviceSettings(struct mg_connection* c, const std::string& id,
+                                         struct mg_http_message* hm) {
+    auto device = m_deviceManager.getDevice(id);
+    if (!device) {
+        sendError(c, 404, "Device not found");
+        return;
+    }
+
+    std::string body(hm->body.buf, hm->body.len);
+
+    try {
+        auto data = nlohmann::json::parse(body);
+
+        // Update name if provided
+        if (data.contains("name")) {
+            device->setName(data["name"].get<std::string>());
+        }
+
+        // Update room if provided
+        if (data.contains("room")) {
+            device->setRoom(data["room"].get<std::string>());
+        }
+
+        // Save device to persist changes
+        m_deviceManager.saveDevice(device);
+
+        std::string json = "{\"success\":true}";
+        sendJson(c, 200, json);
+    } catch (const std::exception& e) {
+        LOG_ERROR("Failed to parse device settings update: %s", e.what());
+        sendError(c, 400, "Invalid JSON");
+    }
+}
+
+void WebServer::apiDeleteDevice(struct mg_connection* c, const std::string& id) {
+    if (m_deviceManager.removeDevice(id)) {
+        sendJson(c, 200, "{\"success\":true}");
+    } else {
+        sendError(c, 404, "Device not found");
+    }
+}
+
+// =============================================================================
+// Zigbee Pairing API Handlers
+// =============================================================================
+
+void WebServer::apiZigbeePermitJoin(struct mg_connection* c, struct mg_http_message* hm) {
+    if (!m_zigbeeHandler) {
+        sendError(c, 503, "Zigbee not available");
+        return;
+    }
+
+    std::string body(hm->body.buf, hm->body.len);
+    int duration = 60;  // Default 60 seconds
+
+    try {
+        if (!body.empty()) {
+            auto data = nlohmann::json::parse(body);
+            duration = data.value("duration", 60);
+        }
+    } catch (...) {
+        // Use default duration
+    }
+
+    m_zigbeeHandler->startDiscovery();
+
+    std::string json = "{\"success\":true,\"duration\":" + std::to_string(duration) + "}";
+    sendJson(c, 200, json);
+}
+
+void WebServer::apiZigbeeStopPermitJoin(struct mg_connection* c) {
+    if (!m_zigbeeHandler) {
+        sendError(c, 503, "Zigbee not available");
+        return;
+    }
+
+    m_zigbeeHandler->stopDiscovery();
+    sendJson(c, 200, "{\"success\":true}");
+}
+
+void WebServer::apiGetPendingDevices(struct mg_connection* c) {
+    if (!m_zigbeeHandler) {
+        sendError(c, 503, "Zigbee not available");
+        return;
+    }
+
+    // Get pending device if any
+    auto pendingDevice = m_zigbeeHandler->getPendingDevice();
+
+    std::string json = "[";
+    if (pendingDevice) {
+        json += "{";
+        json += "\"ieeeAddress\":\"" + pendingDevice->protocolAddress() + "\",";
+        json += "\"manufacturer\":\"" + pendingDevice->getConfig().value("manufacturer", "") + "\",";
+        json += "\"model\":\"" + pendingDevice->getConfig().value("model", "") + "\",";
+        json += "\"type\":\"" + pendingDevice->typeString() + "\"";
+        json += "}";
+    }
+    json += "]";
+
+    sendJson(c, 200, json);
+}
+
+void WebServer::apiAddZigbeeDevice(struct mg_connection* c, struct mg_http_message* hm) {
+    if (!m_zigbeeHandler) {
+        sendError(c, 503, "Zigbee not available");
+        return;
+    }
+
+    std::string body(hm->body.buf, hm->body.len);
+
+    try {
+        auto data = nlohmann::json::parse(body);
+
+        std::string ieeeAddress = data.value("ieeeAddress", "");
+        std::string name = data.value("name", "");
+        std::string room = data.value("room", "");
+
+        if (ieeeAddress.empty()) {
+            sendError(c, 400, "ieeeAddress is required");
+            return;
+        }
+
+        // Check if there's a pending device with this address
+        auto pendingDevice = m_zigbeeHandler->getPendingDevice();
+        if (!pendingDevice || pendingDevice->protocolAddress() != ieeeAddress) {
+            sendError(c, 404, "No pending device with that address");
+            return;
+        }
+
+        // Update device name and room
+        if (!name.empty()) {
+            pendingDevice->setName(name);
+        }
+        if (!room.empty()) {
+            pendingDevice->setRoom(room);
+        }
+
+        // Add to device manager
+        if (m_deviceManager.addDevice(pendingDevice)) {
+            // Clear pending device
+            m_zigbeeHandler->clearPendingDevice();
+
+            std::string json = "{\"success\":true,\"id\":\"" + pendingDevice->id() + "\"}";
+            sendJson(c, 201, json);
+        } else {
+            sendError(c, 500, "Failed to add device");
+        }
+    } catch (const std::exception& e) {
+        LOG_ERROR("Failed to parse Zigbee device add request: %s", e.what());
+        sendError(c, 400, "Invalid JSON");
+    }
+}
+
+// =============================================================================
+// Automation API Handlers
+// =============================================================================
+
+void WebServer::apiGetAutomations(struct mg_connection* c) {
+    if (!m_automationMgr) {
+        sendError(c, 503, "Automations not available");
+        return;
+    }
+
+    auto automations = m_automationMgr->getAllAutomations();
+
+    std::string json = "[";
+    bool first = true;
+    for (const auto& automation : automations) {
+        if (!first) json += ",";
+        first = false;
+
+        json += automation->toJson().dump();
+    }
+    json += "]";
+
+    sendJson(c, 200, json);
+}
+
+void WebServer::apiCreateAutomation(struct mg_connection* c, struct mg_http_message* hm) {
+    if (!m_automationMgr) {
+        sendError(c, 503, "Automations not available");
+        return;
+    }
+
+    std::string body(hm->body.buf, hm->body.len);
+
+    try {
+        auto data = nlohmann::json::parse(body);
+
+        // Validate required fields
+        if (!data.contains("name") || data["name"].get<std::string>().empty()) {
+            sendError(c, 400, "name is required");
+            return;
+        }
+
+        Automation automation = Automation::fromJson(data);
+
+        // Generate ID if not provided
+        if (automation.id.empty()) {
+            automation.id = m_automationMgr->generateId();
+        }
+
+        if (m_automationMgr->addAutomation(automation)) {
+            std::string json = "{\"success\":true,\"id\":\"" + automation.id + "\"}";
+            sendJson(c, 201, json);
+        } else {
+            sendError(c, 500, "Failed to create automation");
+        }
+    } catch (const std::exception& e) {
+        LOG_ERROR("Failed to parse automation create request: %s", e.what());
+        sendError(c, 400, std::string("Invalid JSON: ") + e.what());
+    }
+}
+
+void WebServer::apiGetAutomation(struct mg_connection* c, const std::string& id) {
+    if (!m_automationMgr) {
+        sendError(c, 503, "Automations not available");
+        return;
+    }
+
+    auto automation = m_automationMgr->getAutomation(id);
+    if (!automation) {
+        sendError(c, 404, "Automation not found");
+        return;
+    }
+
+    sendJson(c, 200, automation->toJson().dump());
+}
+
+void WebServer::apiUpdateAutomation(struct mg_connection* c, const std::string& id,
+                                     struct mg_http_message* hm) {
+    if (!m_automationMgr) {
+        sendError(c, 503, "Automations not available");
+        return;
+    }
+
+    // Check if automation exists
+    auto existing = m_automationMgr->getAutomation(id);
+    if (!existing) {
+        sendError(c, 404, "Automation not found");
+        return;
+    }
+
+    std::string body(hm->body.buf, hm->body.len);
+
+    try {
+        auto data = nlohmann::json::parse(body);
+        Automation automation = Automation::fromJson(data);
+        automation.id = id;  // Ensure ID matches URL
+
+        if (m_automationMgr->updateAutomation(automation)) {
+            sendJson(c, 200, "{\"success\":true}");
+        } else {
+            sendError(c, 500, "Failed to update automation");
+        }
+    } catch (const std::exception& e) {
+        LOG_ERROR("Failed to parse automation update request: %s", e.what());
+        sendError(c, 400, std::string("Invalid JSON: ") + e.what());
+    }
+}
+
+void WebServer::apiDeleteAutomation(struct mg_connection* c, const std::string& id) {
+    if (!m_automationMgr) {
+        sendError(c, 503, "Automations not available");
+        return;
+    }
+
+    if (m_automationMgr->deleteAutomation(id)) {
+        sendJson(c, 200, "{\"success\":true}");
+    } else {
+        sendError(c, 404, "Automation not found");
+    }
+}
+
+void WebServer::apiSetAutomationEnabled(struct mg_connection* c, const std::string& id,
+                                         struct mg_http_message* hm) {
+    if (!m_automationMgr) {
+        sendError(c, 503, "Automations not available");
+        return;
+    }
+
+    std::string body(hm->body.buf, hm->body.len);
+
+    try {
+        auto data = nlohmann::json::parse(body);
+        bool enabled = data.value("enabled", true);
+
+        if (m_automationMgr->setEnabled(id, enabled)) {
+            sendJson(c, 200, "{\"success\":true,\"enabled\":" +
+                     std::string(enabled ? "true" : "false") + "}");
+        } else {
+            sendError(c, 404, "Automation not found");
+        }
+    } catch (const std::exception& e) {
+        LOG_ERROR("Failed to parse automation enable request: %s", e.what());
+        sendError(c, 400, "Invalid JSON");
+    }
+}
+
 void WebServer::sendJson(struct mg_connection* c, int status, const std::string& json) {
     sendJsonWithHeaders(c, status, json, "");
 }
@@ -631,6 +1187,8 @@ void WebServer::stop() {}
 void WebServer::setTlsCert(const std::string&, const std::string&) {}
 void WebServer::setHttpRedirect(bool, int) {}
 void WebServer::setSecurityManagers(security::SessionManager*, security::ApiTokenManager*) {}
+void WebServer::setAutomationManager(AutomationManager*) {}
+void WebServer::setZigbeeHandler(zigbee::ZigbeeHandler*) {}
 void WebServer::setRateLimit(int) {}
 void WebServer::setPublicRoutes(const std::vector<std::string>&) {}
 AuthInfo WebServer::checkAuth(struct mg_http_message*) { return {}; }
@@ -650,6 +1208,23 @@ void WebServer::apiGetSystemStatus(struct mg_connection*) {}
 void WebServer::apiLogin(struct mg_connection*, struct mg_http_message*) {}
 void WebServer::apiLogout(struct mg_connection*, const AuthInfo&) {}
 void WebServer::apiGetCurrentUser(struct mg_connection*, const AuthInfo&) {}
+void WebServer::apiGetRooms(struct mg_connection*) {}
+void WebServer::apiCreateRoom(struct mg_connection*, struct mg_http_message*) {}
+void WebServer::apiUpdateRoom(struct mg_connection*, const std::string&, struct mg_http_message*) {}
+void WebServer::apiDeleteRoom(struct mg_connection*, const std::string&) {}
+void WebServer::apiCreateDevice(struct mg_connection*, struct mg_http_message*) {}
+void WebServer::apiUpdateDeviceSettings(struct mg_connection*, const std::string&, struct mg_http_message*) {}
+void WebServer::apiDeleteDevice(struct mg_connection*, const std::string&) {}
+void WebServer::apiZigbeePermitJoin(struct mg_connection*, struct mg_http_message*) {}
+void WebServer::apiZigbeeStopPermitJoin(struct mg_connection*) {}
+void WebServer::apiGetPendingDevices(struct mg_connection*) {}
+void WebServer::apiAddZigbeeDevice(struct mg_connection*, struct mg_http_message*) {}
+void WebServer::apiGetAutomations(struct mg_connection*) {}
+void WebServer::apiCreateAutomation(struct mg_connection*, struct mg_http_message*) {}
+void WebServer::apiGetAutomation(struct mg_connection*, const std::string&) {}
+void WebServer::apiUpdateAutomation(struct mg_connection*, const std::string&, struct mg_http_message*) {}
+void WebServer::apiDeleteAutomation(struct mg_connection*, const std::string&) {}
+void WebServer::apiSetAutomationEnabled(struct mg_connection*, const std::string&, struct mg_http_message*) {}
 void WebServer::sendJson(struct mg_connection*, int, const std::string&) {}
 void WebServer::sendJsonWithHeaders(struct mg_connection*, int, const std::string&, const std::string&) {}
 void WebServer::sendError(struct mg_connection*, int, const std::string&) {}

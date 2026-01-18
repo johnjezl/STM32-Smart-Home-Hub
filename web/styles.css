@@ -567,6 +567,439 @@ body {
     border-color: var(--error);
 }
 
+/* Section Headers */
+.section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.section-header h2 {
+    margin-bottom: 0;
+}
+
+.btn-sm {
+    padding: 8px 16px;
+    font-size: 0.875rem;
+}
+
+.btn-danger {
+    background: var(--error);
+    color: white;
+}
+
+.btn-danger:hover {
+    background: #dc2626;
+}
+
+.devices-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+/* Modal Overlay */
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    padding: 20px;
+}
+
+.modal {
+    background: var(--surface);
+    border-radius: 16px;
+    width: 100%;
+    max-width: 400px;
+    max-height: 90vh;
+    overflow-y: auto;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+
+.modal-lg {
+    max-width: 600px;
+}
+
+.modal-sm {
+    max-width: 320px;
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 20px 24px;
+    border-bottom: 1px solid var(--border);
+}
+
+.modal-header h3 {
+    font-size: 1.125rem;
+    font-weight: 600;
+}
+
+.modal-close {
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 0;
+    line-height: 1;
+}
+
+.modal-close:hover {
+    color: var(--text-primary);
+}
+
+.modal-body {
+    padding: 24px;
+}
+
+.modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+    padding: 16px 24px;
+    border-top: 1px solid var(--border);
+}
+
+/* Wizard Steps */
+.wizard-step {
+    display: none;
+}
+
+.wizard-step.active {
+    display: block;
+}
+
+.wizard-step h4 {
+    font-size: 1rem;
+    font-weight: 500;
+    margin-bottom: 16px;
+    color: var(--text-secondary);
+}
+
+/* Device Type Grid */
+.device-type-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+}
+
+.device-type-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 16px 8px;
+    background: var(--surface-light);
+    border: 2px solid transparent;
+    border-radius: 12px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.device-type-card:hover {
+    background: var(--border);
+}
+
+.device-type-card.selected {
+    border-color: var(--primary);
+    background: rgba(99, 102, 241, 0.15);
+}
+
+.device-type-icon {
+    font-size: 2rem;
+    margin-bottom: 8px;
+}
+
+.device-type-name {
+    font-size: 0.75rem;
+    text-align: center;
+    color: var(--text-secondary);
+}
+
+.device-type-card.selected .device-type-name {
+    color: var(--text-primary);
+}
+
+/* Protocol Config */
+.protocol-config {
+    display: none;
+}
+
+.protocol-config.active {
+    display: block;
+}
+
+.info-text {
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+    margin-bottom: 16px;
+}
+
+/* Zigbee Pairing */
+.zigbee-pairing {
+    margin-bottom: 20px;
+}
+
+.pairing-status {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 16px;
+    background: var(--surface-light);
+    border-radius: 8px;
+    margin-top: 12px;
+}
+
+.spinner {
+    width: 20px;
+    height: 20px;
+    border: 2px solid var(--border);
+    border-top-color: var(--primary);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+.discovered-device {
+    padding: 16px;
+    background: rgba(34, 197, 94, 0.1);
+    border: 1px solid var(--success);
+    border-radius: 8px;
+    margin-top: 12px;
+}
+
+.discovered-info strong {
+    display: block;
+    margin-bottom: 4px;
+}
+
+.discovered-info span {
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+}
+
+/* Device Summary */
+.device-summary {
+    margin-top: 20px;
+    padding: 16px;
+    background: var(--surface-light);
+    border-radius: 8px;
+}
+
+.device-summary-row {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 8px;
+}
+
+.device-summary-row:last-child {
+    margin-bottom: 0;
+}
+
+.device-summary-label {
+    color: var(--text-secondary);
+}
+
+/* Device Info in Edit Modal */
+.device-info-readonly {
+    margin-top: 16px;
+    padding: 12px;
+    background: var(--surface-light);
+    border-radius: 8px;
+    font-size: 0.875rem;
+}
+
+.device-info-readonly div {
+    margin-bottom: 4px;
+}
+
+.device-info-readonly div:last-child {
+    margin-bottom: 0;
+}
+
+/* Trigger Configs */
+.trigger-config {
+    display: none;
+}
+
+.trigger-config.active {
+    display: block;
+}
+
+.form-row {
+    display: flex;
+    gap: 16px;
+}
+
+.form-row .form-group {
+    flex: 1;
+}
+
+/* Actions List */
+.action-form {
+    margin-top: 16px;
+    padding: 16px;
+    background: var(--surface-light);
+    border-radius: 8px;
+}
+
+#actions-list {
+    margin-bottom: 16px;
+}
+
+.action-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px;
+    background: var(--surface-light);
+    border-radius: 8px;
+    margin-bottom: 8px;
+}
+
+.action-item-text {
+    font-size: 0.875rem;
+}
+
+.action-remove-btn {
+    background: none;
+    border: none;
+    color: var(--error);
+    cursor: pointer;
+    font-size: 1rem;
+}
+
+/* Automations List */
+.automations-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.automation-card {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: var(--surface);
+    padding: 16px 20px;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+}
+
+.automation-card.disabled {
+    opacity: 0.6;
+}
+
+.automation-info {
+    flex: 1;
+}
+
+.automation-name {
+    font-size: 1rem;
+    font-weight: 500;
+    margin-bottom: 4px;
+}
+
+.automation-trigger {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+
+.automation-controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.automation-edit-btn {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 1rem;
+    padding: 4px;
+}
+
+.automation-edit-btn:hover {
+    color: var(--text-primary);
+}
+
+/* Room Card Context Menu */
+.room-card {
+    position: relative;
+    cursor: pointer;
+}
+
+.room-card-menu {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 1.25rem;
+    padding: 4px;
+    opacity: 0;
+    transition: opacity 0.2s;
+}
+
+.room-card:hover .room-card-menu {
+    opacity: 1;
+}
+
+.room-card-menu:hover {
+    color: var(--text-primary);
+}
+
+/* Device Card Context Menu */
+.device-card {
+    position: relative;
+}
+
+.device-edit-btn {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 1rem;
+    padding: 4px;
+    margin-right: 8px;
+}
+
+.device-edit-btn:hover {
+    color: var(--text-primary);
+}
+
+/* Empty State */
+.empty-state {
+    text-align: center;
+    padding: 40px 20px;
+    color: var(--text-secondary);
+}
+
+.empty-state-icon {
+    font-size: 3rem;
+    margin-bottom: 12px;
+}
+
+.empty-state-text {
+    font-size: 0.9rem;
+}
+
 /* Responsive */
 @media (max-width: 640px) {
     .header {
@@ -598,5 +1031,47 @@ body {
     .device-controls {
         width: 100%;
         justify-content: space-between;
+    }
+
+    .device-type-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .modal {
+        max-width: 100%;
+        margin: 10px;
+        max-height: calc(100vh - 20px);
+    }
+
+    .modal-lg {
+        max-width: 100%;
+    }
+
+    .form-row {
+        flex-direction: column;
+        gap: 0;
+    }
+
+    .automation-card {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 12px;
+    }
+
+    .automation-controls {
+        width: 100%;
+        justify-content: space-between;
+    }
+
+    .section-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 12px;
+    }
+
+    .devices-actions {
+        width: 100%;
+        flex-direction: column;
+        align-items: stretch;
     }
 }

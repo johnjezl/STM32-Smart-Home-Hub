@@ -47,6 +47,7 @@
             <button class="tab active" data-tab="dashboard">Dashboard</button>
             <button class="tab" data-tab="devices">Devices</button>
             <button class="tab" data-tab="sensors">Sensors</button>
+            <button class="tab" data-tab="automations">Automations</button>
         </nav>
 
         <!-- Dashboard Tab -->
@@ -82,7 +83,10 @@
                 </div>
             </div>
 
-            <h2>Rooms</h2>
+            <div class="section-header">
+                <h2>Rooms</h2>
+                <button id="add-room-btn" class="btn btn-primary btn-sm">+ Add Room</button>
+            </div>
             <div id="rooms-grid" class="rooms-grid">
                 <!-- Room cards inserted here -->
             </div>
@@ -92,10 +96,11 @@
         <main id="tab-devices" class="tab-content">
             <div class="devices-header">
                 <h2>All Devices</h2>
-                <div class="filter-group">
+                <div class="devices-actions">
                     <select id="room-filter">
                         <option value="">All Rooms</option>
                     </select>
+                    <button id="add-device-btn" class="btn btn-primary btn-sm">+ Add Device</button>
                 </div>
             </div>
             <div id="devices-list" class="devices-list">
@@ -110,10 +115,391 @@
                 <!-- Sensor cards inserted here -->
             </div>
         </main>
+
+        <!-- Automations Tab -->
+        <main id="tab-automations" class="tab-content">
+            <div class="section-header">
+                <h2>Automations</h2>
+                <button id="add-automation-btn" class="btn btn-primary btn-sm">+ Add Automation</button>
+            </div>
+            <div id="automations-list" class="automations-list">
+                <!-- Automation cards inserted here -->
+            </div>
+        </main>
     </div>
 
     <!-- Toast Notification -->
     <div id="toast" class="toast"></div>
+
+    <!-- Modal Overlay -->
+    <div id="modal-overlay" class="modal-overlay hidden">
+        <!-- Add Room Modal -->
+        <div id="add-room-modal" class="modal hidden">
+            <div class="modal-header">
+                <h3>Add Room</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="room-name">Room Name</label>
+                    <input type="text" id="room-name" placeholder="e.g., Living Room">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline modal-cancel">Cancel</button>
+                <button id="save-room-btn" class="btn btn-primary">Save</button>
+            </div>
+        </div>
+
+        <!-- Edit Room Modal -->
+        <div id="edit-room-modal" class="modal hidden">
+            <div class="modal-header">
+                <h3>Edit Room</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="edit-room-id">
+                <div class="form-group">
+                    <label for="edit-room-name">Room Name</label>
+                    <input type="text" id="edit-room-name">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="delete-room-btn" class="btn btn-danger">Delete</button>
+                <button class="btn btn-outline modal-cancel">Cancel</button>
+                <button id="update-room-btn" class="btn btn-primary">Save</button>
+            </div>
+        </div>
+
+        <!-- Add Device Modal (Wizard) -->
+        <div id="add-device-modal" class="modal modal-lg hidden">
+            <div class="modal-header">
+                <h3>Add Device</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <!-- Step 1: Device Type -->
+                <div id="device-step-1" class="wizard-step active">
+                    <h4>Select Device Type</h4>
+                    <div class="device-type-grid">
+                        <div class="device-type-card" data-type="switch">
+                            <div class="device-type-icon">🔌</div>
+                            <div class="device-type-name">Switch</div>
+                        </div>
+                        <div class="device-type-card" data-type="dimmer">
+                            <div class="device-type-icon">💡</div>
+                            <div class="device-type-name">Dimmer</div>
+                        </div>
+                        <div class="device-type-card" data-type="color_light">
+                            <div class="device-type-icon">🌈</div>
+                            <div class="device-type-name">Color Light</div>
+                        </div>
+                        <div class="device-type-card" data-type="outlet">
+                            <div class="device-type-icon">🔌</div>
+                            <div class="device-type-name">Outlet</div>
+                        </div>
+                        <div class="device-type-card" data-type="temperature_sensor">
+                            <div class="device-type-icon">🌡️</div>
+                            <div class="device-type-name">Temp Sensor</div>
+                        </div>
+                        <div class="device-type-card" data-type="motion_sensor">
+                            <div class="device-type-icon">👁️</div>
+                            <div class="device-type-name">Motion Sensor</div>
+                        </div>
+                        <div class="device-type-card" data-type="contact_sensor">
+                            <div class="device-type-icon">🚪</div>
+                            <div class="device-type-name">Contact Sensor</div>
+                        </div>
+                        <div class="device-type-card" data-type="thermostat">
+                            <div class="device-type-icon">🏠</div>
+                            <div class="device-type-name">Thermostat</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Step 2: Name and Protocol -->
+                <div id="device-step-2" class="wizard-step hidden">
+                    <h4>Device Details</h4>
+                    <div class="form-group">
+                        <label for="device-name">Device Name</label>
+                        <input type="text" id="device-name" placeholder="e.g., Living Room Light">
+                    </div>
+                    <div class="form-group">
+                        <label for="device-protocol">Protocol</label>
+                        <select id="device-protocol">
+                            <option value="local">Local (Virtual)</option>
+                            <option value="zigbee">Zigbee</option>
+                            <option value="mqtt">MQTT</option>
+                            <option value="http">HTTP</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Step 3: Protocol Configuration -->
+                <div id="device-step-3" class="wizard-step hidden">
+                    <h4>Protocol Configuration</h4>
+
+                    <!-- Local config -->
+                    <div id="config-local" class="protocol-config">
+                        <p class="info-text">No additional configuration needed for local devices.</p>
+                    </div>
+
+                    <!-- Zigbee config -->
+                    <div id="config-zigbee" class="protocol-config hidden">
+                        <div class="zigbee-pairing">
+                            <button id="start-pairing-btn" class="btn btn-primary">Start Pairing</button>
+                            <div id="pairing-status" class="pairing-status hidden">
+                                <div class="spinner"></div>
+                                <span>Searching for devices...</span>
+                            </div>
+                            <div id="discovered-device" class="discovered-device hidden">
+                                <div class="discovered-info">
+                                    <strong id="discovered-name">Device Name</strong>
+                                    <span id="discovered-type">Type</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="zigbee-address">IEEE Address (or discover above)</label>
+                            <input type="text" id="zigbee-address" placeholder="0x00158d0001234567">
+                        </div>
+                    </div>
+
+                    <!-- MQTT config -->
+                    <div id="config-mqtt" class="protocol-config hidden">
+                        <div class="form-group">
+                            <label for="mqtt-topic">MQTT Topic</label>
+                            <input type="text" id="mqtt-topic" placeholder="home/living-room/light">
+                        </div>
+                    </div>
+
+                    <!-- HTTP config -->
+                    <div id="config-http" class="protocol-config hidden">
+                        <div class="form-group">
+                            <label for="http-url">Device URL</label>
+                            <input type="text" id="http-url" placeholder="http://192.168.1.100">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Step 4: Room Assignment -->
+                <div id="device-step-4" class="wizard-step hidden">
+                    <h4>Room Assignment</h4>
+                    <div class="form-group">
+                        <label for="device-room">Assign to Room (Optional)</label>
+                        <select id="device-room">
+                            <option value="">No Room</option>
+                        </select>
+                    </div>
+                    <div id="device-summary" class="device-summary">
+                        <!-- Summary will be shown here -->
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="device-prev-btn" class="btn btn-outline hidden">Previous</button>
+                <button class="btn btn-outline modal-cancel">Cancel</button>
+                <button id="device-next-btn" class="btn btn-primary">Next</button>
+            </div>
+        </div>
+
+        <!-- Edit Device Modal -->
+        <div id="edit-device-modal" class="modal hidden">
+            <div class="modal-header">
+                <h3>Edit Device</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="edit-device-id">
+                <div class="form-group">
+                    <label for="edit-device-name">Device Name</label>
+                    <input type="text" id="edit-device-name">
+                </div>
+                <div class="form-group">
+                    <label for="edit-device-room">Room</label>
+                    <select id="edit-device-room">
+                        <option value="">No Room</option>
+                    </select>
+                </div>
+                <div class="device-info-readonly">
+                    <div><strong>Type:</strong> <span id="edit-device-type"></span></div>
+                    <div><strong>Protocol:</strong> <span id="edit-device-protocol"></span></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="delete-device-btn" class="btn btn-danger">Delete</button>
+                <button class="btn btn-outline modal-cancel">Cancel</button>
+                <button id="update-device-btn" class="btn btn-primary">Save</button>
+            </div>
+        </div>
+
+        <!-- Add Automation Modal -->
+        <div id="add-automation-modal" class="modal modal-lg hidden">
+            <div class="modal-header">
+                <h3>Add Automation</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <!-- Step 1: Name -->
+                <div id="automation-step-1" class="wizard-step active">
+                    <h4>Basic Info</h4>
+                    <div class="form-group">
+                        <label for="automation-name">Automation Name</label>
+                        <input type="text" id="automation-name" placeholder="e.g., Turn on lights at sunset">
+                    </div>
+                    <div class="form-group">
+                        <label for="automation-description">Description (Optional)</label>
+                        <input type="text" id="automation-description" placeholder="Brief description">
+                    </div>
+                </div>
+
+                <!-- Step 2: Trigger -->
+                <div id="automation-step-2" class="wizard-step hidden">
+                    <h4>Trigger</h4>
+                    <div class="form-group">
+                        <label for="trigger-type">When...</label>
+                        <select id="trigger-type">
+                            <option value="device_state">Device state changes</option>
+                            <option value="time">At a specific time</option>
+                            <option value="interval">Every X minutes</option>
+                            <option value="sensor_threshold">Sensor reaches threshold</option>
+                        </select>
+                    </div>
+
+                    <!-- Device state trigger -->
+                    <div id="trigger-device-state" class="trigger-config">
+                        <div class="form-group">
+                            <label for="trigger-device">Device</label>
+                            <select id="trigger-device"></select>
+                        </div>
+                        <div class="form-group">
+                            <label for="trigger-property">Property</label>
+                            <select id="trigger-property">
+                                <option value="on">On/Off</option>
+                                <option value="brightness">Brightness</option>
+                                <option value="motion">Motion</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="trigger-value">Becomes</label>
+                            <select id="trigger-value">
+                                <option value="true">On / Active</option>
+                                <option value="false">Off / Inactive</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Time trigger -->
+                    <div id="trigger-time" class="trigger-config hidden">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="trigger-hour">Hour</label>
+                                <select id="trigger-hour"></select>
+                            </div>
+                            <div class="form-group">
+                                <label for="trigger-minute">Minute</label>
+                                <select id="trigger-minute">
+                                    <option value="0">:00</option>
+                                    <option value="15">:15</option>
+                                    <option value="30">:30</option>
+                                    <option value="45">:45</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Interval trigger -->
+                    <div id="trigger-interval" class="trigger-config hidden">
+                        <div class="form-group">
+                            <label for="trigger-interval-mins">Every</label>
+                            <select id="trigger-interval-mins">
+                                <option value="5">5 minutes</option>
+                                <option value="15">15 minutes</option>
+                                <option value="30">30 minutes</option>
+                                <option value="60">1 hour</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Sensor threshold trigger -->
+                    <div id="trigger-sensor" class="trigger-config hidden">
+                        <div class="form-group">
+                            <label for="trigger-sensor-device">Sensor</label>
+                            <select id="trigger-sensor-device"></select>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="trigger-operator">Condition</label>
+                                <select id="trigger-operator">
+                                    <option value=">">Greater than</option>
+                                    <option value=">=">Greater or equal</option>
+                                    <option value="<">Less than</option>
+                                    <option value="<=">Less or equal</option>
+                                    <option value="=">Equals</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="trigger-threshold">Value</label>
+                                <input type="number" id="trigger-threshold" value="75">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Step 3: Actions -->
+                <div id="automation-step-3" class="wizard-step hidden">
+                    <h4>Actions</h4>
+                    <p class="info-text">What should happen when the trigger fires?</p>
+                    <div id="actions-list">
+                        <!-- Actions added here -->
+                    </div>
+                    <button id="add-action-btn" class="btn btn-outline btn-sm">+ Add Action</button>
+
+                    <div id="action-form" class="action-form hidden">
+                        <div class="form-group">
+                            <label for="action-device">Device</label>
+                            <select id="action-device"></select>
+                        </div>
+                        <div class="form-group">
+                            <label for="action-property">Set</label>
+                            <select id="action-property">
+                                <option value="on">On/Off</option>
+                                <option value="brightness">Brightness</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="action-value">To</label>
+                            <select id="action-value">
+                                <option value="true">On</option>
+                                <option value="false">Off</option>
+                            </select>
+                        </div>
+                        <button id="confirm-action-btn" class="btn btn-primary btn-sm">Add</button>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="automation-prev-btn" class="btn btn-outline hidden">Previous</button>
+                <button class="btn btn-outline modal-cancel">Cancel</button>
+                <button id="automation-next-btn" class="btn btn-primary">Next</button>
+            </div>
+        </div>
+
+        <!-- Confirm Delete Modal -->
+        <div id="confirm-delete-modal" class="modal modal-sm hidden">
+            <div class="modal-header">
+                <h3>Confirm Delete</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p id="delete-message">Are you sure you want to delete this item?</p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline modal-cancel">Cancel</button>
+                <button id="confirm-delete-btn" class="btn btn-danger">Delete</button>
+            </div>
+        </div>
+    </div>
 
     <script src="app.js"></script>
 </body>

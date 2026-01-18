@@ -201,17 +201,16 @@ Condition Condition::fromJson(const nlohmann::json& j) {
 // Action serialization
 nlohmann::json Action::toJson() const {
     nlohmann::json j;
-    j["type"] = actionTypeToString(type);
 
     switch (type) {
         case ActionType::SetDeviceState:
-            j["device_id"] = deviceId;
+            j["deviceId"] = deviceId;
             j["property"] = property;
             j["value"] = value;
             break;
 
         case ActionType::Delay:
-            j["delay_ms"] = delayMs;
+            j["delayMs"] = delayMs;
             break;
     }
 
@@ -224,13 +223,14 @@ Action Action::fromJson(const nlohmann::json& j) {
 
     switch (a.type) {
         case ActionType::SetDeviceState:
-            a.deviceId = j.value("device_id", "");
+            // Accept both camelCase and snake_case
+            a.deviceId = j.value("deviceId", j.value("device_id", ""));
             a.property = j.value("property", "");
             if (j.contains("value")) a.value = j["value"];
             break;
 
         case ActionType::Delay:
-            a.delayMs = j.value("delay_ms", 0);
+            a.delayMs = j.value("delayMs", j.value("delay_ms", 0));
             break;
     }
 
@@ -245,14 +245,13 @@ nlohmann::json Automation::toJson() const {
     j["description"] = description;
     j["enabled"] = enabled;
 
-    nlohmann::json triggersArray = nlohmann::json::array();
-    for (const auto& trigger : triggers) {
-        triggersArray.push_back(trigger.toJson());
+    // Output single trigger for API compatibility
+    if (!triggers.empty()) {
+        j["trigger"] = triggers[0].toJson();
     }
-    j["triggers"] = triggersArray;
 
     if (condition.has_value()) {
-        j["condition"] = condition->toJson();
+        j["conditions"] = nlohmann::json::array({condition->toJson()});
     }
 
     nlohmann::json actionsArray = nlohmann::json::array();
@@ -261,9 +260,7 @@ nlohmann::json Automation::toJson() const {
     }
     j["actions"] = actionsArray;
 
-    j["created_at"] = createdAt;
-    j["updated_at"] = updatedAt;
-    j["last_triggered_at"] = lastTriggeredAt;
+    j["lastTriggered"] = lastTriggeredAt;
 
     return j;
 }
@@ -275,7 +272,10 @@ Automation Automation::fromJson(const nlohmann::json& j) {
     a.description = j.value("description", "");
     a.enabled = j.value("enabled", true);
 
-    if (j.contains("triggers") && j["triggers"].is_array()) {
+    // Accept both singular "trigger" and plural "triggers"
+    if (j.contains("trigger") && j["trigger"].is_object()) {
+        a.triggers.push_back(Trigger::fromJson(j["trigger"]));
+    } else if (j.contains("triggers") && j["triggers"].is_array()) {
         for (const auto& trigger : j["triggers"]) {
             a.triggers.push_back(Trigger::fromJson(trigger));
         }
@@ -293,7 +293,7 @@ Automation Automation::fromJson(const nlohmann::json& j) {
 
     a.createdAt = j.value("created_at", 0ULL);
     a.updatedAt = j.value("updated_at", 0ULL);
-    a.lastTriggeredAt = j.value("last_triggered_at", 0ULL);
+    a.lastTriggeredAt = j.value("last_triggered_at", j.value("lastTriggered", 0ULL));
 
     return a;
 }

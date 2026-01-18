@@ -24,6 +24,11 @@ namespace smarthub {
 
 class EventBus;
 class DeviceManager;
+class AutomationManager;
+
+namespace zigbee {
+class ZigbeeHandler;
+}
 
 namespace security {
 class SessionManager;
@@ -94,6 +99,16 @@ public:
                              security::ApiTokenManager* tokenMgr);
 
     /**
+     * Set automation manager for automation API
+     */
+    void setAutomationManager(AutomationManager* automationMgr);
+
+    /**
+     * Set Zigbee handler for pairing API
+     */
+    void setZigbeeHandler(zigbee::ZigbeeHandler* zigbeeHandler);
+
+    /**
      * Configure rate limiting
      * @param requestsPerMinute Max requests per minute per IP (0 = disabled)
      */
@@ -132,6 +147,35 @@ private:
     void apiLogout(struct mg_connection* c, const AuthInfo& auth);
     void apiGetCurrentUser(struct mg_connection* c, const AuthInfo& auth);
 
+    // Room API handlers
+    void apiGetRooms(struct mg_connection* c);
+    void apiCreateRoom(struct mg_connection* c, struct mg_http_message* hm);
+    void apiUpdateRoom(struct mg_connection* c, const std::string& id,
+                       struct mg_http_message* hm);
+    void apiDeleteRoom(struct mg_connection* c, const std::string& id);
+
+    // Device CRUD API handlers
+    void apiCreateDevice(struct mg_connection* c, struct mg_http_message* hm);
+    void apiUpdateDeviceSettings(struct mg_connection* c, const std::string& id,
+                                  struct mg_http_message* hm);
+    void apiDeleteDevice(struct mg_connection* c, const std::string& id);
+
+    // Zigbee pairing API handlers
+    void apiZigbeePermitJoin(struct mg_connection* c, struct mg_http_message* hm);
+    void apiZigbeeStopPermitJoin(struct mg_connection* c);
+    void apiGetPendingDevices(struct mg_connection* c);
+    void apiAddZigbeeDevice(struct mg_connection* c, struct mg_http_message* hm);
+
+    // Automation API handlers
+    void apiGetAutomations(struct mg_connection* c);
+    void apiCreateAutomation(struct mg_connection* c, struct mg_http_message* hm);
+    void apiGetAutomation(struct mg_connection* c, const std::string& id);
+    void apiUpdateAutomation(struct mg_connection* c, const std::string& id,
+                             struct mg_http_message* hm);
+    void apiDeleteAutomation(struct mg_connection* c, const std::string& id);
+    void apiSetAutomationEnabled(struct mg_connection* c, const std::string& id,
+                                  struct mg_http_message* hm);
+
     void sendJson(struct mg_connection* c, int status, const std::string& json);
     void sendJsonWithHeaders(struct mg_connection* c, int status,
                              const std::string& json, const std::string& extraHeaders = "");
@@ -151,6 +195,10 @@ private:
     security::ApiTokenManager* m_tokenMgr = nullptr;
     int m_rateLimitPerMinute = 0;
     std::vector<std::string> m_publicRoutes;
+
+    // Additional managers
+    AutomationManager* m_automationMgr = nullptr;
+    zigbee::ZigbeeHandler* m_zigbeeHandler = nullptr;
 
     // Rate limiting state
     std::unordered_map<std::string, RateLimitEntry> m_rateLimits;
