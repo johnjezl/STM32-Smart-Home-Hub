@@ -10,6 +10,7 @@
 #include <smarthub/devices/DeviceManager.hpp>
 #include <smarthub/devices/Device.hpp>
 #include <smarthub/database/Database.hpp>
+#include <smarthub/automation/AutomationManager.hpp>
 #include <thread>
 #include <chrono>
 #include <cstdlib>
@@ -75,6 +76,10 @@ protected:
             webServer->stop();
             webServer.reset();
         }
+        if (automationManager) {
+            automationManager->shutdown();
+            automationManager.reset();
+        }
         deviceManager.reset();
         database.reset();
         eventBus.reset();
@@ -92,9 +97,20 @@ protected:
         // Make all API routes public for testing (no auth required)
         webServer->setPublicRoutes({"/api/"});
 
+        // Set automation manager if available
+        if (automationManager) {
+            webServer->setAutomationManager(automationManager.get());
+        }
+
         ASSERT_TRUE(webServer->start());
         // Give server time to start
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+
+    void setupAutomationManager() {
+        automationManager = std::make_unique<smarthub::AutomationManager>(
+            *eventBus, *database, *deviceManager);
+        automationManager->initialize();
     }
 
     std::string baseUrl() {
@@ -106,6 +122,7 @@ protected:
     std::unique_ptr<smarthub::EventBus> eventBus;
     std::unique_ptr<smarthub::Database> database;
     std::unique_ptr<smarthub::DeviceManager> deviceManager;
+    std::unique_ptr<smarthub::AutomationManager> automationManager;
     std::unique_ptr<smarthub::WebServer> webServer;
 };
 
@@ -330,6 +347,22 @@ static std::string curlGetWithAuth(const std::string& url, const std::string& to
     return result;
 }
 
+// Helper to execute DELETE request
+static std::string curlDelete(const std::string& url) {
+    std::string cmd = "curl -s --max-time 5 -X DELETE " + url + " 2>/dev/null";
+    std::array<char, 4096> buffer;
+    std::string result;
+
+    FILE* pipe = popen(cmd.c_str(), "r");
+    if (!pipe) return "";
+
+    while (fgets(buffer.data(), buffer.size(), pipe) != nullptr) {
+        result += buffer.data();
+    }
+    pclose(pipe);
+    return result;
+}
+
 // Security Headers Tests
 TEST_F(WebServerTest, SecurityHeadersPresent) {
     startServer();
@@ -474,4 +507,626 @@ TEST_F(WebServerTest, ErrorResponseFormat) {
     std::string response = curlGet(baseUrl() + "/api/nonexistent");
     EXPECT_NE(response.find("\"error\""), std::string::npos)
         << "Error responses should have JSON format with 'error' field";
+}
+
+// ============================================================================
+// Room API Tests
+// ============================================================================
+
+class WebServerRoomApiTest : public WebServerTest {
+protected:
+    void SetUp() override {
+        WebServerTest::SetUp();
+        startServer();
+    }
+};
+
+TEST_F(WebServerRoomApiTest, GetRooms_InitiallyEmpty) {
+    std::string response = curlGet(baseUrl() + "/api/rooms");
+    EXPECT_EQ(response, "[]") << "Should return empty array when no rooms exist";
+}
+
+TEST_F(WebServerRoomApiTest, CreateRoom_Success) {
+    std::string response = curlPost(baseUrl() + "/api/rooms", "{\"name\":\"Living Room\"}");
+
+    EXPECT_NE(response.find("\"success\":true"), std::string::npos)
+        << "Should return success for valid room creation";
+    EXPECT_NE(response.find("\"id\""), std::string::npos)
+        << "Should return room ID";
+}
+
+TEST_F(WebServerRoomApiTest, CreateRoom_MissingName) {
+    std::string response = curlPost(baseUrl() + "/api/rooms", "{}");
+
+    EXPECT_NE(response.find("\"error\""), std::string::npos)
+        << "Should return error for missing name";
+}
+
+TEST_F(WebServerRoomApiTest, GetRooms_AfterCreation) {
+    // Create a room
+    curlPost(baseUrl() + "/api/rooms", "{\"name\":\"Kitchen\"}");
+
+    // Get rooms
+    std::string response = curlGet(baseUrl() + "/api/rooms");
+
+    EXPECT_NE(response.find("Kitchen"), std::string::npos)
+        << "Created room should appear in list";
+    EXPECT_NE(response.find("\"deviceCount\""), std::string::npos)
+        << "Should include device count";
+}
+
+TEST_F(WebServerRoomApiTest, UpdateRoom_Success) {
+    // Create a room
+    std::string createResponse = curlPost(baseUrl() + "/api/rooms", "{\"name\":\"Old Name\"}");
+
+    // Extract room ID (simple parsing)
+    size_t idStart = createResponse.find("\"id\":\"") + 6;
+    size_t idEnd = createResponse.find("\"", idStart);
+    std::string roomId = createResponse.substr(idStart, idEnd - idStart);
+
+    // Update room
+    std::string updateResponse = curlPut(baseUrl() + "/api/rooms/" + roomId,
+                                         "{\"name\":\"New Name\"}");
+
+    EXPECT_NE(updateResponse.find("\"success\":true"), std::string::npos)
+        << "Should return success for valid update";
+
+    // Verify update
+    std::string listResponse = curlGet(baseUrl() + "/api/rooms");
+    EXPECT_NE(listResponse.find("New Name"), std::string::npos)
+        << "Updated name should appear in list";
+}
+
+TEST_F(WebServerRoomApiTest, DeleteRoom_Success) {
+    // Create a room
+    std::string createResponse = curlPost(baseUrl() + "/api/rooms", "{\"name\":\"To Delete\"}");
+
+    size_t idStart = createResponse.find("\"id\":\"") + 6;
+    size_t idEnd = createResponse.find("\"", idStart);
+    std::string roomId = createResponse.substr(idStart, idEnd - idStart);
+
+    // Delete room
+    std::string deleteResponse = curlDelete(baseUrl() + "/api/rooms/" + roomId);
+
+    EXPECT_NE(deleteResponse.find("\"success\":true"), std::string::npos)
+        << "Should return success for delete";
+
+    // Verify deletion
+    std::string listResponse = curlGet(baseUrl() + "/api/rooms");
+    EXPECT_EQ(listResponse.find("To Delete"), std::string::npos)
+        << "Deleted room should not appear in list";
+}
+
+TEST_F(WebServerRoomApiTest, RoomDeviceCount_Accurate) {
+    // Create a room
+    curlPost(baseUrl() + "/api/rooms", "{\"name\":\"Test Room\"}");
+
+    // Add a device to the room
+    auto device = std::make_shared<smarthub::Device>("test-dev", "Test Device", smarthub::DeviceType::Light);
+    device->setRoom("Test Room");
+    deviceManager->addDevice(device);
+
+    // Get rooms
+    std::string response = curlGet(baseUrl() + "/api/rooms");
+
+    EXPECT_NE(response.find("\"deviceCount\":1"), std::string::npos)
+        << "Should show 1 device in room";
+}
+
+// ============================================================================
+// Device CRUD API Tests
+// ============================================================================
+
+class WebServerDeviceCrudTest : public WebServerTest {
+protected:
+    void SetUp() override {
+        WebServerTest::SetUp();
+        startServer();
+    }
+};
+
+TEST_F(WebServerDeviceCrudTest, CreateDevice_Success) {
+    std::string response = curlPost(baseUrl() + "/api/devices",
+        "{\"type\":\"switch\",\"name\":\"Test Switch\",\"protocol\":\"local\"}");
+
+    EXPECT_NE(response.find("\"success\":true"), std::string::npos)
+        << "Should return success for valid device creation";
+    EXPECT_NE(response.find("\"id\""), std::string::npos)
+        << "Should return device ID";
+}
+
+TEST_F(WebServerDeviceCrudTest, CreateDevice_WithRoom) {
+    // Create room first
+    curlPost(baseUrl() + "/api/rooms", "{\"name\":\"Office\"}");
+
+    // Create device in room
+    std::string response = curlPost(baseUrl() + "/api/devices",
+        "{\"type\":\"dimmer\",\"name\":\"Office Light\",\"room\":\"Office\"}");
+
+    EXPECT_NE(response.find("\"success\":true"), std::string::npos)
+        << "Should create device in room";
+
+    // Verify device is in room
+    std::string listResponse = curlGet(baseUrl() + "/api/devices");
+    EXPECT_NE(listResponse.find("Office Light"), std::string::npos)
+        << "Device should appear in list";
+}
+
+TEST_F(WebServerDeviceCrudTest, CreateDevice_MissingType) {
+    std::string response = curlPost(baseUrl() + "/api/devices",
+        "{\"name\":\"No Type Device\"}");
+
+    EXPECT_NE(response.find("\"error\""), std::string::npos)
+        << "Should return error for missing type";
+}
+
+TEST_F(WebServerDeviceCrudTest, CreateDevice_MissingName) {
+    std::string response = curlPost(baseUrl() + "/api/devices",
+        "{\"type\":\"switch\"}");
+
+    EXPECT_NE(response.find("\"error\""), std::string::npos)
+        << "Should return error for missing name";
+}
+
+TEST_F(WebServerDeviceCrudTest, UpdateDeviceSettings_Success) {
+    // Add a device
+    auto device = std::make_shared<smarthub::Device>("test-update", "Original Name", smarthub::DeviceType::Switch);
+    deviceManager->addDevice(device);
+
+    // Update settings
+    std::string response = curlPut(baseUrl() + "/api/devices/test-update/settings",
+        "{\"name\":\"Updated Name\",\"room\":\"Living Room\"}");
+
+    EXPECT_NE(response.find("\"success\":true"), std::string::npos)
+        << "Should return success for valid update";
+
+    // Verify update
+    auto updatedDevice = deviceManager->getDevice("test-update");
+    EXPECT_EQ(updatedDevice->name(), "Updated Name");
+    EXPECT_EQ(updatedDevice->room(), "Living Room");
+}
+
+TEST_F(WebServerDeviceCrudTest, UpdateDeviceSettings_InvalidDevice) {
+    std::string response = curlPut(baseUrl() + "/api/devices/nonexistent/settings",
+        "{\"name\":\"New Name\"}");
+
+    EXPECT_NE(response.find("\"error\""), std::string::npos)
+        << "Should return error for nonexistent device";
+}
+
+TEST_F(WebServerDeviceCrudTest, DeleteDevice_Success) {
+    // Add a device
+    auto device = std::make_shared<smarthub::Device>("to-delete", "Delete Me", smarthub::DeviceType::Switch);
+    deviceManager->addDevice(device);
+
+    EXPECT_NE(deviceManager->getDevice("to-delete"), nullptr);
+
+    // Delete device
+    std::string response = curlDelete(baseUrl() + "/api/devices/to-delete");
+
+    EXPECT_NE(response.find("\"success\":true"), std::string::npos)
+        << "Should return success for delete";
+
+    // Verify deletion
+    EXPECT_EQ(deviceManager->getDevice("to-delete"), nullptr)
+        << "Device should be removed from manager";
+}
+
+TEST_F(WebServerDeviceCrudTest, DeleteDevice_NotFound) {
+    std::string response = curlDelete(baseUrl() + "/api/devices/nonexistent");
+
+    EXPECT_NE(response.find("\"error\""), std::string::npos)
+        << "Should return error for nonexistent device";
+}
+
+TEST_F(WebServerDeviceCrudTest, CreateDevice_AllTypes) {
+    std::vector<std::string> types = {"switch", "dimmer", "color_light", "temperature_sensor", "motion_sensor"};
+
+    for (const auto& type : types) {
+        std::string json = "{\"type\":\"" + type + "\",\"name\":\"Test " + type + "\"}";
+        std::string response = curlPost(baseUrl() + "/api/devices", json);
+
+        EXPECT_NE(response.find("\"success\":true"), std::string::npos)
+            << "Should create device of type: " << type;
+    }
+}
+
+// ============================================================================
+// Automation API Tests
+// ============================================================================
+
+class WebServerAutomationApiTest : public WebServerTest {
+protected:
+    void SetUp() override {
+        WebServerTest::SetUp();
+
+        // Add a test device for automations
+        auto device = std::make_shared<smarthub::Device>("test-light", "Test Light", smarthub::DeviceType::Light);
+        deviceManager->addDevice(device);
+
+        // Set up automation manager
+        setupAutomationManager();
+
+        startServer();
+    }
+};
+
+TEST_F(WebServerAutomationApiTest, GetAutomations_InitiallyEmpty) {
+    std::string response = curlGet(baseUrl() + "/api/automations");
+    EXPECT_EQ(response, "[]") << "Should return empty array when no automations exist";
+}
+
+TEST_F(WebServerAutomationApiTest, CreateAutomation_DeviceStateTrigger) {
+    std::string json = R"({
+        "name": "Motion Light",
+        "enabled": true,
+        "trigger": {
+            "type": "device_state",
+            "deviceId": "test-light",
+            "property": "on",
+            "value": true
+        },
+        "actions": [
+            {"deviceId": "test-light", "property": "on", "value": true}
+        ]
+    })";
+
+    std::string response = curlPost(baseUrl() + "/api/automations", json);
+
+    EXPECT_NE(response.find("\"success\":true"), std::string::npos)
+        << "Should return success for valid automation";
+    EXPECT_NE(response.find("\"id\""), std::string::npos)
+        << "Should return automation ID";
+}
+
+TEST_F(WebServerAutomationApiTest, CreateAutomation_TimeTrigger) {
+    std::string json = R"({
+        "name": "Evening Lights",
+        "enabled": true,
+        "trigger": {
+            "type": "time",
+            "hour": 18,
+            "minute": 30
+        },
+        "actions": [
+            {"deviceId": "test-light", "property": "on", "value": true}
+        ]
+    })";
+
+    std::string response = curlPost(baseUrl() + "/api/automations", json);
+
+    EXPECT_NE(response.find("\"success\":true"), std::string::npos)
+        << "Should create time-based automation";
+}
+
+TEST_F(WebServerAutomationApiTest, CreateAutomation_IntervalTrigger) {
+    std::string json = R"({
+        "name": "Periodic Check",
+        "enabled": true,
+        "trigger": {
+            "type": "interval",
+            "intervalMinutes": 15
+        },
+        "actions": [
+            {"deviceId": "test-light", "property": "on", "value": false}
+        ]
+    })";
+
+    std::string response = curlPost(baseUrl() + "/api/automations", json);
+
+    EXPECT_NE(response.find("\"success\":true"), std::string::npos)
+        << "Should create interval-based automation";
+}
+
+TEST_F(WebServerAutomationApiTest, CreateAutomation_MissingName) {
+    std::string json = R"({
+        "trigger": {"type": "time", "hour": 12, "minute": 0},
+        "actions": [{"deviceId": "test-light", "property": "on", "value": true}]
+    })";
+
+    std::string response = curlPost(baseUrl() + "/api/automations", json);
+
+    EXPECT_NE(response.find("\"error\""), std::string::npos)
+        << "Should return error for missing name";
+}
+
+TEST_F(WebServerAutomationApiTest, GetAutomations_AfterCreation) {
+    // Create automation
+    std::string json = R"({
+        "name": "Test Auto",
+        "trigger": {"type": "time", "hour": 12, "minute": 0},
+        "actions": [{"deviceId": "test-light", "property": "on", "value": true}]
+    })";
+    curlPost(baseUrl() + "/api/automations", json);
+
+    // Get automations
+    std::string response = curlGet(baseUrl() + "/api/automations");
+
+    EXPECT_NE(response.find("Test Auto"), std::string::npos)
+        << "Created automation should appear in list";
+    EXPECT_NE(response.find("\"enabled\""), std::string::npos)
+        << "Should include enabled status";
+}
+
+TEST_F(WebServerAutomationApiTest, GetSingleAutomation) {
+    // Create automation
+    std::string createJson = R"({
+        "name": "Single Auto",
+        "trigger": {"type": "time", "hour": 8, "minute": 0},
+        "actions": [{"deviceId": "test-light", "property": "on", "value": true}]
+    })";
+    std::string createResponse = curlPost(baseUrl() + "/api/automations", createJson);
+
+    // Extract ID
+    size_t idStart = createResponse.find("\"id\":\"") + 6;
+    size_t idEnd = createResponse.find("\"", idStart);
+    std::string autoId = createResponse.substr(idStart, idEnd - idStart);
+
+    // Get single automation
+    std::string response = curlGet(baseUrl() + "/api/automations/" + autoId);
+
+    EXPECT_NE(response.find("Single Auto"), std::string::npos)
+        << "Should return automation details";
+    EXPECT_NE(response.find("\"trigger\""), std::string::npos)
+        << "Should include trigger info";
+}
+
+TEST_F(WebServerAutomationApiTest, GetAutomation_NotFound) {
+    std::string response = curlGet(baseUrl() + "/api/automations/nonexistent");
+
+    EXPECT_NE(response.find("\"error\""), std::string::npos)
+        << "Should return error for nonexistent automation";
+}
+
+TEST_F(WebServerAutomationApiTest, UpdateAutomation) {
+    // Create automation
+    std::string createJson = R"({
+        "name": "Original Name",
+        "trigger": {"type": "time", "hour": 12, "minute": 0},
+        "actions": [{"deviceId": "test-light", "property": "on", "value": true}]
+    })";
+    std::string createResponse = curlPost(baseUrl() + "/api/automations", createJson);
+
+    size_t idStart = createResponse.find("\"id\":\"") + 6;
+    size_t idEnd = createResponse.find("\"", idStart);
+    std::string autoId = createResponse.substr(idStart, idEnd - idStart);
+
+    // Update automation
+    std::string updateJson = R"({
+        "name": "Updated Name",
+        "trigger": {"type": "time", "hour": 18, "minute": 30},
+        "actions": [{"deviceId": "test-light", "property": "on", "value": false}]
+    })";
+    std::string updateResponse = curlPut(baseUrl() + "/api/automations/" + autoId, updateJson);
+
+    EXPECT_NE(updateResponse.find("\"success\":true"), std::string::npos)
+        << "Should return success for update";
+
+    // Verify update
+    std::string getResponse = curlGet(baseUrl() + "/api/automations/" + autoId);
+    EXPECT_NE(getResponse.find("Updated Name"), std::string::npos)
+        << "Name should be updated";
+}
+
+TEST_F(WebServerAutomationApiTest, EnableDisableAutomation) {
+    // Create enabled automation
+    std::string createJson = R"({
+        "name": "Toggle Auto",
+        "enabled": true,
+        "trigger": {"type": "time", "hour": 12, "minute": 0},
+        "actions": [{"deviceId": "test-light", "property": "on", "value": true}]
+    })";
+    std::string createResponse = curlPost(baseUrl() + "/api/automations", createJson);
+
+    size_t idStart = createResponse.find("\"id\":\"") + 6;
+    size_t idEnd = createResponse.find("\"", idStart);
+    std::string autoId = createResponse.substr(idStart, idEnd - idStart);
+
+    // Disable automation
+    std::string disableResponse = curlPut(baseUrl() + "/api/automations/" + autoId + "/enable",
+                                          "{\"enabled\":false}");
+    EXPECT_NE(disableResponse.find("\"success\":true"), std::string::npos)
+        << "Should return success for disable";
+
+    // Enable automation
+    std::string enableResponse = curlPut(baseUrl() + "/api/automations/" + autoId + "/enable",
+                                         "{\"enabled\":true}");
+    EXPECT_NE(enableResponse.find("\"success\":true"), std::string::npos)
+        << "Should return success for enable";
+}
+
+TEST_F(WebServerAutomationApiTest, DeleteAutomation) {
+    // Create automation
+    std::string createJson = R"({
+        "name": "To Delete",
+        "trigger": {"type": "time", "hour": 12, "minute": 0},
+        "actions": [{"deviceId": "test-light", "property": "on", "value": true}]
+    })";
+    std::string createResponse = curlPost(baseUrl() + "/api/automations", createJson);
+
+    size_t idStart = createResponse.find("\"id\":\"") + 6;
+    size_t idEnd = createResponse.find("\"", idStart);
+    std::string autoId = createResponse.substr(idStart, idEnd - idStart);
+
+    // Delete automation
+    std::string deleteResponse = curlDelete(baseUrl() + "/api/automations/" + autoId);
+
+    EXPECT_NE(deleteResponse.find("\"success\":true"), std::string::npos)
+        << "Should return success for delete";
+
+    // Verify deletion
+    std::string getResponse = curlGet(baseUrl() + "/api/automations/" + autoId);
+    EXPECT_NE(getResponse.find("\"error\""), std::string::npos)
+        << "Deleted automation should not be found";
+}
+
+TEST_F(WebServerAutomationApiTest, CreateAutomation_MultipleActions) {
+    // Add another device
+    auto device2 = std::make_shared<smarthub::Device>("test-switch", "Test Switch", smarthub::DeviceType::Switch);
+    deviceManager->addDevice(device2);
+
+    std::string json = R"({
+        "name": "Multi Action",
+        "trigger": {"type": "time", "hour": 22, "minute": 0},
+        "actions": [
+            {"deviceId": "test-light", "property": "on", "value": false},
+            {"deviceId": "test-switch", "property": "on", "value": false}
+        ]
+    })";
+
+    std::string response = curlPost(baseUrl() + "/api/automations", json);
+
+    EXPECT_NE(response.find("\"success\":true"), std::string::npos)
+        << "Should create automation with multiple actions";
+}
+
+// ============================================================================
+// Zigbee Pairing API Tests (Without actual Zigbee hardware)
+// ============================================================================
+
+class WebServerZigbeeApiTest : public WebServerTest {
+protected:
+    void SetUp() override {
+        WebServerTest::SetUp();
+        startServer();
+    }
+};
+
+TEST_F(WebServerZigbeeApiTest, PermitJoin_NoHandler) {
+    // Without Zigbee handler configured, should return error
+    std::string response = curlPost(baseUrl() + "/api/zigbee/permit-join", "{\"duration\":60}");
+
+    // Should either succeed (if handler mock is set) or return error
+    // This test verifies the endpoint exists and responds
+    EXPECT_FALSE(response.empty()) << "Permit join endpoint should respond";
+}
+
+TEST_F(WebServerZigbeeApiTest, StopPermitJoin_NoHandler) {
+    std::string response = curlDelete(baseUrl() + "/api/zigbee/permit-join");
+
+    EXPECT_FALSE(response.empty()) << "Stop permit join endpoint should respond";
+}
+
+TEST_F(WebServerZigbeeApiTest, GetPendingDevices_Empty) {
+    std::string response = curlGet(baseUrl() + "/api/zigbee/pending-devices");
+
+    // Should return empty array or error
+    EXPECT_FALSE(response.empty()) << "Pending devices endpoint should respond";
+}
+
+// ============================================================================
+// Integration Tests - Full Workflow
+// ============================================================================
+
+class WebServerIntegrationTest : public WebServerTest {
+protected:
+    void SetUp() override {
+        WebServerTest::SetUp();
+        setupAutomationManager();
+        startServer();
+    }
+};
+
+TEST_F(WebServerIntegrationTest, FullRoomDeviceWorkflow) {
+    // 1. Create a room
+    std::string roomResponse = curlPost(baseUrl() + "/api/rooms", "{\"name\":\"Bedroom\"}");
+    ASSERT_NE(roomResponse.find("\"success\":true"), std::string::npos);
+
+    // 2. Create a device in that room
+    std::string deviceResponse = curlPost(baseUrl() + "/api/devices",
+        "{\"type\":\"dimmer\",\"name\":\"Bedroom Light\",\"room\":\"Bedroom\"}");
+    ASSERT_NE(deviceResponse.find("\"success\":true"), std::string::npos);
+
+    size_t idStart = deviceResponse.find("\"id\":\"") + 6;
+    size_t idEnd = deviceResponse.find("\"", idStart);
+    std::string deviceId = deviceResponse.substr(idStart, idEnd - idStart);
+
+    // 3. Verify room shows device count
+    std::string roomsResponse = curlGet(baseUrl() + "/api/rooms");
+    EXPECT_NE(roomsResponse.find("\"deviceCount\":1"), std::string::npos)
+        << "Room should show 1 device";
+
+    // 4. Update device state
+    std::string stateResponse = curlPut(baseUrl() + "/api/devices/" + deviceId,
+        "{\"on\":true,\"brightness\":75}");
+    EXPECT_NE(stateResponse.find("\"success\":true"), std::string::npos);
+
+    // 5. Verify room shows active device
+    roomsResponse = curlGet(baseUrl() + "/api/rooms");
+    EXPECT_NE(roomsResponse.find("\"activeDevices\":1"), std::string::npos)
+        << "Room should show 1 active device";
+
+    // 6. Update device settings
+    std::string settingsResponse = curlPut(baseUrl() + "/api/devices/" + deviceId + "/settings",
+        "{\"name\":\"Master Bedroom Light\"}");
+    EXPECT_NE(settingsResponse.find("\"success\":true"), std::string::npos);
+
+    // 7. Verify device name changed
+    std::string deviceInfo = curlGet(baseUrl() + "/api/devices/" + deviceId);
+    EXPECT_NE(deviceInfo.find("Master Bedroom Light"), std::string::npos);
+
+    // 8. Delete device
+    std::string deleteResponse = curlDelete(baseUrl() + "/api/devices/" + deviceId);
+    EXPECT_NE(deleteResponse.find("\"success\":true"), std::string::npos);
+
+    // 9. Verify room is empty
+    roomsResponse = curlGet(baseUrl() + "/api/rooms");
+    EXPECT_NE(roomsResponse.find("\"deviceCount\":0"), std::string::npos)
+        << "Room should show 0 devices after deletion";
+}
+
+TEST_F(WebServerIntegrationTest, FullAutomationWorkflow) {
+    // 1. Create a device
+    auto device = std::make_shared<smarthub::Device>("living-light", "Living Room Light", smarthub::DeviceType::Light);
+    deviceManager->addDevice(device);
+
+    // 2. Create an automation
+    std::string createJson = R"({
+        "name": "Night Mode",
+        "description": "Turn off lights at night",
+        "enabled": true,
+        "trigger": {"type": "time", "hour": 23, "minute": 0},
+        "actions": [{"deviceId": "living-light", "property": "on", "value": false}]
+    })";
+    std::string createResponse = curlPost(baseUrl() + "/api/automations", createJson);
+    ASSERT_NE(createResponse.find("\"success\":true"), std::string::npos);
+
+    size_t idStart = createResponse.find("\"id\":\"") + 6;
+    size_t idEnd = createResponse.find("\"", idStart);
+    std::string autoId = createResponse.substr(idStart, idEnd - idStart);
+
+    // 3. Verify automation in list
+    std::string listResponse = curlGet(baseUrl() + "/api/automations");
+    EXPECT_NE(listResponse.find("Night Mode"), std::string::npos);
+
+    // 4. Disable automation
+    std::string disableResponse = curlPut(baseUrl() + "/api/automations/" + autoId + "/enable",
+                                          "{\"enabled\":false}");
+    EXPECT_NE(disableResponse.find("\"success\":true"), std::string::npos);
+
+    // 5. Update automation
+    std::string updateJson = R"({
+        "name": "Late Night Mode",
+        "trigger": {"type": "time", "hour": 0, "minute": 0},
+        "actions": [{"deviceId": "living-light", "property": "on", "value": false}]
+    })";
+    std::string updateResponse = curlPut(baseUrl() + "/api/automations/" + autoId, updateJson);
+    EXPECT_NE(updateResponse.find("\"success\":true"), std::string::npos);
+
+    // 6. Re-enable automation
+    std::string enableResponse = curlPut(baseUrl() + "/api/automations/" + autoId + "/enable",
+                                         "{\"enabled\":true}");
+    EXPECT_NE(enableResponse.find("\"success\":true"), std::string::npos);
+
+    // 7. Verify updated name
+    std::string getResponse = curlGet(baseUrl() + "/api/automations/" + autoId);
+    EXPECT_NE(getResponse.find("Late Night Mode"), std::string::npos);
+
+    // 8. Delete automation
+    std::string deleteResponse = curlDelete(baseUrl() + "/api/automations/" + autoId);
+    EXPECT_NE(deleteResponse.find("\"success\":true"), std::string::npos);
+
+    // 9. Verify empty list
+    listResponse = curlGet(baseUrl() + "/api/automations");
+    EXPECT_EQ(listResponse, "[]");
 }
