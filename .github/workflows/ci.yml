@@ -56,7 +56,7 @@ jobs:
 
       - name: Run tests
         working-directory: app/build
-        run: ctest --output-on-failure --verbose
+        run: ctest --output-on-failure --verbose --timeout 300
 
       - name: Upload test results
         if: always()
@@ -89,15 +89,27 @@ jobs:
             qemu-user-static
 
       - name: Install ARM cross-compile libraries
-        continue-on-error: true
         run: |
+          # Ubuntu's main mirrors only carry x86; armhf packages are on ports.ubuntu.com.
+          # Pin the existing sources to amd64 so apt doesn't request armhf from them.
           sudo dpkg --add-architecture armhf
-          # Update with armhf repos - may fail on some Ubuntu versions
-          sudo apt-get update || true
+          if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
+            sudo sed -i '/^Types:/a Architectures: amd64' /etc/apt/sources.list.d/ubuntu.sources
+          fi
+          if [ -f /etc/apt/sources.list ]; then
+            sudo sed -i -E 's/^deb (https?:)/deb [arch=amd64] \1/' /etc/apt/sources.list
+          fi
+          codename="$(. /etc/os-release && echo "$VERSION_CODENAME")"
+          for pocket in "$codename" "$codename-updates" "$codename-security"; do
+            echo "deb [arch=armhf] http://ports.ubuntu.com/ubuntu-ports $pocket main universe"
+          done | sudo tee /etc/apt/sources.list.d/armhf-ports.list
+          sudo apt-get update
           sudo apt-get install -y \
             libsqlite3-dev:armhf \
             libssl-dev:armhf \
-            libyaml-cpp-dev:armhf || true
+            libmosquitto-dev:armhf \
+            libyaml-cpp-dev:armhf \
+            nlohmann-json3-dev
 
       - name: Configure CMake (Cross-compile)
         working-directory: app
@@ -110,15 +122,52 @@ jobs:
 
       - name: Build
         working-directory: app
-        run: cmake --build build-arm || echo "Cross-build may fail without full ARM sysroot"
+        run: cmake --build build-arm
 
       - name: Verify binary
         working-directory: app
         run: |
-          if [ -f build-arm/smarthub ]; then
-            file build-arm/smarthub
-            arm-linux-gnueabihf-readelf -h build-arm/smarthub || true
-          fi
+          file build-arm/smarthub
+          arm-linux-gnueabihf-readelf -h build-arm/smarthub | grep -q 'Machine:.*ARM'
+
+  # M4 firmware: cross-compile and host-side unit tests
+  build-m4:
+    name: M4 Firmware
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake \
+            ninja-build \
+            gcc-arm-none-eabi \
+            libnewlib-arm-none-eabi \
+            libstdc++-arm-none-eabi-newlib
+
+      - name: Build firmware
+        working-directory: m4-firmware
+        run: |
+          cmake -B build -G Ninja
+          cmake --build build
+
+      - name: Verify firmware
+        working-directory: m4-firmware
+        run: arm-none-eabi-readelf -S build/smarthub-m4.elf | grep -q '\.resource_table'
+
+      - name: Build host tests
+        working-directory: m4-firmware/tests
+        run: |
+          cmake -B build -G Ninja
+          cmake --build build
+
+      - name: Run host tests
+        working-directory: m4-firmware/tests/build
+        run: ctest --output-on-failure --timeout 300
 
   # Code coverage (separate job for detailed analysis)
   coverage:
@@ -238,20 +287,20 @@ jobs:
   ci-complete:
     name: CI Complete
     runs-on: ubuntu-24.04
-    needs: [build-native, build-arm, coverage, static-analysis]
+    needs: [build-native, build-arm, build-m4, coverage, static-analysis]
     if: always()
 
     steps:
       - name: Check all jobs
         run: |
-          echo "Native Build: ${{ needs.build-native.result }}"
-          echo "ARM Build: ${{ needs.build-arm.result }}"
-          echo "Coverage: ${{ needs.coverage.result }}"
-          echo "Static Analysis: ${{ needs.static-analysis.result }}"
-
-          if [ "${{ needs.build-native.result }}" != "success" ]; then
-            echo "Native build failed!"
-            exit 1
-          fi
-
-          echo "CI pipeline completed successfully!"
+          status=0
+          check() {
+            echo "$1: $2"
+            [ "$2" = "success" ] || status=1
+          }
+          check "Native Build" "${{ needs.build-native.result }}"
+          check "ARM Build" "${{ needs.build-arm.result }}"
+          check "M4 Firmware" "${{ needs.build-m4.result }}"
+          check "Coverage" "${{ needs.coverage.result }}"
+          check "Static Analysis" "${{ needs.static-analysis.result }}"
+          exit $status
