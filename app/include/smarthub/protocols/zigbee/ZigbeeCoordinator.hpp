@@ -263,6 +263,7 @@ private:
     void handleIndication(const ZnpFrame& frame);
     void handleStateChange(const ZnpFrame& frame);
     void handleDeviceAnnounce(const ZnpFrame& frame);
+    void forgetAddress(uint16_t nwkAddr, uint64_t ieeeAddr);  // Caller holds m_deviceMutex
     void handleDeviceLeave(const ZnpFrame& frame);
     void handleIncomingMessage(const ZnpFrame& frame);
     void handleTcDeviceInd(const ZnpFrame& frame);

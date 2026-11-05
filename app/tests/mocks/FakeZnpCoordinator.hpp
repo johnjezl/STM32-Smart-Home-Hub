@@ -84,7 +84,20 @@ public:
         m_rxCv.notify_all();
     }
 
-    /** Release just one endpoint's held reply. */
+    /** Release one held reply for this endpoint, and keep holding any others. */
+    void releaseNextDescriptor(uint16_t nwkAddr, uint8_t endpoint) {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        const std::pair<uint16_t, uint8_t> key{nwkAddr, endpoint};
+        auto next = std::find_if(m_heldFrames.begin(), m_heldFrames.end(),
+                                 [&](const auto& held) { return held.first == key; });
+        if (next != m_heldFrames.end()) {
+            queueFrame(next->second);
+            m_heldFrames.erase(next);
+        }
+        m_rxCv.notify_all();
+    }
+
+    /** Release all of one endpoint's held replies. */
     void releaseDescriptor(uint16_t nwkAddr, uint8_t endpoint) {
         std::lock_guard<std::mutex> lock(m_mutex);
         const std::pair<uint16_t, uint8_t> key{nwkAddr, endpoint};

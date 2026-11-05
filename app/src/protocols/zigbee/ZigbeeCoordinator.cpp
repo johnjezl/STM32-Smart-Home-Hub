@@ -676,6 +676,14 @@ void ZigbeeCoordinator::handleStateChange(const ZnpFrame& frame) {
     LOG_INFO("Device state changed: {}", znpDeviceStateToString(m_deviceState));
 }
 
+void ZigbeeCoordinator::forgetAddress(uint16_t nwkAddr, uint64_t ieeeAddr) {
+    // Another device may have been given this address since
+    auto mapping = m_nwkToIeee.find(nwkAddr);
+    if (mapping != m_nwkToIeee.end() && mapping->second == ieeeAddr) {
+        m_nwkToIeee.erase(mapping);
+    }
+}
+
 void ZigbeeCoordinator::handleDeviceAnnounce(const ZnpFrame& frame) {
     if (frame.payload().size() < 11) return;
 
@@ -692,11 +700,8 @@ void ZigbeeCoordinator::handleDeviceAnnounce(const ZnpFrame& frame) {
         std::lock_guard<std::mutex> lock(m_deviceMutex);
 
         auto& device = m_devices[ieeeAddr];
-        // If it rejoined at a new address, forget the old one, unless another device has it now
-        auto oldAddress = m_nwkToIeee.find(device.networkAddress);
-        if (device.networkAddress != nwkAddr && oldAddress != m_nwkToIeee.end() &&
-            oldAddress->second == ieeeAddr) {
-            m_nwkToIeee.erase(oldAddress);
+        if (device.networkAddress != nwkAddr) {
+            forgetAddress(device.networkAddress, ieeeAddr);  // It rejoined at a new address
         }
         device.ieeeAddress = ieeeAddr;
         device.networkAddress = nwkAddr;
@@ -731,7 +736,7 @@ void ZigbeeCoordinator::handleDeviceLeave(const ZnpFrame& frame) {
 
         auto it = m_devices.find(ieeeAddr);
         if (it != m_devices.end()) {
-            m_nwkToIeee.erase(it->second.networkAddress);
+            forgetAddress(it->second.networkAddress, ieeeAddr);
             m_devices.erase(it);
         }
     }

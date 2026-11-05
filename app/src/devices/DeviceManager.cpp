@@ -98,20 +98,18 @@ bool DeviceManager::loadProtocol(const std::string& name, const nlohmann::json& 
 
     // Unlocked, for the same reason as in shutdown(): initialize can join threads
     // that are waiting to call back into this class.
-    bool duplicate = false;
     if (!protocol->initialize()) {
         LOG_ERROR("Failed to initialize protocol: %s", name.c_str());
         return false;
     }
 
+    bool inserted = false;
     {
         std::lock_guard<std::mutex> lock(m_mutex);
-        if (!m_protocols.emplace(name, protocol).second) {
-            LOG_WARN("Protocol %s already loaded", name.c_str());
-            duplicate = true;
-        }
+        inserted = m_protocols.emplace(name, protocol).second;
     }
-    if (duplicate) {
+    if (!inserted) {
+        LOG_WARN("Protocol %s already loaded", name.c_str());
         protocol->shutdown();
         return false;
     }

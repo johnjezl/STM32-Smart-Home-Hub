@@ -500,6 +500,7 @@ uint64_t ZigbeeHandler::pairDevice(uint64_t ieeeAddr) {
     // Ask about one endpoint at a time and wait for its answer. A refusal doesn't say
     // which endpoint it's for, and some devices don't cope with many requests at once.
     uint64_t attempt = 0;
+    int mayStillRefuse = 0;  // Requests left unanswered, whose refusal could still arrive
     for (;;) {
         uint16_t nwkAddr;
         {
@@ -530,7 +531,6 @@ uint64_t ZigbeeHandler::pairDevice(uint64_t ieeeAddr) {
 
         // What does each one do?
         bool restart = false;
-        int timedOut = 0;
         for (uint8_t endpoint : endpoints) {
             if (!isApplicationEndpoint(endpoint)) continue;
 
@@ -543,16 +543,17 @@ uint64_t ZigbeeHandler::pairDevice(uint64_t ieeeAddr) {
                 auto info = m_coordinator->getDevice(ieeeAddr);
                 return !info ||  // It left
                        info->inClusters.count(endpoint) > 0 ||
-                       info->failedDescriptors > before->failedDescriptors + timedOut;
+                       info->failedDescriptors > before->failedDescriptors + mayStillRefuse;
             });
             if (result == PairingWait::Stopped) return attempt;
             if (result == PairingWait::Restarted) {
+                ++mayStillRefuse;
                 restart = true;
                 break;
             }
             if (result == PairingWait::TimedOut) {
                 LOG_WARN("Endpoint %d of 0x%04X didn't answer; continuing without it", endpoint, nwkAddr);
-                ++timedOut;  // It may still refuse late, which mustn't count for the next endpoint
+                ++mayStillRefuse;
             }
         }
         if (!restart) {

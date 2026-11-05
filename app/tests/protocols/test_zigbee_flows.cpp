@@ -485,6 +485,24 @@ TEST_F(ZigbeeHandlerFlowTest, RejoiningKeepsAnotherDevicesClaimOnTheOldAddress) 
     EXPECT_EQ(holder->ieeeAddress, second.ieeeAddr);
 }
 
+TEST_F(ZigbeeHandlerFlowTest, LeavingKeepsAnotherDevicesClaimOnTheAddress) {
+    FakeZigbeeDevice first{0x1111, 0x00124B000000AAAAULL, {{1, {zcl::cluster::ON_OFF}}}};
+    FakeZigbeeDevice second{0x1111, 0x00124B000000BBBBULL, {{1, {zcl::cluster::ON_OFF}}}};
+    fake.addDevice(first);
+
+    auto* coordinator = handler->coordinator();
+    fake.announceDevice(first);
+    fake.announceDevice(second);
+    ASSERT_TRUE(eventually([&] { return coordinator->getDevice(second.ieeeAddr).has_value(); }));
+
+    fake.deviceLeft(first);
+
+    ASSERT_TRUE(eventually([&] { return !coordinator->getDevice(first.ieeeAddr).has_value(); }));
+    auto holder = coordinator->getDeviceByNwkAddr(0x1111);
+    ASSERT_TRUE(holder.has_value());
+    EXPECT_EQ(holder->ieeeAddress, second.ieeeAddr);
+}
+
 TEST_F(ZigbeeHandlerFlowTest, LeavingDuringPairingAbandonsIt) {
     watchForPairingErrors();
     handler->startDiscovery();
@@ -643,7 +661,17 @@ TEST_F(ZigbeePairingTimeoutTest, ReportsAFailureWhenNoEndpointAnswers) {
     EXPECT_EQ(discoveredCount(), 0u);
 }
 
-TEST_F(ZigbeePairingTimeoutTest, LateRefusalDoesNotEndTheNextEndpointsWait) {
+// Long enough that the steps in these tests can't outlast a wait on a slow machine,
+// though each test sits through it at most once.
+class ZigbeeLateRefusalTest : public ZigbeeHandlerFlowTest {
+protected:
+    void SetUp() override {
+        handlerConfig["pairingEndpointTimeoutMs"] = 2000;
+        ZigbeeHandlerFlowTest::SetUp();
+    }
+};
+
+TEST_F(ZigbeeLateRefusalTest, DoesNotEndTheNextEndpointsWait) {
     fake.failDescriptor(MULTI_ENDPOINT_LIGHT.nwkAddr, 1);
     fake.holdDescriptor(MULTI_ENDPOINT_LIGHT.nwkAddr, 1);
     fake.holdDescriptor(MULTI_ENDPOINT_LIGHT.nwkAddr, 11);
@@ -654,7 +682,33 @@ TEST_F(ZigbeePairingTimeoutTest, LateRefusalDoesNotEndTheNextEndpointsWait) {
 
     // Endpoint 1's refusal arrives late, then endpoint 11 answers.
     fake.releaseDescriptor(MULTI_ENDPOINT_LIGHT.nwkAddr, 1);
-    std::this_thread::sleep_for(150ms);
+    std::this_thread::sleep_for(300ms);
+    EXPECT_EQ(discoveredCount(), 0u);
+    fake.releaseDescriptor(MULTI_ENDPOINT_LIGHT.nwkAddr, 11);
+
+    ASSERT_TRUE(eventually([&] { return discoveredCount() == 1; }));
+    std::lock_guard<std::mutex> lock(mutex);
+    EXPECT_EQ(discovered[0]->type(), DeviceType::Dimmer);
+}
+
+TEST_F(ZigbeeLateRefusalTest, RestartDoesNotLetASecondRefusalEndTheNextEndpointsWait) {
+    fake.failDescriptor(MULTI_ENDPOINT_LIGHT.nwkAddr, 1);
+    fake.holdDescriptor(MULTI_ENDPOINT_LIGHT.nwkAddr, 1);
+    fake.holdDescriptor(MULTI_ENDPOINT_LIGHT.nwkAddr, 11);
+
+    // Announcing twice asks about endpoint 1 twice, so it refuses twice.
+    fake.announceDevice(MULTI_ENDPOINT_LIGHT);
+    ASSERT_TRUE(fake.waitForSent(ZnpSubsystem::ZDO, cmd::zdo::SIMPLE_DESC_REQ, 1));
+    fake.announceDevice(MULTI_ENDPOINT_LIGHT);
+    ASSERT_TRUE(fake.waitForSent(ZnpSubsystem::ZDO, cmd::zdo::SIMPLE_DESC_REQ, 2));
+
+    // The first refusal arrives. Pairing moves on to endpoint 11 either way...
+    fake.releaseNextDescriptor(MULTI_ENDPOINT_LIGHT.nwkAddr, 1);
+    ASSERT_TRUE(fake.waitForSent(ZnpSubsystem::ZDO, cmd::zdo::SIMPLE_DESC_REQ, 3));
+
+    // ...and the second refusal, for the earlier request, mustn't end that wait.
+    fake.releaseNextDescriptor(MULTI_ENDPOINT_LIGHT.nwkAddr, 1);
+    std::this_thread::sleep_for(300ms);
     EXPECT_EQ(discoveredCount(), 0u);
     fake.releaseDescriptor(MULTI_ENDPOINT_LIGHT.nwkAddr, 11);
 
