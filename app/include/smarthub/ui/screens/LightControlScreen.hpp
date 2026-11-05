@@ -46,6 +46,8 @@ private:
     void onPowerToggle(bool on);
     void onBrightnessChange(int percent);
     void onColorTempChange(int kelvin);
+    void showBrightness(int percent);
+    void showColorTemp(int kelvin);
     void onBackClicked();
 
     static void powerToggleHandler(lv_event_t* e);

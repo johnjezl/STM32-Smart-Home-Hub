@@ -268,11 +268,8 @@ lv_obj_t* RoomDetailScreen::createDeviceRow(lv_obj_t* parent,
     return row;
 }
 
-void RoomDetailScreen::onDeviceToggle(const std::string& deviceId, bool newState) {
-    auto device = m_deviceManager.getDevice(deviceId);
-    if (device) {
-        device->setState("on", newState);
-    }
+bool RoomDetailScreen::onDeviceToggle(const std::string& deviceId, bool newState) {
+    return m_deviceManager.setDeviceState(deviceId, "on", newState);
 }
 
 void RoomDetailScreen::onDeviceClicked(const std::string& deviceId) {
@@ -563,8 +560,13 @@ void RoomDetailScreen::toggleHandler(lv_event_t* e) {
     lv_obj_t* toggle = lv_event_get_target(e);
     const char* deviceId = static_cast<const char*>(lv_obj_get_user_data(toggle));
     bool newState = lv_obj_has_state(toggle, LV_STATE_CHECKED);
-    if (self && deviceId) {
-        self->onDeviceToggle(deviceId, newState);
+    if (self && deviceId && !self->onDeviceToggle(deviceId, newState)) {
+        // It didn't happen, so don't show it as if it did
+        if (newState) {
+            lv_obj_clear_state(toggle, LV_STATE_CHECKED);
+        } else {
+            lv_obj_add_state(toggle, LV_STATE_CHECKED);
+        }
     }
 }
 

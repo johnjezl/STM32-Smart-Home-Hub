@@ -12,6 +12,7 @@
 #include <string>
 
 struct _lv_obj_t;
+struct _lv_obj_class_t;
 
 namespace smarthub::ui::test {
 
@@ -29,6 +30,9 @@ void finishTransitions();
 
 /** Number of times LVGL has flushed pixels since startup. */
 uint32_t flushCount();
+
+/** The first object of this class under root (inclusive), or nullptr. */
+_lv_obj_t* findFirst(_lv_obj_t* root, const _lv_obj_class_t* objectClass);
 
 /** Number of labels and text areas under root (inclusive) with this exact text. */
 int countText(_lv_obj_t* root, const std::string& text);

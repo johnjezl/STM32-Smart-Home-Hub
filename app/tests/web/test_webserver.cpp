@@ -221,6 +221,59 @@ TEST_F(WebServerTest, ApiSetDeviceState) {
     EXPECT_NE(response.find("success"), std::string::npos);
 }
 
+TEST_F(WebServerTest, ApiSetDeviceStateUpdatesTheDevice) {
+    auto light = std::make_shared<smarthub::Device>(
+        "light1", "Test Light", smarthub::DeviceType::Light
+    );
+    deviceManager->addDevice(light);
+
+    startServer();
+    std::string response = curlPut(baseUrl() + "/api/devices/light1", R"({"on":true})");
+
+    EXPECT_NE(response.find("success"), std::string::npos);
+    EXPECT_EQ(light->getProperty("on"), true);
+}
+
+TEST_F(WebServerTest, ApiSetDeviceStateReportsFailureWhenDeviceCantBeReached) {
+    // Its protocol isn't loaded, so the change can't reach the device
+    auto light = std::make_shared<smarthub::Device>(
+        "light1", "Test Light", smarthub::DeviceType::Light, "zigbee"
+    );
+    deviceManager->addDevice(light);
+
+    startServer();
+    std::string response = curlPut(baseUrl() + "/api/devices/light1", R"({"on":true})");
+
+    EXPECT_NE(response.find("error"), std::string::npos);
+    EXPECT_EQ(response.find("success"), std::string::npos);
+    EXPECT_TRUE(light->getProperty("on").is_null());
+}
+
+TEST_F(WebServerTest, ApiSetDeviceStateRejectsWrongTypes) {
+    auto light = std::make_shared<smarthub::Device>(
+        "light1", "Test Light", smarthub::DeviceType::Light
+    );
+    deviceManager->addDevice(light);
+
+    startServer();
+    std::string response = curlPut(baseUrl() + "/api/devices/light1", R"({"on":"yes"})");
+
+    EXPECT_NE(response.find("error"), std::string::npos);
+    EXPECT_TRUE(light->getProperty("on").is_null());
+}
+
+TEST_F(WebServerTest, ApiSetDeviceStateRejectsNonObjects) {
+    auto light = std::make_shared<smarthub::Device>(
+        "light1", "Test Light", smarthub::DeviceType::Light
+    );
+    deviceManager->addDevice(light);
+
+    startServer();
+    std::string response = curlPut(baseUrl() + "/api/devices/light1", "[1,2,3]");
+
+    EXPECT_NE(response.find("error"), std::string::npos);
+}
+
 TEST_F(WebServerTest, ApiSetDeviceStateNotFound) {
     startServer();
     std::string response = curlPut(

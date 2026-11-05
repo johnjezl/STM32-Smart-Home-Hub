@@ -345,6 +345,8 @@ Properties vary by device type:
 }
 ```
 
+**Errors:** `502` if a property couldn't be set, for example when the device's radio doesn't accept the command, the device's protocol isn't loaded, or the value has the wrong type. State is only updated for properties that were set. `400` if the body isn't a JSON object.
+
 ---
 
 ### PUT /api/devices/{id}/settings

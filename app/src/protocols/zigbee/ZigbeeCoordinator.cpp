@@ -59,6 +59,14 @@ std::string ZclAttributeValue::asString() const {
 // ZigbeeCoordinator Implementation
 // ============================================================================
 
+namespace {
+
+// The radio answers these itself, at once, so waiting longer only holds up the caller,
+// which can be the UI thread.
+constexpr int COMMAND_TIMEOUT_MS = 1000;
+
+} // namespace
+
 ZigbeeCoordinator::ZigbeeCoordinator(const std::string& port, int baudRate)
     : m_transport(std::make_unique<ZnpTransport>(port, baudRate))
     , m_ownsTransport(true)
@@ -345,7 +353,7 @@ bool ZigbeeCoordinator::sendCommand(uint16_t nwkAddr, uint8_t endpoint,
     req.appendByte(static_cast<uint8_t>(zclFrame.size()));
     req.appendBytes(zclFrame);
 
-    auto rsp = m_transport->request(req);
+    auto rsp = m_transport->request(req, COMMAND_TIMEOUT_MS);
     if (!rsp) return false;
 
     return rsp->getByte(0) == 0;  // Status = SUCCESS
@@ -449,7 +457,7 @@ bool ZigbeeCoordinator::configureReporting(uint16_t nwkAddr, uint8_t endpoint,
     req.appendByte(static_cast<uint8_t>(zclFrame.size()));
     req.appendBytes(zclFrame);
 
-    auto rsp = m_transport->request(req);
+    auto rsp = m_transport->request(req, COMMAND_TIMEOUT_MS);
     return rsp && rsp->getByte(0) == 0;
 }
 

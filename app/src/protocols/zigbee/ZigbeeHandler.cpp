@@ -11,6 +11,7 @@
 #include <smarthub/devices/types/TemperatureSensor.hpp>
 #include <smarthub/devices/types/MotionSensor.hpp>
 #include <algorithm>
+#include <cmath>
 #include <iomanip>
 #include <sstream>
 #include <thread>
@@ -23,6 +24,26 @@ namespace smarthub::zigbee {
 // ============================================================================
 
 namespace {
+
+// Devices hold brightness as 0-100 and color temperature in kelvin. ZCL uses a
+// level of 0-254 and mireds.
+constexpr int MAX_ZCL_LEVEL = 254;
+
+uint8_t percentToLevel(double percent) {
+    return static_cast<uint8_t>(std::lround(std::clamp(percent, 0.0, 100.0) * MAX_ZCL_LEVEL / 100.0));
+}
+
+int levelToPercent(uint8_t level) {
+    return static_cast<int>(std::lround(std::min<int>(level, MAX_ZCL_LEVEL) * 100.0 / MAX_ZCL_LEVEL));
+}
+
+uint16_t kelvinToMireds(double kelvin) {
+    return static_cast<uint16_t>(std::clamp<long>(std::lround(1000000.0 / kelvin), 1, 65279));
+}
+
+int miredsToKelvin(uint16_t mireds) {
+    return static_cast<int>(std::lround(1000000.0 / mireds));
+}
 
 bool isApplicationEndpoint(uint8_t endpoint) {
     return endpoint != 0 && endpoint != GREEN_POWER_ENDPOINT;
@@ -299,7 +320,7 @@ bool ZigbeeHandler::sendCommand(const std::string& deviceAddress,
 
     // Route command based on type
     if (command == "on" || command == "off" || command == "toggle") {
-        return handleOnOffCommand(deviceInfo->networkAddress, endpoint, params);
+        return handleOnOffCommand(deviceInfo->networkAddress, endpoint, command);
     } else if (command == "brightness" || command == "level") {
         return handleBrightnessCommand(deviceInfo->networkAddress, endpoint, params);
     } else if (command == "color" || command == "colorTemp" || command == "hue" || command == "saturation") {
@@ -694,7 +715,7 @@ void ZigbeeHandler::onAttributeReport(uint16_t nwkAddr, const ZclAttributeValue&
         case zcl::cluster::LEVEL_CONTROL:
             if (attr.attributeId == zcl::attr::level::CURRENT_LEVEL) {
                 if (m_stateCb) {
-                    m_stateCb(deviceId, "brightness", attr.asUint8());
+                    m_stateCb(deviceId, "brightness", levelToPercent(attr.asUint8()));
                 }
             }
             break;
@@ -709,8 +730,8 @@ void ZigbeeHandler::onAttributeReport(uint16_t nwkAddr, const ZclAttributeValue&
                     m_stateCb(deviceId, "saturation", attr.asUint8());
                 }
             } else if (attr.attributeId == zcl::attr::color::COLOR_TEMP) {
-                if (m_stateCb) {
-                    m_stateCb(deviceId, "colorTemp", attr.asUint16());
+                if (m_stateCb && attr.asUint16() > 0) {
+                    m_stateCb(deviceId, "colorTemp", miredsToKelvin(attr.asUint16()));
                 }
             }
             break;
@@ -1003,16 +1024,13 @@ void ZigbeeHandler::setupReporting(uint16_t nwkAddr, uint8_t endpoint, DeviceTyp
 // ============================================================================
 
 bool ZigbeeHandler::handleOnOffCommand(uint16_t nwkAddr, uint8_t endpoint,
-                                        const nlohmann::json& params) {
-    bool on = params.value("on", true);
-
-    if (params.contains("toggle") && params["toggle"].get<bool>()) {
-        // Toggle command
+                                        const std::string& command) {
+    if (command == "toggle") {
         return m_coordinator->sendCommand(nwkAddr, endpoint,
             zcl::cluster::ON_OFF, zcl::cmd::onoff::TOGGLE);
     }
 
-    return m_coordinator->setOnOff(nwkAddr, endpoint, on);
+    return m_coordinator->setOnOff(nwkAddr, endpoint, command == "on");
 }
 
 bool ZigbeeHandler::handleBrightnessCommand(uint16_t nwkAddr, uint8_t endpoint,
@@ -1023,7 +1041,16 @@ bool ZigbeeHandler::handleBrightnessCommand(uint16_t nwkAddr, uint8_t endpoint,
         return false;
     }
 
-    uint8_t level = params.value("brightness", params.value("level", 254));
+    if (params.contains("brightness") && !params["brightness"].is_number()) {
+        m_lastError = "Brightness must be a number";
+        LOG_ERROR("%s", m_lastError.c_str());
+        return false;
+    }
+
+    // "brightness" is the percentage devices use everywhere else; "level" is raw ZCL
+    uint8_t level = params.contains("brightness")
+        ? percentToLevel(params["brightness"].get<double>())
+        : static_cast<uint8_t>(params.value("level", 254));
     uint16_t transitionTime = params.value("transitionTime", 10); // 1 second default
 
     return m_coordinator->setLevel(nwkAddr, endpoint, level, transitionTime);
@@ -1034,8 +1061,13 @@ bool ZigbeeHandler::handleColorCommand(uint16_t nwkAddr, uint8_t endpoint,
     uint16_t transitionTime = params.value("transitionTime", 10);
 
     if (params.contains("colorTemp")) {
-        uint16_t colorTemp = params["colorTemp"];
-        return m_coordinator->setColorTemp(nwkAddr, endpoint, colorTemp, transitionTime);
+        if (!params["colorTemp"].is_number() || params["colorTemp"].get<double>() <= 0) {
+            m_lastError = "Color temperature must be a positive number of kelvin";
+            LOG_ERROR("%s", m_lastError.c_str());
+            return false;
+        }
+        return m_coordinator->setColorTemp(nwkAddr, endpoint,
+            kelvinToMireds(params["colorTemp"].get<double>()), transitionTime);
     }
 
     if (params.contains("hue") || params.contains("saturation")) {

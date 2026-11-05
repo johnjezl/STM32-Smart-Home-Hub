@@ -146,6 +146,7 @@ void LightControlScreen::createContent() {
     lv_obj_set_style_bg_color(m_brightnessSlider, m_theme.primary(), LV_PART_INDICATOR);
     lv_obj_set_style_bg_color(m_brightnessSlider, m_theme.primary(), LV_PART_KNOB);
     lv_obj_add_event_cb(m_brightnessSlider, brightnessSliderHandler, LV_EVENT_VALUE_CHANGED, this);
+    lv_obj_add_event_cb(m_brightnessSlider, brightnessSliderHandler, LV_EVENT_RELEASED, this);
 
     // Color temperature slider
     lv_obj_t* colorTempRow = lv_obj_create(m_content);
@@ -170,6 +171,7 @@ void LightControlScreen::createContent() {
     lv_slider_set_range(m_colorTempSlider, 2700, 6500);
     lv_slider_set_value(m_colorTempSlider, 4000, LV_ANIM_OFF);
     lv_obj_add_event_cb(m_colorTempSlider, colorTempSliderHandler, LV_EVENT_VALUE_CHANGED, this);
+    lv_obj_add_event_cb(m_colorTempSlider, colorTempSliderHandler, LV_EVENT_RELEASED, this);
 }
 
 void LightControlScreen::updateControls() {
@@ -229,20 +231,13 @@ void LightControlScreen::updateControls() {
 }
 
 void LightControlScreen::onPowerToggle(bool on) {
-    auto device = m_deviceManager.getDevice(m_deviceId);
-    if (!device) return;
+    m_deviceManager.setDeviceState(m_deviceId, "on", on);
 
-    device->setState("on", on);
-
+    // Shows what really happened, whether or not that worked
     updateControls();
 }
 
-void LightControlScreen::onBrightnessChange(int percent) {
-    auto device = m_deviceManager.getDevice(m_deviceId);
-    if (!device) return;
-
-    device->setState("brightness", percent);
-
+void LightControlScreen::showBrightness(int percent) {
     if (m_brightnessLabel) {
         char buf[16];
         snprintf(buf, sizeof(buf), "%d%%", percent);
@@ -250,17 +245,22 @@ void LightControlScreen::onBrightnessChange(int percent) {
     }
 }
 
-void LightControlScreen::onColorTempChange(int kelvin) {
-    auto device = m_deviceManager.getDevice(m_deviceId);
-    if (!device) return;
+void LightControlScreen::onBrightnessChange(int percent) {
+    m_deviceManager.setDeviceState(m_deviceId, "brightness", percent);
+    updateControls();
+}
 
-    device->setState("colorTemp", kelvin);
-
+void LightControlScreen::showColorTemp(int kelvin) {
     if (m_colorTempLabel) {
         char buf[16];
         snprintf(buf, sizeof(buf), "%dK", kelvin);
         lv_label_set_text(m_colorTempLabel, buf);
     }
+}
+
+void LightControlScreen::onColorTempChange(int kelvin) {
+    m_deviceManager.setDeviceState(m_deviceId, "colorTemp", kelvin);
+    updateControls();
 }
 
 void LightControlScreen::onBackClicked() {
@@ -278,16 +278,25 @@ void LightControlScreen::powerToggleHandler(lv_event_t* e) {
 void LightControlScreen::brightnessSliderHandler(lv_event_t* e) {
     LightControlScreen* self = static_cast<LightControlScreen*>(lv_event_get_user_data(e));
     lv_obj_t* slider = lv_event_get_target(e);
-    if (self) {
+    if (!self) return;
+
+    // Follow the drag on screen, and only tell the device where it ended up
+    if (lv_event_get_code(e) == LV_EVENT_RELEASED) {
         self->onBrightnessChange(lv_slider_get_value(slider));
+    } else {
+        self->showBrightness(lv_slider_get_value(slider));
     }
 }
 
 void LightControlScreen::colorTempSliderHandler(lv_event_t* e) {
     LightControlScreen* self = static_cast<LightControlScreen*>(lv_event_get_user_data(e));
     lv_obj_t* slider = lv_event_get_target(e);
-    if (self) {
+    if (!self) return;
+
+    if (lv_event_get_code(e) == LV_EVENT_RELEASED) {
         self->onColorTempChange(lv_slider_get_value(slider));
+    } else {
+        self->showColorTemp(lv_slider_get_value(slider));
     }
 }
 

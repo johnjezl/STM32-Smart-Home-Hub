@@ -551,10 +551,17 @@ void WebServer::apiSetDeviceState(struct mg_connection* c, const std::string& id
 
     try {
         auto stateJson = nlohmann::json::parse(body);
+        if (!stateJson.is_object()) {
+            sendError(c, 400, "Expected a JSON object of properties");
+            return;
+        }
 
-        // Apply each state property
+        // Apply each state property, through the device's protocol
         for (auto& [key, value] : stateJson.items()) {
-            device->setState(key, value);
+            if (!m_deviceManager.setDeviceState(id, key, value)) {
+                sendError(c, 502, "Could not set " + key);
+                return;
+            }
         }
 
         // Return updated state

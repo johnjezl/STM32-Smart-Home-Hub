@@ -48,7 +48,7 @@ private:
                                const std::string& name, const std::string& type,
                                bool isOn);
 
-    void onDeviceToggle(const std::string& deviceId, bool newState);
+    bool onDeviceToggle(const std::string& deviceId, bool newState);  // False if it failed
     void onDeviceClicked(const std::string& deviceId);
     void onAddDeviceClicked();
     void onBackClicked();

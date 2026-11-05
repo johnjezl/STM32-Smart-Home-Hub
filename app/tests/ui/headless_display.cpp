@@ -103,6 +103,18 @@ uint32_t flushCount() {
     return s_flushCount;
 }
 
+lv_obj_t* findFirst(lv_obj_t* root, const lv_obj_class_t* objectClass) {
+    if (lv_obj_check_type(root, objectClass)) {
+        return root;
+    }
+    for (uint32_t i = 0; i < lv_obj_get_child_cnt(root); ++i) {
+        if (lv_obj_t* found = findFirst(lv_obj_get_child(root, static_cast<int32_t>(i)), objectClass)) {
+            return found;
+        }
+    }
+    return nullptr;
+}
+
 int countText(lv_obj_t* root, const std::string& text) {
     int count = 0;
     if (lv_obj_check_type(root, &lv_label_class) && text == lv_label_get_text(root)) {

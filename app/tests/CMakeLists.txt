@@ -183,6 +183,11 @@ if(GTEST_AVAILABLE)
     target_link_libraries(test_zigbee_flows PRIVATE smarthub_lib GTest::gtest GTest::gtest_main)
     add_test(NAME ZigbeeFlows COMMAND test_zigbee_flows)
 
+    # Controlling Zigbee devices through DeviceManager, against a fake coordinator
+    add_executable(test_zigbee_control protocols/test_zigbee_control.cpp)
+    target_link_libraries(test_zigbee_control PRIVATE smarthub_lib GTest::gtest GTest::gtest_main)
+    add_test(NAME ZigbeeControl COMMAND test_zigbee_control)
+
     # WiFi Protocol tests
     add_executable(test_wifi protocols/test_wifi.cpp)
     target_link_libraries(test_wifi PRIVATE smarthub_lib GTest::gtest GTest::gtest_main)
@@ -218,6 +223,7 @@ if(GTEST_AVAILABLE)
             ui/test_theme_manager.cpp
             ui/test_widgets.cpp
             ui/test_screens.cpp
+            ui/test_device_control.cpp
             ui/headless_display.cpp
         )
         target_link_libraries(test_ui PRIVATE smarthub_ui GTest::gtest GTest::gtest_main)
@@ -279,6 +285,7 @@ if(GTEST_AVAILABLE)
         protocols/test_protocol_factory.cpp
         protocols/test_zigbee.cpp
         protocols/test_zigbee_flows.cpp
+        protocols/test_zigbee_control.cpp
         protocols/test_wifi.cpp
         rpmsg/test_rpmsg.cpp
         network/test_network.cpp
@@ -298,7 +305,8 @@ if(GTEST_AVAILABLE)
     if(SMARTHUB_ENABLE_LVGL)
         target_link_libraries(smarthub_tests PRIVATE smarthub_ui)
         # Includes the render tests, so they also run after every other UI test
-        target_sources(smarthub_tests PRIVATE ui/headless_display.cpp ui/test_screens_render.cpp)
+        target_sources(smarthub_tests PRIVATE ui/headless_display.cpp ui/test_screens_render.cpp
+                       ui/test_device_control.cpp)
     else()
         # ThemeManager, DisplayManager, and AnimationManager work without LVGL
         target_sources(smarthub_tests PRIVATE

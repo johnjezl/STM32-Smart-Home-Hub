@@ -262,13 +262,10 @@ lv_obj_t* DeviceListScreen::createDeviceRow(lv_obj_t* parent,
     return row;
 }
 
-void DeviceListScreen::onDeviceToggle(const std::string& deviceId, bool newState) {
+bool DeviceListScreen::onDeviceToggle(const std::string& deviceId, bool newState) {
     LOG_DEBUG("Device toggle: %s -> %s", deviceId.c_str(), newState ? "ON" : "OFF");
 
-    auto device = m_deviceManager.getDevice(deviceId);
-    if (device) {
-        device->setState("on", newState);
-    }
+    return m_deviceManager.setDeviceState(deviceId, "on", newState);
 }
 
 void DeviceListScreen::onDeviceClicked(const std::string& deviceId) {
@@ -311,7 +308,14 @@ void DeviceListScreen::toggleHandler(lv_event_t* e) {
 
     if (self && deviceId) {
         bool isOn = lv_obj_has_state(sw, LV_STATE_CHECKED);
-        self->onDeviceToggle(deviceId, isOn);
+        if (!self->onDeviceToggle(deviceId, isOn)) {
+            // It didn't happen, so don't show it as if it did
+            if (isOn) {
+                lv_obj_clear_state(sw, LV_STATE_CHECKED);
+            } else {
+                lv_obj_add_state(sw, LV_STATE_CHECKED);
+            }
+        }
     }
 }
 

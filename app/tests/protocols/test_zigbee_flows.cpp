@@ -812,14 +812,14 @@ TEST_F(ZigbeeCommandTest, CommandUsesTheDevicesOwnEndpoint) {
 }
 
 TEST_F(ZigbeeCommandTest, BrightnessSendsMoveToLevel) {
-    ASSERT_TRUE(handler->sendCommand(idOf(LIGHT), "brightness", {{"brightness", 128}}));
+    ASSERT_TRUE(handler->sendCommand(idOf(LIGHT), "brightness", {{"brightness", 50}}));
 
     auto frames = airFrames(fake);
     ASSERT_EQ(frames.size(), 1u);
     EXPECT_EQ(frames[0].cluster, zcl::cluster::LEVEL_CONTROL);
     EXPECT_EQ(frames[0].zclCommand, zcl::cmd::level::MOVE_TO_LEVEL_ONOFF);
     ASSERT_FALSE(frames[0].zclPayload.empty());
-    EXPECT_EQ(frames[0].zclPayload[0], 128);
+    EXPECT_EQ(frames[0].zclPayload[0], 127);  // 50% of ZCL's 254
 }
 
 TEST_F(ZigbeeCommandTest, RadioRejectionIsReported) {
@@ -837,17 +837,6 @@ TEST_F(ZigbeeCommandTest, UnknownDeviceSendsNothing) {
 TEST_F(ZigbeeCommandTest, UnknownCommandSendsNothing) {
     EXPECT_FALSE(handler->sendCommand(idOf(LIGHT), "explode", nlohmann::json::object()));
     EXPECT_TRUE(airFrames(fake).empty());
-}
-
-// Issue #3: DeviceManager::setDeviceState sends the command "set" with the
-// property in its parameters, which the handler doesn't accept.
-TEST_F(ZigbeeCommandTest, DISABLED_SetCommandFromDeviceManagerReachesRadio) {
-    ASSERT_TRUE(handler->sendCommand(idOf(LIGHT), "set", {{"on", true}}));
-
-    auto frames = airFrames(fake);
-    ASSERT_EQ(frames.size(), 1u);
-    EXPECT_EQ(frames[0].cluster, zcl::cluster::ON_OFF);
-    EXPECT_EQ(frames[0].zclCommand, zcl::cmd::onoff::ON);
 }
 
 // ---- Incoming reports ------------------------------------------------------

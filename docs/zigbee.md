@@ -171,6 +171,20 @@ if (handler.initialize()) {
 }
 ```
 
+### Controlling Devices
+
+The touch UI, web API and automations all go through `DeviceManager::setDeviceState`, which sends the command to the device's protocol and only updates state if that succeeds.
+
+| Property | Device value | Sent over Zigbee as |
+|----------|--------------|---------------------|
+| `on` | true/false | On/Off command |
+| `brightness` | 0-100 | Level, 0-254 |
+| `colorTemp` | Kelvin | Mireds |
+
+Reports are converted back to these units. Other properties, including `hue` and `saturation`, are rejected for now.
+
+Success means the radio accepted the command, not that the device acted on it. The device's next report confirms the real state.
+
 ### Pairing Settings
 
 Pairing asks a joining device for its endpoints, then asks about each endpoint in turn.

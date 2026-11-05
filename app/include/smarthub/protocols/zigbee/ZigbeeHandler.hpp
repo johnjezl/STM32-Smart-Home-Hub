@@ -128,7 +128,7 @@ private:
     void setupReporting(uint16_t nwkAddr, uint8_t endpoint, DeviceType type);
 
     // Command handling
-    bool handleOnOffCommand(uint16_t nwkAddr, uint8_t endpoint, const nlohmann::json& params);
+    bool handleOnOffCommand(uint16_t nwkAddr, uint8_t endpoint, const std::string& command);
     bool handleBrightnessCommand(uint16_t nwkAddr, uint8_t endpoint, const nlohmann::json& params);
     bool handleColorCommand(uint16_t nwkAddr, uint8_t endpoint, const nlohmann::json& params);
 

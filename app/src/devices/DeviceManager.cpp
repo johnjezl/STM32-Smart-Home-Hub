@@ -2,6 +2,7 @@
  * SmartHub Device Manager Implementation
  */
 
+#include <optional>
 #include <smarthub/devices/DeviceManager.hpp>
 #include <smarthub/devices/Device.hpp>
 #include <smarthub/devices/DeviceTypeRegistry.hpp>
@@ -390,8 +391,33 @@ void DeviceManager::clearPendingDevice(const std::string& protocol) {
     }
 }
 
+namespace {
+
+/** Whether a value has the right type for a property. Other properties can hold anything. */
+bool isValidStateValue(const std::string& property, const nlohmann::json& value) {
+    if (property == "on") return value.is_boolean();
+    if (property == "brightness" || property == "colorTemp") return value.is_number();
+    return true;
+}
+
+/** The protocol command that changes a property, if there is one. */
+std::optional<std::string> commandForProperty(const std::string& property,
+                                              const nlohmann::json& value) {
+    if (property == "on") return value.get<bool>() ? "on" : "off";
+    if (property == "brightness" || property == "colorTemp") return property;
+    return std::nullopt;
+}
+
+} // namespace
+
 bool DeviceManager::setDeviceState(const std::string& deviceId, const std::string& property,
                                    const nlohmann::json& value) {
+    if (!isValidStateValue(property, value)) {
+        LOG_WARN("Invalid value for %s.%s: %s", deviceId.c_str(), property.c_str(),
+                 value.dump().c_str());
+        return false;
+    }
+
     DevicePtr device;
     ProtocolHandlerPtr protocol;
 
@@ -411,15 +437,44 @@ bool DeviceManager::setDeviceState(const std::string& deviceId, const std::strin
         }
     }
 
+    // Unlocked: this can wait on the radio.
     if (protocol) {
-        // Send command through protocol handler
+        auto command = commandForProperty(property, value);
+        if (!command) {
+            LOG_WARN("%s can't change %s", device->protocol().c_str(), property.c_str());
+            return false;
+        }
+
+        // Handlers address devices by ID unless the device has its own address
+        std::string address = device->protocolAddress();
+        if (address.empty()) {
+            address = deviceId;
+        }
+
         nlohmann::json params;
         params[property] = value;
-        return protocol->sendCommand(device->protocolAddress(), "set", params);
-    } else {
-        // Direct state update (for local/virtual devices)
-        return device->setState(property, value);
+        if (!protocol->sendCommand(address, *command, params)) {
+            LOG_WARN("Failed to set %s.%s", deviceId.c_str(), property.c_str());
+            return false;
+        }
+    } else if (device->protocol() != "local") {
+        // Reporting success here would show a change that never reached the device
+        LOG_WARN("Can't set %s.%s: protocol %s isn't loaded", deviceId.c_str(),
+                 property.c_str(), device->protocol().c_str());
+        return false;
     }
+
+    // Only publish real changes, so an automation can't keep re-triggering itself
+    const bool changed = device->getProperty(property) != value;
+    device->setState(property, value);
+    if (changed) {
+        DeviceStateEvent event;
+        event.deviceId = deviceId;
+        event.property = property;
+        event.value = value;
+        m_eventBus.publish(event);
+    }
+    return true;
 }
 
 bool DeviceManager::saveAllDevices() {
