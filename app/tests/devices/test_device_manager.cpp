@@ -9,8 +9,10 @@
 #include <smarthub/devices/types/TemperatureSensor.hpp>
 #include <smarthub/core/EventBus.hpp>
 #include <smarthub/database/Database.hpp>
+#include "../mocks/MockProtocolHandler.hpp"
 #include <filesystem>
 #include <memory>
+#include <thread>
 
 namespace fs = std::filesystem;
 using namespace smarthub;
@@ -37,6 +39,38 @@ protected:
     EventBus eventBus;
     std::unique_ptr<Database> database;
 };
+
+// Joins a thread during shutdown that calls back into DeviceManager, as a
+// protocol's background threads do.
+class JoinsCallbackThreadOnShutdown : public smarthub::testing::MockProtocolHandler {
+public:
+    using MockProtocolHandler::MockProtocolHandler;
+
+    void shutdown() override {
+        std::thread callback([this] {
+            simulateDeviceDiscovered(std::make_shared<Device>(
+                "late", "Late Device", DeviceType::Light));
+        });
+        callback.join();
+        MockProtocolHandler::shutdown();
+    }
+};
+
+TEST_F(DeviceManagerTest, ShutdownDoesNotDeadlockWithProtocolCallbacks) {
+    ProtocolFactory::instance().registerProtocol("joins_on_shutdown",
+        [](EventBus& bus, const nlohmann::json& config) -> ProtocolHandlerPtr {
+            return std::make_shared<JoinsCallbackThreadOnShutdown>(bus, config);
+        });
+
+    DeviceManager manager(eventBus, *database);
+    manager.initialize();
+    ASSERT_TRUE(manager.loadProtocol("joins_on_shutdown", nlohmann::json::object()));
+
+    manager.shutdown();
+
+    EXPECT_EQ(manager.deviceCount(), 0u);
+    ProtocolFactory::instance().unregisterProtocol("joins_on_shutdown");
+}
 
 TEST_F(DeviceManagerTest, AddDevice) {
     DeviceManager manager(eventBus, *database);

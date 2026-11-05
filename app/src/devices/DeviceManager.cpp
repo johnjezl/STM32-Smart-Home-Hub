@@ -42,13 +42,19 @@ void DeviceManager::shutdown() {
     // Save device states
     saveAllDevices();
 
-    // Shutdown all protocols
-    std::lock_guard<std::mutex> lock(m_mutex);
-    for (auto& [name, protocol] : m_protocols) {
+    // Shutdown all protocols, unlocked: they join threads that may be waiting to
+    // call back into this class, which takes m_mutex.
+    decltype(m_protocols) protocols;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        protocols.swap(m_protocols);
+    }
+    for (auto& [name, protocol] : protocols) {
         LOG_DEBUG("Shutting down protocol: %s", name.c_str());
         protocol->shutdown();
     }
-    m_protocols.clear();
+
+    std::lock_guard<std::mutex> lock(m_mutex);
     m_devices.clear();
 }
 

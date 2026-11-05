@@ -68,6 +68,12 @@ public:
         m_heldEndpoints.insert({nwkAddr, endpoint});
     }
 
+    /** Make a device refuse to describe this endpoint. */
+    void failDescriptor(uint16_t nwkAddr, uint8_t endpoint) {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_failedEndpoints.insert({nwkAddr, endpoint});
+    }
+
     void releaseDescriptors() {
         std::lock_guard<std::mutex> lock(m_mutex);
         m_heldEndpoints.clear();
@@ -339,6 +345,16 @@ private:
             if (device == m_devices.end()) return;
 
             uint8_t endpoint = req.getByte(4);
+            if (m_failedEndpoints.count({device->second.nwkAddr, endpoint}) > 0) {
+                ZnpFrame failure(ZnpType::AREQ, ZnpSubsystem::ZDO, cmd::zdo::SIMPLE_DESC_RSP);
+                failure.appendWord(device->second.nwkAddr);
+                failure.appendByte(0x80);   // Status: invalid request
+                failure.appendWord(device->second.nwkAddr);
+                failure.appendByte(0);      // Length
+                queueFrame(failure);
+                return;
+            }
+
             auto clusters = device->second.inClusters.find(endpoint);
             if (clusters == device->second.inClusters.end()) return;
 
@@ -374,6 +390,7 @@ private:
     std::map<uint16_t, FakeZigbeeDevice> m_devices;
     std::map<std::pair<ZnpSubsystem, uint8_t>, Responder> m_responders;
     std::set<std::pair<uint16_t, uint8_t>> m_heldEndpoints;
+    std::set<std::pair<uint16_t, uint8_t>> m_failedEndpoints;
     std::vector<ZnpFrame> m_heldFrames;
     bool m_unresponsive = false;
     size_t m_maxReadChunk = SIZE_MAX;

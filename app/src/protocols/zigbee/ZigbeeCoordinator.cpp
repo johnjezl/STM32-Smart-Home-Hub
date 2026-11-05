@@ -690,14 +690,12 @@ void ZigbeeCoordinator::handleDeviceAnnounce(const ZnpFrame& frame) {
         device.lastSeen = std::chrono::duration_cast<std::chrono::seconds>(
             std::chrono::system_clock::now().time_since_epoch()).count();
         device.available = true;
+        device.failedDescriptors = 0;
 
         m_nwkToIeee[nwkAddr] = ieeeAddr;
     }
 
-    // Request more device info
-    requestDeviceInfo(nwkAddr);
-
-    // Notify callback
+    // Notify callback, which requests the device's details
     std::lock_guard<std::mutex> lock(m_callbackMutex);
     if (m_deviceAnnouncedCb) {
         m_deviceAnnouncedCb(nwkAddr, ieeeAddr);
@@ -783,7 +781,7 @@ void ZigbeeCoordinator::handleActiveEpRsp(const ZnpFrame& frame) {
 
     // Request simple descriptor for each endpoint
     for (uint8_t ep : endpoints) {
-        if (ep == 0) continue;  // Skip ZDO endpoint
+        if (ep == 0 || ep == GREEN_POWER_ENDPOINT) continue;
 
         ZnpFrame req(ZnpType::SREQ, ZnpSubsystem::ZDO, cmd::zdo::SIMPLE_DESC_REQ);
         req.appendWord(nwkAddr);
@@ -799,17 +797,29 @@ void ZigbeeCoordinator::handleSimpleDescRsp(const ZnpFrame& frame) {
     // SrcAddr(2) + Status(1) + NwkAddr(2) + Len(1) + Endpoint(1) + AppProfId(2)
     // + AppDeviceId(2) + AppDevVer(1) + NumInClusters(1) + InClusterList(N*2)
     // + NumOutClusters(1) + OutClusterList(M*2)
-    if (frame.payload().size() < 14) return;
+    if (frame.payload().size() < 5) return;
 
     uint16_t srcAddr = frame.getWord(0);
     uint8_t status = frame.getByte(2);
     uint16_t nwkAddr = frame.getWord(3);
     uint8_t descLen = frame.getByte(5);
 
+    // A failure has no descriptor, so check this before the length.
     if (status != 0) {
-        LOG_WARN("Simple descriptor request failed for {:04X}: status={}", nwkAddr, status);
+        LOG_WARN("Simple descriptor request failed for 0x%04X: status=%d", nwkAddr, status);
+
+        std::lock_guard<std::mutex> lock(m_deviceMutex);
+        auto it = m_nwkToIeee.find(nwkAddr);
+        if (it != m_nwkToIeee.end()) {
+            auto devIt = m_devices.find(it->second);
+            if (devIt != m_devices.end()) {
+                devIt->second.failedDescriptors++;
+            }
+        }
         return;
     }
+
+    if (frame.payload().size() < 14) return;
 
     if (descLen < 8) {
         LOG_WARN("Simple descriptor too short: {}", descLen);

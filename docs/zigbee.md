@@ -171,6 +171,17 @@ if (handler.initialize()) {
 }
 ```
 
+### Pairing Settings
+
+| Setting | Default | Meaning |
+|---------|---------|---------|
+| `pairingTimeoutMs` | 30000 | How long to wait for a joining device to report any clusters |
+| `pairingSettleMs` | 5000 | Once some clusters have arrived, how much longer to wait for endpoints that haven't answered |
+
+Invalid values are ignored with a warning. An endpoint that refuses a descriptor request doesn't hold up pairing, and the Green Power endpoint (242) isn't queried.
+
+---
+
 ## ZCL Clusters
 
 The implementation supports the following Zigbee Cluster Library (ZCL) clusters:

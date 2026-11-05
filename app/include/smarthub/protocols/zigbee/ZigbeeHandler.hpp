@@ -10,8 +10,12 @@
 #include "ZigbeeCoordinator.hpp"
 #include "ZigbeeDeviceDatabase.hpp"
 #include <map>
+#include <atomic>
+#include <condition_variable>
 #include <functional>
 #include <memory>
+#include <mutex>
+#include <thread>
 
 namespace smarthub::zigbee {
 
@@ -102,6 +106,10 @@ public:
 private:
     // Device discovery and management
     void onDeviceAnnounced(uint16_t nwkAddr, uint64_t ieeeAddr);
+    bool startPairing(uint16_t nwkAddr, uint64_t ieeeAddr);
+    void stopPairing();
+    void pairDevice(uint16_t nwkAddr, uint64_t ieeeAddr);
+    bool waitWhilePairing(int ms);
     void onDeviceLeft(uint64_t ieeeAddr);
     void onAttributeReport(uint16_t nwkAddr, const ZclAttributeValue& attr);
     void onCommandReceived(uint16_t nwkAddr, uint8_t endpoint, uint16_t cluster,
@@ -134,8 +142,20 @@ private:
 
     // State
     bool m_initialized = false;
-    bool m_discovering = false;
+    std::atomic<bool> m_discovering{false};
     std::string m_lastError;
+
+    // Pairing, one background thread per joining device
+    struct PairingTask {
+        std::thread thread;
+        bool finished = false;
+    };
+    std::map<uint64_t, PairingTask> m_pairingTasks;
+    std::mutex m_pairingMutex;
+    std::condition_variable m_pairingCv;
+    bool m_stopPairing = false;
+    int m_pairingTimeoutMs = 30000;
+    int m_pairingSettleMs = 5000;
 
     // Callbacks
     DeviceDiscoveredCallback m_discoveredCb;

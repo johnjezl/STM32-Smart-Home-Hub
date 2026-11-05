@@ -10,6 +10,7 @@
 #include <smarthub/devices/types/ColorLightDevice.hpp>
 #include <smarthub/devices/types/TemperatureSensor.hpp>
 #include <smarthub/devices/types/MotionSensor.hpp>
+#include <algorithm>
 #include <iomanip>
 #include <sstream>
 #include <thread>
@@ -23,42 +24,69 @@ namespace smarthub::zigbee {
 
 namespace {
 
-/** True once every application endpoint has reported its clusters. */
-bool allEndpointsDescribed(const ZigbeeDeviceInfo& info) {
-    bool any = false;
-    for (uint8_t endpoint : info.endpoints) {
-        if (endpoint == 0) continue;  // ZDO
-        if (info.inClusters.find(endpoint) == info.inClusters.end()) return false;
-        any = true;
-    }
-    return any;
+bool isApplicationEndpoint(uint8_t endpoint) {
+    return endpoint != 0 && endpoint != GREEN_POWER_ENDPOINT;
 }
 
-/** The first endpoint with a cluster we use, or else the first application endpoint. */
-std::optional<uint8_t> primaryEndpoint(const ZigbeeDeviceInfo& info) {
-    std::optional<uint8_t> fallback;
+/** True once every application endpoint has either described itself or refused to. */
+bool allEndpointsAnswered(const ZigbeeDeviceInfo& info) {
+    int total = 0;
+    int answered = info.failedDescriptors;
     for (uint8_t endpoint : info.endpoints) {
-        if (endpoint == 0) continue;  // ZDO
-        if (!fallback) fallback = endpoint;
+        if (!isApplicationEndpoint(endpoint)) continue;
+        ++total;
+        if (info.inClusters.count(endpoint) > 0) ++answered;
+    }
+    return total > 0 && answered >= total;
+}
 
-        auto clusters = info.inClusters.find(endpoint);
-        if (clusters == info.inClusters.end()) continue;
-        for (uint16_t cluster : clusters->second) {
-            switch (cluster) {
-                case zcl::cluster::ON_OFF:
-                case zcl::cluster::LEVEL_CONTROL:
-                case zcl::cluster::COLOR_CONTROL:
-                case zcl::cluster::TEMPERATURE_MEASUREMENT:
-                case zcl::cluster::RELATIVE_HUMIDITY:
-                case zcl::cluster::IAS_ZONE:
-                case zcl::cluster::OCCUPANCY_SENSING:
-                    return endpoint;
-                default:
-                    break;
+/** The clusters that identify a device type's working endpoint, most specific first. */
+std::vector<uint16_t> clustersFor(DeviceType type) {
+    switch (type) {
+        case DeviceType::ColorLight:
+            return {zcl::cluster::COLOR_CONTROL, zcl::cluster::LEVEL_CONTROL, zcl::cluster::ON_OFF};
+        case DeviceType::Dimmer:
+            return {zcl::cluster::LEVEL_CONTROL, zcl::cluster::ON_OFF};
+        case DeviceType::TemperatureSensor:
+            return {zcl::cluster::TEMPERATURE_MEASUREMENT, zcl::cluster::RELATIVE_HUMIDITY};
+        case DeviceType::HumiditySensor:
+            return {zcl::cluster::RELATIVE_HUMIDITY};
+        case DeviceType::MotionSensor:
+            return {zcl::cluster::IAS_ZONE, zcl::cluster::OCCUPANCY_SENSING};
+        case DeviceType::ContactSensor:
+            return {zcl::cluster::IAS_ZONE};
+        default:
+            return {zcl::cluster::ON_OFF};
+    }
+}
+
+/** The endpoint that does the work for this device type, or else the first application one. */
+std::optional<uint8_t> primaryEndpoint(const ZigbeeDeviceInfo& info, DeviceType type) {
+    for (uint16_t cluster : clustersFor(type)) {
+        for (uint8_t endpoint : info.endpoints) {
+            auto clusters = info.inClusters.find(endpoint);
+            if (isApplicationEndpoint(endpoint) && clusters != info.inClusters.end() &&
+                std::find(clusters->second.begin(), clusters->second.end(), cluster) !=
+                    clusters->second.end()) {
+                return endpoint;
             }
         }
     }
-    return fallback;
+    for (uint8_t endpoint : info.endpoints) {
+        if (isApplicationEndpoint(endpoint)) return endpoint;
+    }
+    return std::nullopt;
+}
+
+/** Reads a positive integer setting, using the default if it's missing or invalid. */
+int positiveIntSetting(const nlohmann::json& config, const char* key, int defaultValue) {
+    auto it = config.find(key);
+    if (it == config.end()) return defaultValue;
+    if (!it->is_number_integer() || it->get<int>() <= 0) {
+        LOG_WARN("Ignoring invalid Zigbee setting %s; using %d", key, defaultValue);
+        return defaultValue;
+    }
+    return it->get<int>();
 }
 
 } // namespace
@@ -93,6 +121,13 @@ bool ZigbeeHandler::initialize() {
     // Extract configuration
     std::string port = m_config.value("port", "/dev/ttyUSB0");
     int baudRate = m_config.value("baudRate", 115200);
+    m_pairingTimeoutMs = positiveIntSetting(m_config, "pairingTimeoutMs", 30000);
+    m_pairingSettleMs = positiveIntSetting(m_config, "pairingSettleMs", 5000);
+
+    {
+        std::lock_guard<std::mutex> lock(m_pairingMutex);
+        m_stopPairing = false;
+    }
 
     LOG_INFO("Initializing Zigbee handler on {} at {} baud", port, baudRate);
 
@@ -159,6 +194,9 @@ void ZigbeeHandler::shutdown() {
     }
 
     LOG_INFO("Shutting down Zigbee handler");
+
+    // Before the coordinator goes away, since these threads use it
+    stopPairing();
 
     if (m_discovering) {
         stopDiscovery();
@@ -314,7 +352,7 @@ nlohmann::json ZigbeeHandler::getStatus() const {
     status["protocol"] = "zigbee";
     status["initialized"] = m_initialized;
     status["connected"] = isConnected();
-    status["discovering"] = m_discovering;
+    status["discovering"] = m_discovering.load();
 
     if (m_coordinator) {
         status["panId"] = m_coordinator->panId();
@@ -366,90 +404,165 @@ void ZigbeeHandler::onDeviceAnnounced(uint16_t nwkAddr, uint64_t ieeeAddr) {
         m_eventBus.publish(detectEvent);
     }
 
+    if (!startPairing(nwkAddr, ieeeAddr)) {
+        return;
+    }
+
     // Request device info (this triggers Active Endpoints and Simple Descriptor requests)
     m_coordinator->requestDeviceInfo(nwkAddr);
+}
 
-    // IMPORTANT: Don't block here! This callback runs on the ZNP reader thread.
-    // Blocking would prevent reception of the Active Endpoints and Simple Descriptor responses.
-    // Spawn a separate thread to wait for cluster info.
-    const int timeoutMs = m_config.value("pairingTimeoutMs", 30000);
-    std::thread([this, nwkAddr, ieeeAddr, timeoutMs]() {
-        // Wait for every endpoint's clusters. Stopping at the first could classify
-        // the device from an endpoint that isn't the one doing the work.
-        std::optional<ZigbeeDeviceInfo> deviceInfo;
-        for (int elapsedMs = 0; elapsedMs < timeoutMs; elapsedMs += 100) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
-            deviceInfo = m_coordinator->getDeviceByNwkAddr(nwkAddr);
-            if (deviceInfo && allEndpointsDescribed(*deviceInfo)) {
-                LOG_INFO("Got cluster info after %d ms", elapsedMs + 100);
+bool ZigbeeHandler::startPairing(uint16_t nwkAddr, uint64_t ieeeAddr) {
+    std::lock_guard<std::mutex> lock(m_pairingMutex);
+    if (m_stopPairing) {
+        return false;
+    }
+
+    // Clear out finished threads
+    for (auto it = m_pairingTasks.begin(); it != m_pairingTasks.end();) {
+        if (it->second.finished) {
+            it->second.thread.join();
+            it = m_pairingTasks.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    if (m_pairingTasks.count(ieeeAddr) > 0) {
+        LOG_DEBUG("Already pairing 0x%016llX", (unsigned long long)ieeeAddr);
+        return false;
+    }
+
+    // IMPORTANT: Don't block here! This runs on the ZNP reader thread, and blocking
+    // would prevent reception of the Active Endpoints and Simple Descriptor responses.
+    m_pairingTasks[ieeeAddr].thread = std::thread([this, nwkAddr, ieeeAddr]() {
+        pairDevice(nwkAddr, ieeeAddr);
+
+        std::lock_guard<std::mutex> taskLock(m_pairingMutex);
+        auto task = m_pairingTasks.find(ieeeAddr);
+        if (task != m_pairingTasks.end()) {
+            task->second.finished = true;
+        }
+    });
+    return true;
+}
+
+void ZigbeeHandler::stopPairing() {
+    std::map<uint64_t, PairingTask> tasks;
+    {
+        std::lock_guard<std::mutex> lock(m_pairingMutex);
+        m_stopPairing = true;
+        tasks.swap(m_pairingTasks);
+    }
+    m_pairingCv.notify_all();
+
+    for (auto& [ieeeAddr, task] : tasks) {
+        task.thread.join();
+    }
+}
+
+bool ZigbeeHandler::waitWhilePairing(int ms) {
+    std::unique_lock<std::mutex> lock(m_pairingMutex);
+    return !m_pairingCv.wait_for(lock, std::chrono::milliseconds(ms),
+                                 [this] { return m_stopPairing; });
+}
+
+void ZigbeeHandler::pairDevice(uint16_t nwkAddr, uint64_t ieeeAddr) {
+    // Wait for every endpoint's clusters, since stopping at the first could classify
+    // the device from an endpoint that isn't the one doing the work. Once any clusters
+    // have arrived, only wait a short while longer for an endpoint that isn't answering.
+    constexpr int POLL_MS = 100;
+    std::optional<ZigbeeDeviceInfo> deviceInfo;
+    int settleDeadlineMs = -1;
+    for (int elapsedMs = POLL_MS; elapsedMs <= m_pairingTimeoutMs; elapsedMs += POLL_MS) {
+        if (!waitWhilePairing(POLL_MS)) {
+            return;
+        }
+
+        deviceInfo = m_coordinator->getDeviceByNwkAddr(nwkAddr);
+        if (!deviceInfo) {
+            continue;
+        }
+        if (allEndpointsAnswered(*deviceInfo)) {
+            LOG_INFO("Got cluster info after %d ms", elapsedMs);
+            break;
+        }
+        if (!deviceInfo->inClusters.empty()) {
+            if (settleDeadlineMs < 0) {
+                settleDeadlineMs = elapsedMs + m_pairingSettleMs;
+            }
+            if (elapsedMs >= settleDeadlineMs) {
                 break;
             }
         }
+    }
 
-        if (!deviceInfo) {
-            LOG_WARN("Device info not available for 0x{:04X}", nwkAddr);
-            return;
+    if (!deviceInfo) {
+        LOG_WARN("Device info not available for 0x%04X", nwkAddr);
+        return;
+    }
+
+    if (deviceInfo->inClusters.empty()) {
+        LOG_ERROR("No cluster info received for 0x%04X after %d ms - cannot determine device type",
+                  nwkAddr, m_pairingTimeoutMs);
+        // Publish error event for UI
+        if (m_discovering) {
+            DeviceStateEvent errorEvent;
+            errorEvent.deviceId = ieeeToDeviceId(deviceInfo->ieeeAddress);
+            errorEvent.property = "_pairing_error";
+            errorEvent.value = "Device did not respond with cluster information. Try re-pairing.";
+            m_eventBus.publish(errorEvent);
         }
+        return;
+    }
 
-        if (deviceInfo->inClusters.empty()) {
-            LOG_ERROR("No cluster info received for 0x%04X after %d ms - cannot determine device type", nwkAddr, timeoutMs);
-            // Publish error event for UI
-            if (m_discovering) {
-                DeviceStateEvent errorEvent;
-                errorEvent.deviceId = ieeeToDeviceId(deviceInfo->ieeeAddress);
-                errorEvent.property = "_pairing_error";
-                errorEvent.value = "Device did not respond with cluster information. Try re-pairing.";
-                m_eventBus.publish(errorEvent);
-            }
-            return;
+    if (!allEndpointsAnswered(*deviceInfo)) {
+        LOG_WARN("Not all endpoints of 0x%04X reported clusters; using what arrived", nwkAddr);
+    }
+
+    // Create SmartHub device from Zigbee device info
+    auto device = createDeviceFromInfo(*deviceInfo);
+    if (!device) {
+        LOG_ERROR("Failed to create device for 0x%016llX", (unsigned long long)ieeeAddr);
+        return;
+    }
+
+    DeviceType type = device->type();
+    std::optional<uint8_t> endpoint = primaryEndpoint(*deviceInfo, type);
+
+    // Store mapping
+    std::string deviceId = device->id();
+    {
+        std::lock_guard<std::mutex> lock(m_deviceMutex);
+        m_ieeeToDeviceId[ieeeAddr] = deviceId;
+        m_deviceIdToIeee[deviceId] = ieeeAddr;
+        if (endpoint) {
+            m_deviceEndpoints[ieeeAddr] = *endpoint;
         }
+    }
 
-        if (!allEndpointsDescribed(*deviceInfo)) {
-            LOG_WARN("Not all endpoints of 0x%04X reported clusters; using what arrived", nwkAddr);
-        }
+    // Set up attribute reporting for the device type
+    if (endpoint) {
+        setupReporting(nwkAddr, *endpoint, type);
+    }
 
-        // Create SmartHub device from Zigbee device info
-        auto device = createDeviceFromInfo(*deviceInfo);
-        if (!device) {
-            LOG_ERROR("Failed to create device for 0x{:016X}", ieeeAddr);
-            return;
-        }
-
-        // Store mapping
-        std::string deviceId = device->id();
+    // If in discovery mode, store as pending and notify via pending callback
+    // Don't auto-add - let the UI wizard complete first
+    if (m_discovering) {
+        LOG_INFO("Device discovered during pairing - storing as pending");
         {
             std::lock_guard<std::mutex> lock(m_deviceMutex);
-            m_ieeeToDeviceId[ieeeAddr] = deviceId;
-            m_deviceIdToIeee[deviceId] = ieeeAddr;
-
-            // Store primary endpoint
-            if (auto primary = primaryEndpoint(*deviceInfo)) {
-                m_deviceEndpoints[ieeeAddr] = *primary;
-            }
+            m_pendingDevice = device;
         }
-
-        // Set up attribute reporting for the device type
-        DeviceType type = inferDeviceType(*deviceInfo);
-        setupReporting(nwkAddr, primaryEndpoint(*deviceInfo).value_or(0), type);
-
-        // If in discovery mode, store as pending and notify via pending callback
-        // Don't auto-add - let the UI wizard complete first
-        if (m_discovering) {
-            LOG_INFO("Device discovered during pairing - storing as pending");
-            {
-                std::lock_guard<std::mutex> lock(m_deviceMutex);
-                m_pendingDevice = device;
-            }
-            if (m_pendingDeviceCb) {
-                m_pendingDeviceCb(device);
-            }
-        } else {
-            // Not in discovery mode - auto-add the device
-            if (m_discoveredCb) {
-                m_discoveredCb(device);
-            }
+        if (m_pendingDeviceCb) {
+            m_pendingDeviceCb(device);
         }
-    }).detach();
+    } else {
+        // Not in discovery mode - auto-add the device
+        if (m_discoveredCb) {
+            m_discoveredCb(device);
+        }
+    }
 }
 
 void ZigbeeHandler::onDeviceLeft(uint64_t ieeeAddr) {
