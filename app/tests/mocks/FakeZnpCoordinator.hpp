@@ -77,10 +77,26 @@ public:
     void releaseDescriptors() {
         std::lock_guard<std::mutex> lock(m_mutex);
         m_heldEndpoints.clear();
-        for (const auto& frame : m_heldFrames) {
-            queueFrame(frame);
+        for (const auto& held : m_heldFrames) {
+            queueFrame(held.second);
         }
         m_heldFrames.clear();
+        m_rxCv.notify_all();
+    }
+
+    /** Release just one endpoint's held reply. */
+    void releaseDescriptor(uint16_t nwkAddr, uint8_t endpoint) {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        const std::pair<uint16_t, uint8_t> key{nwkAddr, endpoint};
+        m_heldEndpoints.erase(key);
+        for (auto it = m_heldFrames.begin(); it != m_heldFrames.end();) {
+            if (it->first == key) {
+                queueFrame(it->second);
+                it = m_heldFrames.erase(it);
+            } else {
+                ++it;
+            }
+        }
         m_rxCv.notify_all();
     }
 
@@ -314,6 +330,15 @@ private:
         return {0};                 // Status: SUCCESS
     }
 
+    void queueOrHold(uint16_t nwkAddr, uint8_t endpoint, const ZnpFrame& frame) {
+        const std::pair<uint16_t, uint8_t> key{nwkAddr, endpoint};
+        if (m_heldEndpoints.count(key) > 0) {
+            m_heldFrames.emplace_back(key, frame);
+        } else {
+            queueFrame(frame);
+        }
+    }
+
     // Requests that a real device answers later with an AREQ.
     void answerZdoRequest(const ZnpFrame& req) {
         if (req.command() == cmd::zdo::IEEE_ADDR_REQ) {
@@ -351,7 +376,7 @@ private:
                 failure.appendByte(0x80);   // Status: invalid request
                 failure.appendWord(device->second.nwkAddr);
                 failure.appendByte(0);      // Length
-                queueFrame(failure);
+                queueOrHold(device->second.nwkAddr, endpoint, failure);
                 return;
             }
 
@@ -372,11 +397,7 @@ private:
                 rsp.appendWord(cluster);
             }
             rsp.appendByte(0);      // NumOutClusters
-            if (m_heldEndpoints.count({device->second.nwkAddr, endpoint}) > 0) {
-                m_heldFrames.push_back(rsp);
-            } else {
-                queueFrame(rsp);
-            }
+            queueOrHold(device->second.nwkAddr, endpoint, rsp);
         }
     }
 
@@ -391,7 +412,7 @@ private:
     std::map<std::pair<ZnpSubsystem, uint8_t>, Responder> m_responders;
     std::set<std::pair<uint16_t, uint8_t>> m_heldEndpoints;
     std::set<std::pair<uint16_t, uint8_t>> m_failedEndpoints;
-    std::vector<ZnpFrame> m_heldFrames;
+    std::vector<std::pair<std::pair<uint16_t, uint8_t>, ZnpFrame>> m_heldFrames;
     bool m_unresponsive = false;
     size_t m_maxReadChunk = SIZE_MAX;
     uint8_t m_zclSeq = 0;

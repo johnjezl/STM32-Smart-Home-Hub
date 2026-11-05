@@ -530,6 +530,7 @@ uint64_t ZigbeeHandler::pairDevice(uint64_t ieeeAddr) {
 
         // What does each one do?
         bool restart = false;
+        int timedOut = 0;
         for (uint8_t endpoint : endpoints) {
             if (!isApplicationEndpoint(endpoint)) continue;
 
@@ -542,7 +543,7 @@ uint64_t ZigbeeHandler::pairDevice(uint64_t ieeeAddr) {
                 auto info = m_coordinator->getDevice(ieeeAddr);
                 return !info ||  // It left
                        info->inClusters.count(endpoint) > 0 ||
-                       info->failedDescriptors > before->failedDescriptors;
+                       info->failedDescriptors > before->failedDescriptors + timedOut;
             });
             if (result == PairingWait::Stopped) return attempt;
             if (result == PairingWait::Restarted) {
@@ -551,6 +552,7 @@ uint64_t ZigbeeHandler::pairDevice(uint64_t ieeeAddr) {
             }
             if (result == PairingWait::TimedOut) {
                 LOG_WARN("Endpoint %d of 0x%04X didn't answer; continuing without it", endpoint, nwkAddr);
+                ++timedOut;  // It may still refuse late, which mustn't count for the next endpoint
             }
         }
         if (!restart) {

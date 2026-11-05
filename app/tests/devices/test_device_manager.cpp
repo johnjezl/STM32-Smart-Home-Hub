@@ -56,6 +56,36 @@ public:
     }
 };
 
+// Joins a thread during startup that calls back into DeviceManager, as a protocol
+// does if startup fails while a device is joining.
+class JoinsCallbackThreadOnInitialize : public smarthub::testing::MockProtocolHandler {
+public:
+    using MockProtocolHandler::MockProtocolHandler;
+
+    bool initialize() override {
+        std::thread callback([this] {
+            simulateDeviceDiscovered(std::make_shared<Device>(
+                "early", "Early Device", DeviceType::Light));
+        });
+        callback.join();
+        return false;
+    }
+};
+
+TEST_F(DeviceManagerTest, FailedLoadDoesNotDeadlockWithProtocolCallbacks) {
+    ProtocolFactory::instance().registerProtocol("joins_on_initialize",
+        [](EventBus& bus, const nlohmann::json& config) -> ProtocolHandlerPtr {
+            return std::make_shared<JoinsCallbackThreadOnInitialize>(bus, config);
+        });
+
+    DeviceManager manager(eventBus, *database);
+    manager.initialize();
+
+    EXPECT_FALSE(manager.loadProtocol("joins_on_initialize", nlohmann::json::object()));
+    EXPECT_TRUE(manager.loadedProtocols().empty());
+    ProtocolFactory::instance().unregisterProtocol("joins_on_initialize");
+}
+
 TEST_F(DeviceManagerTest, ShutdownDoesNotDeadlockWithProtocolCallbacks) {
     ProtocolFactory::instance().registerProtocol("joins_on_shutdown",
         [](EventBus& bus, const nlohmann::json& config) -> ProtocolHandlerPtr {

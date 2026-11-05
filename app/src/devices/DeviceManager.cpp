@@ -66,11 +66,12 @@ void DeviceManager::poll() {
 }
 
 bool DeviceManager::loadProtocol(const std::string& name, const nlohmann::json& config) {
-    std::lock_guard<std::mutex> lock(m_mutex);
-
-    if (m_protocols.find(name) != m_protocols.end()) {
-        LOG_WARN("Protocol %s already loaded", name.c_str());
-        return false;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        if (m_protocols.find(name) != m_protocols.end()) {
+            LOG_WARN("Protocol %s already loaded", name.c_str());
+            return false;
+        }
     }
 
     auto protocol = ProtocolFactory::instance().create(name, m_eventBus, config);
@@ -95,12 +96,26 @@ bool DeviceManager::loadProtocol(const std::string& name, const nlohmann::json& 
             onDeviceAvailabilityChanged(id, avail);
         });
 
+    // Unlocked, for the same reason as in shutdown(): initialize can join threads
+    // that are waiting to call back into this class.
+    bool duplicate = false;
     if (!protocol->initialize()) {
         LOG_ERROR("Failed to initialize protocol: %s", name.c_str());
         return false;
     }
 
-    m_protocols[name] = protocol;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        if (!m_protocols.emplace(name, protocol).second) {
+            LOG_WARN("Protocol %s already loaded", name.c_str());
+            duplicate = true;
+        }
+    }
+    if (duplicate) {
+        protocol->shutdown();
+        return false;
+    }
+
     LOG_INFO("Loaded protocol: %s v%s", name.c_str(), protocol->version().c_str());
 
     return true;

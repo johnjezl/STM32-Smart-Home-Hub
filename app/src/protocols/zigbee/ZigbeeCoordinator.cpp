@@ -692,8 +692,11 @@ void ZigbeeCoordinator::handleDeviceAnnounce(const ZnpFrame& frame) {
         std::lock_guard<std::mutex> lock(m_deviceMutex);
 
         auto& device = m_devices[ieeeAddr];
-        if (device.networkAddress != nwkAddr) {
-            m_nwkToIeee.erase(device.networkAddress);  // It rejoined at a new address
+        // If it rejoined at a new address, forget the old one, unless another device has it now
+        auto oldAddress = m_nwkToIeee.find(device.networkAddress);
+        if (device.networkAddress != nwkAddr && oldAddress != m_nwkToIeee.end() &&
+            oldAddress->second == ieeeAddr) {
+            m_nwkToIeee.erase(oldAddress);
         }
         device.ieeeAddress = ieeeAddr;
         device.networkAddress = nwkAddr;

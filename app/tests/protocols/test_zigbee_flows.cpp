@@ -463,6 +463,28 @@ TEST_F(ZigbeeHandlerFlowTest, RejoiningAtANewAddressRestartsPairing) {
     EXPECT_EQ(frames[0].nwkAddr, 0xBEEF);
 }
 
+TEST_F(ZigbeeHandlerFlowTest, RejoiningKeepsAnotherDevicesClaimOnTheOldAddress) {
+    FakeZigbeeDevice first{0x1111, 0x00124B000000AAAAULL, {{1, {zcl::cluster::ON_OFF}}}};
+    FakeZigbeeDevice second{0x1111, 0x00124B000000BBBBULL, {{1, {zcl::cluster::ON_OFF}}}};
+    FakeZigbeeDevice firstMoved = first;
+    firstMoved.nwkAddr = 0x2222;
+    fake.addDevice(first);
+    fake.addDevice(firstMoved);
+
+    fake.announceDevice(first);
+    fake.announceDevice(second);
+    fake.announceDevice(firstMoved);
+
+    auto* coordinator = handler->coordinator();
+    ASSERT_TRUE(eventually([&] {
+        auto moved = coordinator->getDeviceByNwkAddr(0x2222);
+        return moved && moved->ieeeAddress == first.ieeeAddr;
+    }));
+    auto holder = coordinator->getDeviceByNwkAddr(0x1111);
+    ASSERT_TRUE(holder.has_value());
+    EXPECT_EQ(holder->ieeeAddress, second.ieeeAddr);
+}
+
 TEST_F(ZigbeeHandlerFlowTest, LeavingDuringPairingAbandonsIt) {
     watchForPairingErrors();
     handler->startDiscovery();
@@ -619,6 +641,26 @@ TEST_F(ZigbeePairingTimeoutTest, ReportsAFailureWhenNoEndpointAnswers) {
     ASSERT_TRUE(eventually([&] { return pairingFailed.load(); }));
     EXPECT_EQ(pendingCount(), 0u);
     EXPECT_EQ(discoveredCount(), 0u);
+}
+
+TEST_F(ZigbeePairingTimeoutTest, LateRefusalDoesNotEndTheNextEndpointsWait) {
+    fake.failDescriptor(MULTI_ENDPOINT_LIGHT.nwkAddr, 1);
+    fake.holdDescriptor(MULTI_ENDPOINT_LIGHT.nwkAddr, 1);
+    fake.holdDescriptor(MULTI_ENDPOINT_LIGHT.nwkAddr, 11);
+    fake.announceDevice(MULTI_ENDPOINT_LIGHT);
+
+    // Endpoint 1 times out, and pairing moves on to endpoint 11.
+    ASSERT_TRUE(fake.waitForSent(ZnpSubsystem::ZDO, cmd::zdo::SIMPLE_DESC_REQ, 2));
+
+    // Endpoint 1's refusal arrives late, then endpoint 11 answers.
+    fake.releaseDescriptor(MULTI_ENDPOINT_LIGHT.nwkAddr, 1);
+    std::this_thread::sleep_for(150ms);
+    EXPECT_EQ(discoveredCount(), 0u);
+    fake.releaseDescriptor(MULTI_ENDPOINT_LIGHT.nwkAddr, 11);
+
+    ASSERT_TRUE(eventually([&] { return discoveredCount() == 1; }));
+    std::lock_guard<std::mutex> lock(mutex);
+    EXPECT_EQ(discovered[0]->type(), DeviceType::Dimmer);
 }
 
 class ZigbeeEndpointListTimeoutTest : public ZigbeeHandlerFlowTest {
