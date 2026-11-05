@@ -28,18 +28,6 @@ bool isApplicationEndpoint(uint8_t endpoint) {
     return endpoint != 0 && endpoint != GREEN_POWER_ENDPOINT;
 }
 
-/** True once every application endpoint has either described itself or refused to. */
-bool allEndpointsAnswered(const ZigbeeDeviceInfo& info) {
-    int total = 0;
-    int answered = info.failedDescriptors;
-    for (uint8_t endpoint : info.endpoints) {
-        if (!isApplicationEndpoint(endpoint)) continue;
-        ++total;
-        if (info.inClusters.count(endpoint) > 0) ++answered;
-    }
-    return total > 0 && answered >= total;
-}
-
 /** The clusters that identify a device type's working endpoint, most specific first. */
 std::vector<uint16_t> clustersFor(DeviceType type) {
     switch (type) {
@@ -78,12 +66,16 @@ std::optional<uint8_t> primaryEndpoint(const ZigbeeDeviceInfo& info, DeviceType 
     return std::nullopt;
 }
 
-/** Reads a positive integer setting, using the default if it's missing or invalid. */
-int positiveIntSetting(const nlohmann::json& config, const char* key, int defaultValue) {
+/** Reads a time setting in milliseconds, using the default if it's missing or out of range. */
+int timeoutSetting(const nlohmann::json& config, const char* key, int defaultValue) {
+    constexpr int MIN_MS = 100;
+    constexpr int MAX_MS = 600000;
+
     auto it = config.find(key);
     if (it == config.end()) return defaultValue;
-    if (!it->is_number_integer() || it->get<int>() <= 0) {
-        LOG_WARN("Ignoring invalid Zigbee setting %s; using %d", key, defaultValue);
+    if (!it->is_number_integer() || it->get<int64_t>() < MIN_MS || it->get<int64_t>() > MAX_MS) {
+        LOG_WARN("Ignoring invalid Zigbee setting %s (must be %d-%d ms); using %d",
+                 key, MIN_MS, MAX_MS, defaultValue);
         return defaultValue;
     }
     return it->get<int>();
@@ -121,8 +113,8 @@ bool ZigbeeHandler::initialize() {
     // Extract configuration
     std::string port = m_config.value("port", "/dev/ttyUSB0");
     int baudRate = m_config.value("baudRate", 115200);
-    m_pairingTimeoutMs = positiveIntSetting(m_config, "pairingTimeoutMs", 30000);
-    m_pairingSettleMs = positiveIntSetting(m_config, "pairingSettleMs", 5000);
+    m_pairingTimeoutMs = timeoutSetting(m_config, "pairingTimeoutMs", 30000);
+    m_pairingEndpointTimeoutMs = timeoutSetting(m_config, "pairingEndpointTimeoutMs", 5000);
 
     {
         std::lock_guard<std::mutex> lock(m_pairingMutex);
@@ -162,6 +154,7 @@ bool ZigbeeHandler::initialize() {
     if (!m_coordinator->initialize()) {
         m_lastError = "Failed to initialize Zigbee coordinator";
         LOG_ERROR("{}", m_lastError);
+        stopPairing();
         m_coordinator.reset();
         return false;
     }
@@ -170,6 +163,7 @@ bool ZigbeeHandler::initialize() {
     if (!m_coordinator->startNetwork()) {
         m_lastError = "Failed to start Zigbee network";
         LOG_ERROR("{}", m_lastError);
+        stopPairing();
         m_coordinator.reset();
         return false;
     }
@@ -404,18 +398,13 @@ void ZigbeeHandler::onDeviceAnnounced(uint16_t nwkAddr, uint64_t ieeeAddr) {
         m_eventBus.publish(detectEvent);
     }
 
-    if (!startPairing(nwkAddr, ieeeAddr)) {
-        return;
-    }
-
-    // Request device info (this triggers Active Endpoints and Simple Descriptor requests)
-    m_coordinator->requestDeviceInfo(nwkAddr);
+    startPairing(nwkAddr, ieeeAddr);
 }
 
-bool ZigbeeHandler::startPairing(uint16_t nwkAddr, uint64_t ieeeAddr) {
+void ZigbeeHandler::startPairing(uint16_t nwkAddr, uint64_t ieeeAddr) {
     std::lock_guard<std::mutex> lock(m_pairingMutex);
     if (m_stopPairing) {
-        return false;
+        return;
     }
 
     // Clear out finished threads
@@ -428,23 +417,36 @@ bool ZigbeeHandler::startPairing(uint16_t nwkAddr, uint64_t ieeeAddr) {
         }
     }
 
-    if (m_pairingTasks.count(ieeeAddr) > 0) {
-        LOG_DEBUG("Already pairing 0x%016llX", (unsigned long long)ieeeAddr);
-        return false;
+    // Announcing again during pairing starts it over, in case the device has a new
+    // address or missed a request.
+    auto existing = m_pairingTasks.find(ieeeAddr);
+    if (existing != m_pairingTasks.end()) {
+        existing->second.nwkAddr = nwkAddr;
+        existing->second.attempt++;
+        m_pairingCv.notify_all();
+        return;
     }
 
     // IMPORTANT: Don't block here! This runs on the ZNP reader thread, and blocking
     // would prevent reception of the Active Endpoints and Simple Descriptor responses.
-    m_pairingTasks[ieeeAddr].thread = std::thread([this, nwkAddr, ieeeAddr]() {
-        pairDevice(nwkAddr, ieeeAddr);
+    PairingTask& task = m_pairingTasks[ieeeAddr];
+    task.nwkAddr = nwkAddr;
+    task.thread = std::thread([this, ieeeAddr]() {
+        for (;;) {
+            uint64_t attempt = pairDevice(ieeeAddr);
 
-        std::lock_guard<std::mutex> taskLock(m_pairingMutex);
-        auto task = m_pairingTasks.find(ieeeAddr);
-        if (task != m_pairingTasks.end()) {
-            task->second.finished = true;
+            // An announce that arrived as pairing ended needs another pass.
+            std::lock_guard<std::mutex> taskLock(m_pairingMutex);
+            auto current = m_pairingTasks.find(ieeeAddr);
+            if (m_stopPairing || current == m_pairingTasks.end()) {
+                return;
+            }
+            if (current->second.attempt == attempt) {
+                current->second.finished = true;
+                return;
+            }
         }
     });
-    return true;
 }
 
 void ZigbeeHandler::stopPairing() {
@@ -461,63 +463,126 @@ void ZigbeeHandler::stopPairing() {
     }
 }
 
-bool ZigbeeHandler::waitWhilePairing(int ms) {
-    std::unique_lock<std::mutex> lock(m_pairingMutex);
-    return !m_pairingCv.wait_for(lock, std::chrono::milliseconds(ms),
-                                 [this] { return m_stopPairing; });
+bool ZigbeeHandler::pairingStopped() {
+    std::lock_guard<std::mutex> lock(m_pairingMutex);
+    return m_stopPairing;
 }
 
-void ZigbeeHandler::pairDevice(uint16_t nwkAddr, uint64_t ieeeAddr) {
-    // Wait for every endpoint's clusters, since stopping at the first could classify
-    // the device from an endpoint that isn't the one doing the work. Once any clusters
-    // have arrived, only wait a short while longer for an endpoint that isn't answering.
+ZigbeeHandler::PairingWait ZigbeeHandler::waitForPairing(uint64_t ieeeAddr, uint64_t attempt,
+                                                         int timeoutMs,
+                                                         const std::function<bool()>& ready) {
     constexpr int POLL_MS = 100;
-    std::optional<ZigbeeDeviceInfo> deviceInfo;
-    int settleDeadlineMs = -1;
-    for (int elapsedMs = POLL_MS; elapsedMs <= m_pairingTimeoutMs; elapsedMs += POLL_MS) {
-        if (!waitWhilePairing(POLL_MS)) {
-            return;
+
+    for (int elapsedMs = 0;; elapsedMs += POLL_MS) {
+        if (ready()) {
+            return PairingWait::Ready;
+        }
+        if (elapsedMs >= timeoutMs) {
+            return PairingWait::TimedOut;
         }
 
-        deviceInfo = m_coordinator->getDeviceByNwkAddr(nwkAddr);
-        if (!deviceInfo) {
-            continue;
+        std::unique_lock<std::mutex> lock(m_pairingMutex);
+        auto interrupted = [&] {
+            auto task = m_pairingTasks.find(ieeeAddr);
+            return m_stopPairing || task == m_pairingTasks.end() ||
+                   task->second.attempt != attempt;
+        };
+        m_pairingCv.wait_for(lock, std::chrono::milliseconds(POLL_MS), interrupted);
+        if (interrupted()) {
+            auto task = m_pairingTasks.find(ieeeAddr);
+            bool restarted = !m_stopPairing && task != m_pairingTasks.end();
+            return restarted ? PairingWait::Restarted : PairingWait::Stopped;
         }
-        if (allEndpointsAnswered(*deviceInfo)) {
-            LOG_INFO("Got cluster info after %d ms", elapsedMs);
-            break;
-        }
-        if (!deviceInfo->inClusters.empty()) {
-            if (settleDeadlineMs < 0) {
-                settleDeadlineMs = elapsedMs + m_pairingSettleMs;
+    }
+}
+
+uint64_t ZigbeeHandler::pairDevice(uint64_t ieeeAddr) {
+    // Ask about one endpoint at a time and wait for its answer. A refusal doesn't say
+    // which endpoint it's for, and some devices don't cope with many requests at once.
+    uint64_t attempt = 0;
+    for (;;) {
+        uint16_t nwkAddr;
+        {
+            std::lock_guard<std::mutex> lock(m_pairingMutex);
+            auto task = m_pairingTasks.find(ieeeAddr);
+            if (m_stopPairing || task == m_pairingTasks.end()) {
+                return attempt;
             }
-            if (elapsedMs >= settleDeadlineMs) {
+            nwkAddr = task->second.nwkAddr;
+            attempt = task->second.attempt;
+        }
+
+        // Which endpoints does it have?
+        m_coordinator->requestDeviceInfo(nwkAddr);
+        std::vector<uint8_t> endpoints;
+        PairingWait result = waitForPairing(ieeeAddr, attempt, m_pairingTimeoutMs, [&] {
+            auto info = m_coordinator->getDevice(ieeeAddr);
+            if (!info) return true;  // It left
+            endpoints = info->endpoints;
+            return !endpoints.empty();
+        });
+        if (result == PairingWait::Stopped) return attempt;
+        if (result == PairingWait::Restarted) continue;
+        if (result == PairingWait::TimedOut) {
+            reportPairingFailure(ieeeAddr, "Device did not report its endpoints. Try re-pairing.");
+            return attempt;
+        }
+
+        // What does each one do?
+        bool restart = false;
+        for (uint8_t endpoint : endpoints) {
+            if (!isApplicationEndpoint(endpoint)) continue;
+
+            auto before = m_coordinator->getDevice(ieeeAddr);
+            if (!before) return attempt;
+            if (before->inClusters.count(endpoint) > 0) continue;
+
+            m_coordinator->requestSimpleDescriptor(nwkAddr, endpoint);
+            result = waitForPairing(ieeeAddr, attempt, m_pairingEndpointTimeoutMs, [&] {
+                auto info = m_coordinator->getDevice(ieeeAddr);
+                return !info ||  // It left
+                       info->inClusters.count(endpoint) > 0 ||
+                       info->failedDescriptors > before->failedDescriptors;
+            });
+            if (result == PairingWait::Stopped) return attempt;
+            if (result == PairingWait::Restarted) {
+                restart = true;
                 break;
             }
+            if (result == PairingWait::TimedOut) {
+                LOG_WARN("Endpoint %d of 0x%04X didn't answer; continuing without it", endpoint, nwkAddr);
+            }
+        }
+        if (!restart) {
+            break;
         }
     }
 
+    finishPairing(ieeeAddr);
+    return attempt;
+}
+
+void ZigbeeHandler::reportPairingFailure(uint64_t ieeeAddr, const std::string& message) {
+    LOG_ERROR("Pairing 0x%016llX failed: %s", (unsigned long long)ieeeAddr, message.c_str());
+    if (m_discovering) {
+        DeviceStateEvent errorEvent;
+        errorEvent.deviceId = ieeeToDeviceId(ieeeAddr);
+        errorEvent.property = "_pairing_error";
+        errorEvent.value = message;
+        m_eventBus.publish(errorEvent);
+    }
+}
+
+void ZigbeeHandler::finishPairing(uint64_t ieeeAddr) {
+    auto deviceInfo = m_coordinator->getDevice(ieeeAddr);
     if (!deviceInfo) {
-        LOG_WARN("Device info not available for 0x%04X", nwkAddr);
-        return;
+        return;  // It left
     }
 
     if (deviceInfo->inClusters.empty()) {
-        LOG_ERROR("No cluster info received for 0x%04X after %d ms - cannot determine device type",
-                  nwkAddr, m_pairingTimeoutMs);
-        // Publish error event for UI
-        if (m_discovering) {
-            DeviceStateEvent errorEvent;
-            errorEvent.deviceId = ieeeToDeviceId(deviceInfo->ieeeAddress);
-            errorEvent.property = "_pairing_error";
-            errorEvent.value = "Device did not respond with cluster information. Try re-pairing.";
-            m_eventBus.publish(errorEvent);
-        }
+        reportPairingFailure(ieeeAddr,
+            "Device did not respond with cluster information. Try re-pairing.");
         return;
-    }
-
-    if (!allEndpointsAnswered(*deviceInfo)) {
-        LOG_WARN("Not all endpoints of 0x%04X reported clusters; using what arrived", nwkAddr);
     }
 
     // Create SmartHub device from Zigbee device info
@@ -527,7 +592,7 @@ void ZigbeeHandler::pairDevice(uint16_t nwkAddr, uint64_t ieeeAddr) {
         return;
     }
 
-    DeviceType type = device->type();
+    DeviceType type = resolveDeviceType(*deviceInfo);
     std::optional<uint8_t> endpoint = primaryEndpoint(*deviceInfo, type);
 
     // Store mapping
@@ -543,7 +608,11 @@ void ZigbeeHandler::pairDevice(uint16_t nwkAddr, uint64_t ieeeAddr) {
 
     // Set up attribute reporting for the device type
     if (endpoint) {
-        setupReporting(nwkAddr, *endpoint, type);
+        setupReporting(deviceInfo->networkAddress, *endpoint, type);
+    }
+
+    if (pairingStopped()) {
+        return;
     }
 
     // If in discovery mode, store as pending and notify via pending callback
@@ -743,12 +812,20 @@ void ZigbeeHandler::onCommandReceived(uint16_t nwkAddr, uint8_t endpoint,
 // Device Creation
 // ============================================================================
 
+DeviceType ZigbeeHandler::resolveDeviceType(const ZigbeeDeviceInfo& info) {
+    // The device database knows better than the clusters, if it has an answer
+    auto dbEntry = m_deviceDb.lookup(info.manufacturer, info.model);
+    if (dbEntry && dbEntry->deviceType != DeviceType::Unknown) {
+        return dbEntry->deviceType;
+    }
+    return inferDeviceType(info);
+}
+
 DevicePtr ZigbeeHandler::createDeviceFromInfo(const ZigbeeDeviceInfo& info) {
     // Generate device ID from IEEE address
     std::string deviceId = ieeeToDeviceId(info.ieeeAddress);
 
-    // Infer device type from clusters
-    DeviceType type = inferDeviceType(info);
+    DeviceType type = resolveDeviceType(info);
 
     // Look up in device database for better info
     auto dbEntry = m_deviceDb.lookup(info.manufacturer, info.model);
@@ -756,9 +833,6 @@ DevicePtr ZigbeeHandler::createDeviceFromInfo(const ZigbeeDeviceInfo& info) {
     std::string name;
     if (dbEntry) {
         name = dbEntry->displayName;
-        if (dbEntry->deviceType != DeviceType::Unknown) {
-            type = dbEntry->deviceType;
-        }
     } else {
         // Generate name from manufacturer/model
         if (!info.manufacturer.empty() && !info.model.empty()) {
@@ -882,12 +956,15 @@ void ZigbeeHandler::setupReporting(uint16_t nwkAddr, uint8_t endpoint, DeviceTyp
         case DeviceType::Dimmer:
         case DeviceType::ColorLight:
             // Report on/off state changes
+            // Each request can block on an unresponsive radio, so check for shutdown between them
+            if (pairingStopped()) return;
             m_coordinator->configureReporting(nwkAddr, endpoint,
                 zcl::cluster::ON_OFF, zcl::attr::onoff::ON_OFF,
                 zcl::datatype::BOOLEAN, 1, 300);
 
             if (type == DeviceType::Dimmer || type == DeviceType::ColorLight) {
                 // Report level changes
+                if (pairingStopped()) return;
                 m_coordinator->configureReporting(nwkAddr, endpoint,
                     zcl::cluster::LEVEL_CONTROL, zcl::attr::level::CURRENT_LEVEL,
                     zcl::datatype::UINT8, 1, 300, {0x01}); // 1% change
@@ -895,6 +972,7 @@ void ZigbeeHandler::setupReporting(uint16_t nwkAddr, uint8_t endpoint, DeviceTyp
 
             if (type == DeviceType::ColorLight) {
                 // Report color temp changes
+                if (pairingStopped()) return;
                 m_coordinator->configureReporting(nwkAddr, endpoint,
                     zcl::cluster::COLOR_CONTROL, zcl::attr::color::COLOR_TEMP,
                     zcl::datatype::UINT16, 1, 300, {0x0A, 0x00}); // 10 mireds change

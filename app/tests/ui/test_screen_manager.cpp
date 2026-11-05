@@ -334,9 +334,9 @@ TEST_F(ScreenManagerTest, UnregisteringAScreenBeingLoaded) {
     ASSERT_TRUE(screenManager->unregisterScreen("home"));
 
     EXPECT_FALSE(test::transitionPending());
+    EXPECT_FALSE(screenManager->isTransitioning());
     test::render();
 
-    screenManager->update(300);
     EXPECT_TRUE(screenManager->showScreen("settings"));
     test::finishTransitions();
     test::render();
@@ -402,6 +402,7 @@ TEST_F(ScreenManagerTest, UnregisteringAnUnrelatedScreenLeavesTheTransitionAlone
     ASSERT_TRUE(screenManager->unregisterScreen("about"));
 
     EXPECT_TRUE(test::transitionPending());
+    EXPECT_TRUE(screenManager->isTransitioning());
     test::finishTransitions();
     EXPECT_EQ(lv_scr_act(), settingsContainer);
 }

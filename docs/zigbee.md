@@ -173,12 +173,14 @@ if (handler.initialize()) {
 
 ### Pairing Settings
 
+Pairing asks a joining device for its endpoints, then asks about each endpoint in turn.
+
 | Setting | Default | Meaning |
 |---------|---------|---------|
-| `pairingTimeoutMs` | 30000 | How long to wait for a joining device to report any clusters |
-| `pairingSettleMs` | 5000 | Once some clusters have arrived, how much longer to wait for endpoints that haven't answered |
+| `pairingTimeoutMs` | 30000 | How long to wait for the device to list its endpoints |
+| `pairingEndpointTimeoutMs` | 5000 | How long to wait for each endpoint's description |
 
-Invalid values are ignored with a warning. An endpoint that refuses a descriptor request doesn't hold up pairing, and the Green Power endpoint (242) isn't queried.
+Both must be from 100 to 600000; invalid values are ignored with a warning. An endpoint that refuses or doesn't answer is skipped, and the device is created from what the others reported. The Green Power endpoint (242) isn't queried. If a device announces again during pairing, pairing starts over at its current address.
 
 ---
 

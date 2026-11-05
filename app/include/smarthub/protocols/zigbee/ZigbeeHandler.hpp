@@ -106,10 +106,16 @@ public:
 private:
     // Device discovery and management
     void onDeviceAnnounced(uint16_t nwkAddr, uint64_t ieeeAddr);
-    bool startPairing(uint16_t nwkAddr, uint64_t ieeeAddr);
+    void startPairing(uint16_t nwkAddr, uint64_t ieeeAddr);
     void stopPairing();
-    void pairDevice(uint16_t nwkAddr, uint64_t ieeeAddr);
-    bool waitWhilePairing(int ms);
+    uint64_t pairDevice(uint64_t ieeeAddr);  // Returns the attempt it last worked on
+    void finishPairing(uint64_t ieeeAddr);
+    void reportPairingFailure(uint64_t ieeeAddr, const std::string& message);
+    bool pairingStopped();
+
+    enum class PairingWait { Ready, TimedOut, Restarted, Stopped };
+    PairingWait waitForPairing(uint64_t ieeeAddr, uint64_t attempt, int timeoutMs,
+                               const std::function<bool()>& ready);
     void onDeviceLeft(uint64_t ieeeAddr);
     void onAttributeReport(uint16_t nwkAddr, const ZclAttributeValue& attr);
     void onCommandReceived(uint16_t nwkAddr, uint8_t endpoint, uint16_t cluster,
@@ -118,6 +124,7 @@ private:
     // Device creation
     DevicePtr createDeviceFromInfo(const ZigbeeDeviceInfo& info);
     DeviceType inferDeviceType(const ZigbeeDeviceInfo& info);
+    DeviceType resolveDeviceType(const ZigbeeDeviceInfo& info);
     void setupReporting(uint16_t nwkAddr, uint8_t endpoint, DeviceType type);
 
     // Command handling
@@ -148,6 +155,8 @@ private:
     // Pairing, one background thread per joining device
     struct PairingTask {
         std::thread thread;
+        uint16_t nwkAddr = 0;
+        uint64_t attempt = 0;      // Goes up when the device announces again
         bool finished = false;
     };
     std::map<uint64_t, PairingTask> m_pairingTasks;
@@ -155,7 +164,7 @@ private:
     std::condition_variable m_pairingCv;
     bool m_stopPairing = false;
     int m_pairingTimeoutMs = 30000;
-    int m_pairingSettleMs = 5000;
+    int m_pairingEndpointTimeoutMs = 5000;
 
     // Callbacks
     DeviceDiscoveredCallback m_discoveredCb;

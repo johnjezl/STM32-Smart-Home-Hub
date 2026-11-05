@@ -99,6 +99,15 @@ bool ScreenManager::unregisterScreen(const std::string& name) {
         m_currentScreen.clear();
     }
 
+#ifdef SMARTHUB_ENABLE_LVGL
+    // Deleting a screen can finish LVGL's load early, leaving nothing to wait for
+    lv_disp_t* display = lv_disp_get_default();
+    if (m_transitionInProgress && display && !display->scr_to_load) {
+        m_transitionInProgress = false;
+        m_transitionRemainingMs = 0;
+    }
+#endif
+
     return true;
 }
 

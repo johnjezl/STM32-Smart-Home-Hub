@@ -15,12 +15,12 @@
 
 namespace smarthub::zigbee {
 
-/**
- * Information about a Zigbee device on the network
- */
 /** Green Power endpoint. Not used here, and many devices don't describe it. */
 constexpr uint8_t GREEN_POWER_ENDPOINT = 242;
 
+/**
+ * Information about a Zigbee device on the network
+ */
 struct ZigbeeDeviceInfo {
     uint16_t networkAddress = 0;      // 16-bit network address
     uint64_t ieeeAddress = 0;         // 64-bit IEEE address (MAC)
@@ -29,7 +29,7 @@ struct ZigbeeDeviceInfo {
     std::string model;
     std::string dateCode;
     std::vector<uint8_t> endpoints;
-    int failedDescriptors = 0;        // Simple descriptor requests refused since last announce
+    int failedDescriptors = 0;        // Simple descriptor requests the device has refused
     uint64_t lastSeen = 0;            // Unix timestamp
     bool available = false;
 
@@ -177,6 +177,12 @@ public:
      * Request device info (IEEE address, node descriptor, endpoints)
      */
     bool requestDeviceInfo(uint16_t nwkAddr);
+
+    /**
+     * Ask a device to describe an endpoint. The answer arrives in the device's
+     * inClusters, or as an increase in failedDescriptors.
+     */
+    bool requestSimpleDescriptor(uint16_t nwkAddr, uint8_t endpoint);
 
     /**
      * Leave request - ask a device to leave the network

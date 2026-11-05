@@ -107,14 +107,20 @@ bool DeviceManager::loadProtocol(const std::string& name, const nlohmann::json& 
 }
 
 void DeviceManager::unloadProtocol(const std::string& name) {
-    std::lock_guard<std::mutex> lock(m_mutex);
-
-    auto it = m_protocols.find(name);
-    if (it != m_protocols.end()) {
-        it->second->shutdown();
+    ProtocolHandlerPtr protocol;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        auto it = m_protocols.find(name);
+        if (it == m_protocols.end()) {
+            return;
+        }
+        protocol = it->second;
         m_protocols.erase(it);
-        LOG_INFO("Unloaded protocol: %s", name.c_str());
     }
+
+    // Unlocked, for the same reason as in shutdown()
+    protocol->shutdown();
+    LOG_INFO("Unloaded protocol: %s", name.c_str());
 }
 
 std::vector<std::string> DeviceManager::loadedProtocols() const {

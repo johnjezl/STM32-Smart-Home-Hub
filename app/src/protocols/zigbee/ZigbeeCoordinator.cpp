@@ -517,6 +517,14 @@ bool ZigbeeCoordinator::requestDeviceInfo(uint16_t nwkAddr) {
     return true;
 }
 
+bool ZigbeeCoordinator::requestSimpleDescriptor(uint16_t nwkAddr, uint8_t endpoint) {
+    ZnpFrame req(ZnpType::SREQ, ZnpSubsystem::ZDO, cmd::zdo::SIMPLE_DESC_REQ);
+    req.appendWord(nwkAddr);
+    req.appendWord(nwkAddr);
+    req.appendByte(endpoint);
+    return m_transport->send(req);
+}
+
 bool ZigbeeCoordinator::leaveRequest(uint64_t ieeeAddr) {
     ZnpFrame req(ZnpType::SREQ, ZnpSubsystem::ZDO, cmd::zdo::MGMT_LEAVE_REQ);
 
@@ -684,13 +692,15 @@ void ZigbeeCoordinator::handleDeviceAnnounce(const ZnpFrame& frame) {
         std::lock_guard<std::mutex> lock(m_deviceMutex);
 
         auto& device = m_devices[ieeeAddr];
+        if (device.networkAddress != nwkAddr) {
+            m_nwkToIeee.erase(device.networkAddress);  // It rejoined at a new address
+        }
         device.ieeeAddress = ieeeAddr;
         device.networkAddress = nwkAddr;
         device.deviceType = (capabilities & 0x02) ? 1 : 2;  // FFD=Router, RFD=EndDevice
         device.lastSeen = std::chrono::duration_cast<std::chrono::seconds>(
             std::chrono::system_clock::now().time_since_epoch()).count();
         device.available = true;
-        device.failedDescriptors = 0;
 
         m_nwkToIeee[nwkAddr] = ieeeAddr;
     }
@@ -777,18 +787,6 @@ void ZigbeeCoordinator::handleActiveEpRsp(const ZnpFrame& frame) {
                 devIt->second.endpoints = endpoints;
             }
         }
-    }
-
-    // Request simple descriptor for each endpoint
-    for (uint8_t ep : endpoints) {
-        if (ep == 0 || ep == GREEN_POWER_ENDPOINT) continue;
-
-        ZnpFrame req(ZnpType::SREQ, ZnpSubsystem::ZDO, cmd::zdo::SIMPLE_DESC_REQ);
-        req.appendWord(nwkAddr);
-        req.appendWord(nwkAddr);
-        req.appendByte(ep);
-        m_transport->send(req);
-        LOG_DEBUG("Requested simple descriptor for {:04X} endpoint {}", nwkAddr, ep);
     }
 }
 

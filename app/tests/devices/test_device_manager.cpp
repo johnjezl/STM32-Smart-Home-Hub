@@ -72,6 +72,23 @@ TEST_F(DeviceManagerTest, ShutdownDoesNotDeadlockWithProtocolCallbacks) {
     ProtocolFactory::instance().unregisterProtocol("joins_on_shutdown");
 }
 
+TEST_F(DeviceManagerTest, UnloadDoesNotDeadlockWithProtocolCallbacks) {
+    ProtocolFactory::instance().registerProtocol("joins_on_shutdown",
+        [](EventBus& bus, const nlohmann::json& config) -> ProtocolHandlerPtr {
+            return std::make_shared<JoinsCallbackThreadOnShutdown>(bus, config);
+        });
+
+    DeviceManager manager(eventBus, *database);
+    manager.initialize();
+    ASSERT_TRUE(manager.loadProtocol("joins_on_shutdown", nlohmann::json::object()));
+
+    manager.unloadProtocol("joins_on_shutdown");
+
+    EXPECT_TRUE(manager.loadedProtocols().empty());
+    EXPECT_EQ(manager.deviceCount(), 1u);  // The callback's device still arrived
+    ProtocolFactory::instance().unregisterProtocol("joins_on_shutdown");
+}
+
 TEST_F(DeviceManagerTest, AddDevice) {
     DeviceManager manager(eventBus, *database);
     manager.initialize();

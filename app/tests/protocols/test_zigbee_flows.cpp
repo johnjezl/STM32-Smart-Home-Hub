@@ -17,6 +17,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <climits>
 #include <condition_variable>
 #include <cstdio>
 #include <memory>
@@ -65,6 +66,15 @@ const FakeZigbeeDevice ROUTER_WITH_GREEN_POWER{
     0x7777, 0x00124B0000007777ULL,
     {{1, {zcl::cluster::ON_OFF}},
      {GREEN_POWER_ENDPOINT, {}}}};
+
+// Nothing we can control or read, so an unknown device type.
+const FakeZigbeeDevice BASIC_ONLY{
+    0x8888, 0x00124B0000008888ULL,
+    {{1, {zcl::cluster::BASIC}}}};
+
+const FakeZigbeeDevice COLOR_LIGHT{
+    0x9999, 0x00124B0000009999ULL,
+    {{1, {zcl::cluster::ON_OFF, zcl::cluster::LEVEL_CONTROL, zcl::cluster::COLOR_CONTROL}}}};
 
 std::string idOf(const FakeZigbeeDevice& device) {
     char id[32];
@@ -173,7 +183,8 @@ protected:
 
     void SetUp() override {
         for (const auto& device : {LIGHT, PLUG, CLIMATE, MOTION, MULTI_ENDPOINT_LIGHT,
-                                   LIGHT_WITH_SENSOR, ROUTER_WITH_GREEN_POWER}) {
+                                   LIGHT_WITH_SENSOR, ROUTER_WITH_GREEN_POWER, BASIC_ONLY,
+                                   COLOR_LIGHT}) {
             fake.addDevice(device);
         }
         handler = makeHandler(fake);
@@ -240,6 +251,17 @@ protected:
     }
 
     nlohmann::json handlerConfig = nlohmann::json::object();
+
+    /** Watches for pairing failures. */
+    void watchForPairingErrors() {
+        eventBus.subscribe("device.state", [this](const Event& event) {
+            if (static_cast<const DeviceStateEvent&>(event).property == "_pairing_error") {
+                pairingFailed = true;
+            }
+        });
+    }
+
+    std::atomic<bool> pairingFailed{false};
 
     std::mutex mutex;
     std::vector<DevicePtr> discovered;
@@ -383,15 +405,113 @@ TEST_F(ZigbeeHandlerFlowTest, RepeatAnnounceDuringPairingCreatesOneDevice) {
 
 TEST_F(ZigbeeHandlerFlowTest, ShutdownStopsPairingPromptly) {
     fake.holdDescriptor(MULTI_ENDPOINT_LIGHT.nwkAddr, 1);
-    fake.holdDescriptor(MULTI_ENDPOINT_LIGHT.nwkAddr, 11);
     fake.announceDevice(MULTI_ENDPOINT_LIGHT);
-    ASSERT_TRUE(fake.waitForSent(ZnpSubsystem::ZDO, cmd::zdo::SIMPLE_DESC_REQ, 2));
+    ASSERT_TRUE(fake.waitForSent(ZnpSubsystem::ZDO, cmd::zdo::SIMPLE_DESC_REQ, 1));
 
     auto started = std::chrono::steady_clock::now();
     handler.reset();
 
     EXPECT_LT(std::chrono::steady_clock::now() - started, 2s);
     EXPECT_EQ(discoveredCount(), 0u);
+}
+
+TEST_F(ZigbeeHandlerFlowTest, ShutdownStopsBetweenReportingRequests) {
+    // Requests time out from here on, as with a radio that's stopped answering.
+    fake.setResponder(ZnpSubsystem::AF, cmd::af::DATA_REQUEST,
+                      [](const ZnpFrame&) { return std::nullopt; });
+    fake.announceDevice(COLOR_LIGHT);
+    ASSERT_TRUE(fake.waitForSent(ZnpSubsystem::AF, cmd::af::DATA_REQUEST, 1, 10s));
+
+    handler.reset();
+
+    // Only the request in progress when shutdown started, of three
+    EXPECT_EQ(fake.sentFrames(ZnpSubsystem::AF, cmd::af::DATA_REQUEST).size(), 1u);
+    EXPECT_EQ(discoveredCount(), 0u);
+}
+
+TEST_F(ZigbeeHandlerFlowTest, FailedStartupWithADeviceJoiningDoesNotCrash) {
+    FakeZnpCoordinator radio;
+    radio.addDevice(PLUG);
+    radio.setResponder(ZnpSubsystem::ZDO, cmd::zdo::STARTUP_FROM_APP, [&](const ZnpFrame&) {
+        radio.announceDevice(PLUG);
+        std::this_thread::sleep_for(200ms);  // Let the announce start pairing
+        return std::vector<uint8_t>{2};      // Then startup fails
+    });
+
+    auto failing = makeHandler(radio);
+    EXPECT_FALSE(failing->initialize());
+    failing.reset();
+
+    EXPECT_EQ(discoveredCount(), 0u);
+}
+
+TEST_F(ZigbeeHandlerFlowTest, RejoiningAtANewAddressRestartsPairing) {
+    FakeZigbeeDevice moved = MULTI_ENDPOINT_LIGHT;
+    moved.nwkAddr = 0xBEEF;
+    fake.addDevice(moved);
+    fake.holdDescriptor(MULTI_ENDPOINT_LIGHT.nwkAddr, 1);
+
+    fake.announceDevice(MULTI_ENDPOINT_LIGHT);
+    ASSERT_TRUE(fake.waitForSent(ZnpSubsystem::ZDO, cmd::zdo::SIMPLE_DESC_REQ, 1));
+    fake.announceDevice(moved);
+
+    ASSERT_TRUE(eventually([&] { return discoveredCount() == 1; }, 10s));
+    fake.clearSentFrames();
+    ASSERT_TRUE(handler->sendCommand(idOf(moved), "on", {{"on", true}}));
+    auto frames = airFrames(fake);
+    ASSERT_EQ(frames.size(), 1u);
+    EXPECT_EQ(frames[0].nwkAddr, 0xBEEF);
+}
+
+TEST_F(ZigbeeHandlerFlowTest, LeavingDuringPairingAbandonsIt) {
+    watchForPairingErrors();
+    handler->startDiscovery();
+    fake.holdDescriptor(MULTI_ENDPOINT_LIGHT.nwkAddr, 1);
+    fake.announceDevice(MULTI_ENDPOINT_LIGHT);
+    ASSERT_TRUE(fake.waitForSent(ZnpSubsystem::ZDO, cmd::zdo::SIMPLE_DESC_REQ, 1));
+
+    fake.deviceLeft(MULTI_ENDPOINT_LIGHT);
+    std::this_thread::sleep_for(500ms);
+
+    // It stopped: no more questions for a device that's gone, and no failure to report.
+    EXPECT_EQ(fake.sentFrames(ZnpSubsystem::ZDO, cmd::zdo::SIMPLE_DESC_REQ).size(), 1u);
+    EXPECT_EQ(pendingCount(), 0u);
+    EXPECT_FALSE(pairingFailed);
+}
+
+TEST_F(ZigbeeHandlerFlowTest, RejoiningAfterLeavingDuringPairingPairsIt) {
+    fake.holdDescriptor(MULTI_ENDPOINT_LIGHT.nwkAddr, 1);
+    fake.announceDevice(MULTI_ENDPOINT_LIGHT);
+    ASSERT_TRUE(fake.waitForSent(ZnpSubsystem::ZDO, cmd::zdo::SIMPLE_DESC_REQ, 1));
+    fake.deviceLeft(MULTI_ENDPOINT_LIGHT);
+    fake.releaseDescriptors();
+
+    fake.announceDevice(MULTI_ENDPOINT_LIGHT);
+
+    EXPECT_TRUE(eventually([&] { return discoveredCount() == 1; }, 10s));
+}
+
+TEST_F(ZigbeeHandlerFlowTest, ReannouncingAfterRefusalsStillEndsPromptly) {
+    watchForPairingErrors();
+    handler->startDiscovery();
+    fake.failDescriptor(MULTI_ENDPOINT_LIGHT.nwkAddr, 1);
+    fake.failDescriptor(MULTI_ENDPOINT_LIGHT.nwkAddr, 11);
+
+    auto started = std::chrono::steady_clock::now();
+    fake.announceDevice(MULTI_ENDPOINT_LIGHT);
+    fake.announceDevice(MULTI_ENDPOINT_LIGHT);
+
+    ASSERT_TRUE(eventually([&] { return pairingFailed.load(); }));
+    EXPECT_LT(std::chrono::steady_clock::now() - started, 3s);
+}
+
+TEST_F(ZigbeeHandlerFlowTest, UnknownDeviceGetsNoReporting) {
+    auto device = pair(BASIC_ONLY);
+    ASSERT_NE(device, nullptr);
+
+    for (const auto& frame : airFrames(fake)) {
+        EXPECT_NE(frame.zclCommand, zcl::global_cmd::CONFIGURE_REPORTING);
+    }
 }
 
 TEST_F(ZigbeeHandlerFlowTest, PairingWorksAfterReinitializing) {
@@ -474,7 +594,7 @@ TEST_F(ZigbeeHandlerFlowTest, LeavingMarksDeviceOffline) {
 class ZigbeePairingTimeoutTest : public ZigbeeHandlerFlowTest {
 protected:
     void SetUp() override {
-        handlerConfig["pairingTimeoutMs"] = 300;
+        handlerConfig["pairingEndpointTimeoutMs"] = 300;
         ZigbeeHandlerFlowTest::SetUp();
     }
 };
@@ -488,54 +608,71 @@ TEST_F(ZigbeePairingTimeoutTest, UsesWhatArrivedWhenAnEndpointNeverAnswers) {
     EXPECT_EQ(device->type(), DeviceType::Dimmer);
 }
 
-TEST_F(ZigbeePairingTimeoutTest, NoDeviceWhenNoEndpointAnswers) {
-    std::atomic<bool> reportedError{false};
-    eventBus.subscribe("device.state", [&](const Event& event) {
-        if (static_cast<const DeviceStateEvent&>(event).property == "_pairing_error") {
-            reportedError = true;
-        }
-    });
+TEST_F(ZigbeePairingTimeoutTest, ReportsAFailureWhenNoEndpointAnswers) {
+    watchForPairingErrors();
     handler->startDiscovery();
     fake.holdDescriptor(MULTI_ENDPOINT_LIGHT.nwkAddr, 1);
     fake.holdDescriptor(MULTI_ENDPOINT_LIGHT.nwkAddr, 11);
 
     fake.announceDevice(MULTI_ENDPOINT_LIGHT);
 
-    ASSERT_TRUE(eventually([&] { return reportedError.load(); }));
+    ASSERT_TRUE(eventually([&] { return pairingFailed.load(); }));
     EXPECT_EQ(pendingCount(), 0u);
     EXPECT_EQ(discoveredCount(), 0u);
 }
 
-class ZigbeePairingSettleTest : public ZigbeeHandlerFlowTest {
+class ZigbeeEndpointListTimeoutTest : public ZigbeeHandlerFlowTest {
 protected:
     void SetUp() override {
-        handlerConfig["pairingSettleMs"] = 200;
+        handlerConfig["pairingTimeoutMs"] = 300;
+        handlerConfig["pairingEndpointTimeoutMs"] = 3000;
         ZigbeeHandlerFlowTest::SetUp();
     }
 };
 
-TEST_F(ZigbeePairingSettleTest, UnansweredEndpointOnlyWaitsForTheSettleTime) {
-    fake.holdDescriptor(MULTI_ENDPOINT_LIGHT.nwkAddr, 1);
+TEST_F(ZigbeeEndpointListTimeoutTest, ReportsAFailureWhenTheDeviceListsNoEndpoints) {
+    watchForPairingErrors();
+    handler->startDiscovery();
+    FakeZigbeeDevice silent{0x1111, 0x00124B0000001111ULL, {}};  // The fake doesn't know it
 
-    auto started = std::chrono::steady_clock::now();
-    auto device = pair(MULTI_ENDPOINT_LIGHT);
+    fake.announceDevice(silent);
 
-    ASSERT_NE(device, nullptr);
-    EXPECT_LT(std::chrono::steady_clock::now() - started, 5s);
+    EXPECT_TRUE(eventually([&] { return pairingFailed.load(); }));
 }
 
-class ZigbeeBadSettingTest : public ZigbeeHandlerFlowTest {
+TEST_F(ZigbeeEndpointListTimeoutTest, EachEndpointGetsItsOwnFullWait) {
+    // A slow answer well past pairingTimeoutMs still counts.
+    fake.holdDescriptor(MULTI_ENDPOINT_LIGHT.nwkAddr, 1);
+    fake.announceDevice(MULTI_ENDPOINT_LIGHT);
+    ASSERT_TRUE(fake.waitForSent(ZnpSubsystem::ZDO, cmd::zdo::SIMPLE_DESC_REQ, 1));
+
+    std::this_thread::sleep_for(1s);
+    fake.releaseDescriptors();
+
+    ASSERT_TRUE(eventually([&] { return discoveredCount() == 1; }, 10s));
+    auto info = handler->coordinator()->getDevice(MULTI_ENDPOINT_LIGHT.ieeeAddr);
+    ASSERT_TRUE(info.has_value());
+    EXPECT_EQ(info->inClusters.count(1), 1u);
+    EXPECT_EQ(info->inClusters.count(11), 1u);
+}
+
+class ZigbeeBadSettingTest : public ZigbeeHandlerFlowTest,
+                             public ::testing::WithParamInterface<nlohmann::json> {
 protected:
     void SetUp() override {
-        handlerConfig["pairingTimeoutMs"] = "soon";
-        handlerConfig["pairingSettleMs"] = -1;
+        handlerConfig["pairingTimeoutMs"] = GetParam();
+        handlerConfig["pairingEndpointTimeoutMs"] = GetParam();
         ZigbeeHandlerFlowTest::SetUp();
     }
 };
 
-TEST_F(ZigbeeBadSettingTest, InvalidSettingsFallBackToDefaults) {
+TEST_P(ZigbeeBadSettingTest, FallsBackToDefaults) {
     EXPECT_NE(pair(PLUG), nullptr);
 }
+
+INSTANTIATE_TEST_SUITE_P(InvalidValues, ZigbeeBadSettingTest,
+                         ::testing::Values(nlohmann::json("soon"), nlohmann::json(-1),
+                                           nlohmann::json(50), nlohmann::json(INT_MAX)));
 
 // ---- Commands --------------------------------------------------------------
 
