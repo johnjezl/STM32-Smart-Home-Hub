@@ -7,6 +7,7 @@
 
 #include <gtest/gtest.h>
 
+#include <smarthub/devices/types/SwitchDevice.hpp>
 #include <smarthub/automation/Automation.hpp>
 #include <smarthub/automation/AutomationManager.hpp>
 #include <smarthub/devices/DeviceManager.hpp>
@@ -232,6 +233,54 @@ TEST_F(AutomationManagerTest, AddAutomation) {
     auto automation = createTestAutomation();
     EXPECT_TRUE(automationManager->addAutomation(automation));
     EXPECT_EQ(automationManager->automationCount(), 1u);
+}
+
+TEST_F(AutomationManagerTest, ActionThatChangesADeviceDoesNotDeadlock) {
+    automationManager->initialize();
+    auto light = std::make_shared<SwitchDevice>("light_001", "Light");
+    deviceManager->addDevice(light);
+
+    // The change publishes an event back to the manager that's running this action.
+    auto automation = createTestAutomation();
+    ASSERT_TRUE(automationManager->addAutomation(automation));
+    ASSERT_TRUE(automationManager->triggerAutomation(automation.id));
+
+    EXPECT_EQ(light->getProperty("on"), true);
+}
+
+TEST_F(AutomationManagerTest, AutomationsTriggeringEachOtherStopAtTheDepthLimit) {
+    automationManager->initialize();
+    auto lamp = std::make_shared<SwitchDevice>("lamp", "Lamp");
+    deviceManager->addDevice(lamp);
+
+    auto makeAutomation = [](const std::string& id, bool value) {
+        Automation automation;
+        automation.id = id;
+        automation.name = id;
+        automation.enabled = true;
+
+        Trigger trigger;
+        trigger.type = TriggerType::DeviceState;
+        trigger.deviceId = "lamp";
+        trigger.property = "on";
+        automation.triggers.push_back(trigger);
+
+        Action action;
+        action.type = ActionType::SetDeviceState;
+        action.deviceId = "lamp";
+        action.property = "on";
+        action.value = value;
+        automation.actions.push_back(action);
+        return automation;
+    };
+
+    // Each change makes one of these change the lamp back.
+    ASSERT_TRUE(automationManager->addAutomation(makeAutomation("on", true)));
+    ASSERT_TRUE(automationManager->addAutomation(makeAutomation("off", false)));
+
+    ASSERT_TRUE(automationManager->triggerAutomation("on"));
+
+    EXPECT_GT(automationManager->getAutomation("off")->lastTriggeredAt, 0u);
 }
 
 TEST_F(AutomationManagerTest, AddMultipleAutomations) {

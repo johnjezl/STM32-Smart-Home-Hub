@@ -11,6 +11,7 @@
 
 #include <map>
 #include <mutex>
+#include <vector>
 #include <functional>
 #include <cstdint>
 
@@ -104,8 +105,13 @@ private:
                        CompareOp op,
                        const nlohmann::json& expected) const;
 
-    // Execution engine
-    void executeAutomation(AutomationPtr automation,
+    // Execution engine. Runs are copies, chosen under m_mutex and executed outside it.
+    struct PendingRun {
+        Automation automation;
+        std::string triggerInfo;
+    };
+    void executeAll(const std::vector<PendingRun>& runs);
+    void executeAutomation(const Automation& automation,
                            const std::string& triggerInfo);
     void executeAction(const Action& action);
 

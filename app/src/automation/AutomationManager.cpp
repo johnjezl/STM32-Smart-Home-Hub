@@ -124,63 +124,82 @@ void AutomationManager::onDeviceStateChanged(const std::string& deviceId,
                                               const std::string& property,
                                               const nlohmann::json& value,
                                               const nlohmann::json& previousValue) {
-    std::lock_guard<std::mutex> lock(m_mutex);
+    std::vector<PendingRun> runs;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
 
-    for (const auto& [id, automation] : m_automations) {
-        if (!automation->enabled) continue;
+        for (const auto& [id, automation] : m_automations) {
+            if (!automation->enabled) continue;
 
-        for (const auto& trigger : automation->triggers) {
-            if (trigger.type != TriggerType::DeviceState &&
-                trigger.type != TriggerType::SensorThreshold) {
-                continue;
-            }
+            for (const auto& trigger : automation->triggers) {
+                if (trigger.type != TriggerType::DeviceState &&
+                    trigger.type != TriggerType::SensorThreshold) {
+                    continue;
+                }
 
-            if (evaluateTrigger(trigger, deviceId, property, value, previousValue)) {
-                std::string triggerInfo = "DeviceState:" + deviceId + "." + property;
-                executeAutomation(automation, triggerInfo);
-                break;  // Only trigger once per automation
+                if (evaluateTrigger(trigger, deviceId, property, value, previousValue)) {
+                    runs.push_back({*automation, "DeviceState:" + deviceId + "." + property});
+                    break;  // Only trigger once per automation
+                }
             }
         }
     }
+    executeAll(runs);
 }
 
 void AutomationManager::checkTimeTriggers() {
-    std::lock_guard<std::mutex> lock(m_mutex);
+    std::vector<PendingRun> runs;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
 
-    for (const auto& [id, automation] : m_automations) {
-        if (!automation->enabled) continue;
+        for (const auto& [id, automation] : m_automations) {
+            if (!automation->enabled) continue;
 
-        for (const auto& trigger : automation->triggers) {
-            if (trigger.type == TriggerType::Time && evaluateTimeTrigger(trigger)) {
-                executeAutomation(automation, "Time");
-                break;
-            }
-        }
-    }
-}
-
-void AutomationManager::checkIntervalTriggers(uint64_t currentTimeMs) {
-    std::lock_guard<std::mutex> lock(m_mutex);
-
-    for (const auto& [id, automation] : m_automations) {
-        if (!automation->enabled) continue;
-
-        for (const auto& trigger : automation->triggers) {
-            if (trigger.type == TriggerType::TimeInterval && trigger.intervalMinutes > 0) {
-                uint64_t intervalMs = trigger.intervalMinutes * 60 * 1000;
-                uint64_t lastCheck = m_lastIntervalCheck[id];
-
-                if (lastCheck == 0) {
-                    // First check - initialize
-                    m_lastIntervalCheck[id] = currentTimeMs;
-                } else if (currentTimeMs - lastCheck >= intervalMs) {
-                    m_lastIntervalCheck[id] = currentTimeMs;
-                    executeAutomation(automation, "Interval:" +
-                                     std::to_string(trigger.intervalMinutes) + "min");
+            for (const auto& trigger : automation->triggers) {
+                if (trigger.type == TriggerType::Time && evaluateTimeTrigger(trigger)) {
+                    runs.push_back({*automation, "Time"});
                     break;
                 }
             }
         }
+    }
+    executeAll(runs);
+}
+
+void AutomationManager::checkIntervalTriggers(uint64_t currentTimeMs) {
+    std::vector<PendingRun> runs;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+
+        for (const auto& [id, automation] : m_automations) {
+            if (!automation->enabled) continue;
+
+            for (const auto& trigger : automation->triggers) {
+                if (trigger.type == TriggerType::TimeInterval && trigger.intervalMinutes > 0) {
+                    uint64_t intervalMs = trigger.intervalMinutes * 60 * 1000;
+                    uint64_t lastCheck = m_lastIntervalCheck[id];
+
+                    if (lastCheck == 0) {
+                        // First check - initialize
+                        m_lastIntervalCheck[id] = currentTimeMs;
+                    } else if (currentTimeMs - lastCheck >= intervalMs) {
+                        m_lastIntervalCheck[id] = currentTimeMs;
+                        runs.push_back({*automation, "Interval:" +
+                                        std::to_string(trigger.intervalMinutes) + "min"});
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    executeAll(runs);
+}
+
+void AutomationManager::executeAll(const std::vector<PendingRun>& runs) {
+    // Unlocked: actions can wait on devices, and changing one publishes an event that
+    // comes straight back to onDeviceStateChanged on this thread.
+    for (const auto& run : runs) {
+        executeAutomation(run.automation, run.triggerInfo);
     }
 }
 
@@ -313,28 +332,48 @@ bool AutomationManager::compareValues(const nlohmann::json& actual,
                                     : (actual.dump() != expected.dump());
 }
 
-void AutomationManager::executeAutomation(AutomationPtr automation,
+void AutomationManager::executeAutomation(const Automation& automation,
                                            const std::string& triggerInfo) {
-    if (!automation || !automation->enabled) return;
+    if (!automation.enabled) return;
+
+    // Actions can trigger other automations on this thread. Opposing ones would
+    // otherwise go on until the stack ran out.
+    thread_local int depth = 0;
+    constexpr int MAX_DEPTH = 8;
+    if (depth >= MAX_DEPTH) {
+        LOG_ERROR("Automation '%s' not run: automations are triggering each other in a loop",
+                  automation.name.c_str());
+        return;
+    }
+    ++depth;
+    struct LeaveDepth {
+        ~LeaveDepth() { --depth; }
+    } leaveDepth;
 
     // Check condition if present
-    if (automation->condition.has_value()) {
-        if (!evaluateCondition(*automation->condition)) {
+    if (automation.condition.has_value()) {
+        if (!evaluateCondition(*automation.condition)) {
             LOG_DEBUG("Automation '%s' condition not met, skipping",
-                     automation->name.c_str());
+                     automation.name.c_str());
             return;
         }
     }
 
     LOG_INFO("Executing automation: %s (trigger: %s)",
-             automation->name.c_str(), triggerInfo.c_str());
+             automation.name.c_str(), triggerInfo.c_str());
 
     // Update last triggered timestamp
-    automation->lastTriggeredAt = getCurrentTimestamp();
-    saveToDatabase(*automation);
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        auto stored = m_automations.find(automation.id);
+        if (stored != m_automations.end()) {
+            stored->second->lastTriggeredAt = getCurrentTimestamp();
+            saveToDatabase(*stored->second);
+        }
+    }
 
     // Execute actions sequentially
-    for (const auto& action : automation->actions) {
+    for (const auto& action : automation.actions) {
         if (action.type == ActionType::Delay) {
             std::this_thread::sleep_for(std::chrono::milliseconds(action.delayMs));
         } else {
@@ -461,14 +500,18 @@ bool AutomationManager::setEnabled(const std::string& id, bool enabled) {
 }
 
 bool AutomationManager::triggerAutomation(const std::string& id) {
-    std::lock_guard<std::mutex> lock(m_mutex);
+    std::vector<PendingRun> runs;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
 
-    auto it = m_automations.find(id);
-    if (it == m_automations.end()) {
-        return false;
+        auto it = m_automations.find(id);
+        if (it == m_automations.end()) {
+            return false;
+        }
+        runs.push_back({*it->second, "Manual"});
     }
 
-    executeAutomation(it->second, "Manual");
+    executeAll(runs);
     return true;
 }
 
