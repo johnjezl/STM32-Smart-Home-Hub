@@ -65,12 +65,13 @@ static std::vector<uint8_t> base64Decode(const std::string& encoded) {
     std::vector<uint8_t> result;
     result.reserve((encoded.size() * 3) / 4);
 
-    int val = 0, bits = -8;
+    uint32_t val = 0;
+    int bits = -8;
     for (char c : encoded) {
         if (c == '=') break;
         int d = decodeTable[static_cast<uint8_t>(c)];
         if (d < 0) continue;
-        val = (val << 6) | d;
+        val = (val << 6) | static_cast<uint32_t>(d);
         bits += 6;
         if (bits >= 0) {
             result.push_back(static_cast<uint8_t>((val >> bits) & 0xFF));
