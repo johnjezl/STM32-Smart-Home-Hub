@@ -112,3 +112,16 @@ Use emoji markers for task status:
 - ✓ Task completed    ← Don't use plain check symbol
 - Deferred: Task      ← Use ⏸️ emoji instead
 ```
+
+---
+
+## Pull Requests
+
+Every PR gets a code review **before** it merges, and fast-forwarding `main` counts as merging.
+
+1. Work on a branch, and get CI green on it.
+2. Run a code review of the branch.
+3. Address the findings, then review the combined changes again.
+4. Merge only after that, when the maintainer asks.
+
+Don't treat green CI as approval to merge.
