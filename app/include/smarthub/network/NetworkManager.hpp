@@ -23,7 +23,7 @@ namespace network {
 struct WifiNetwork {
     std::string ssid;
     std::string bssid;
-    int signalStrength = 0;    // 0-100 percentage
+    int signalStrength = 0;    // dBm, as reported by wpa_cli scan_results
     bool secured = false;       // Has encryption
     bool connected = false;     // Currently connected
     std::string security;       // "WPA2", "WPA3", "WEP", "Open"

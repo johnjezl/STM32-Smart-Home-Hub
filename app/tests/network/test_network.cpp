@@ -122,38 +122,38 @@ TEST(NetworkStatusTest, Connected) {
 // ============================================================================
 
 TEST(NetworkManagerStaticTest, SignalToIconIndexExcellent) {
-    // 80-100%: Excellent (level 4)
-    EXPECT_EQ(NetworkManager::signalToIconIndex(100), 4);
-    EXPECT_EQ(NetworkManager::signalToIconIndex(90), 4);
-    EXPECT_EQ(NetworkManager::signalToIconIndex(80), 4);
+    // -50 dBm or stronger: Excellent (level 4)
+    EXPECT_EQ(NetworkManager::signalToIconIndex(-30), 4);
+    EXPECT_EQ(NetworkManager::signalToIconIndex(-40), 4);
+    EXPECT_EQ(NetworkManager::signalToIconIndex(-50), 4);
 }
 
 TEST(NetworkManagerStaticTest, SignalToIconIndexGood) {
-    // 60-79%: Good (level 3)
-    EXPECT_EQ(NetworkManager::signalToIconIndex(79), 3);
-    EXPECT_EQ(NetworkManager::signalToIconIndex(70), 3);
-    EXPECT_EQ(NetworkManager::signalToIconIndex(60), 3);
+    // -51 to -60 dBm: Good (level 3)
+    EXPECT_EQ(NetworkManager::signalToIconIndex(-51), 3);
+    EXPECT_EQ(NetworkManager::signalToIconIndex(-55), 3);
+    EXPECT_EQ(NetworkManager::signalToIconIndex(-60), 3);
 }
 
 TEST(NetworkManagerStaticTest, SignalToIconIndexFair) {
-    // 40-59%: Fair (level 2)
-    EXPECT_EQ(NetworkManager::signalToIconIndex(59), 2);
-    EXPECT_EQ(NetworkManager::signalToIconIndex(50), 2);
-    EXPECT_EQ(NetworkManager::signalToIconIndex(40), 2);
+    // -61 to -70 dBm: Fair (level 2)
+    EXPECT_EQ(NetworkManager::signalToIconIndex(-61), 2);
+    EXPECT_EQ(NetworkManager::signalToIconIndex(-65), 2);
+    EXPECT_EQ(NetworkManager::signalToIconIndex(-70), 2);
 }
 
 TEST(NetworkManagerStaticTest, SignalToIconIndexWeak) {
-    // 20-39%: Weak (level 1)
-    EXPECT_EQ(NetworkManager::signalToIconIndex(39), 1);
-    EXPECT_EQ(NetworkManager::signalToIconIndex(30), 1);
-    EXPECT_EQ(NetworkManager::signalToIconIndex(20), 1);
+    // -71 to -80 dBm: Weak (level 1)
+    EXPECT_EQ(NetworkManager::signalToIconIndex(-71), 1);
+    EXPECT_EQ(NetworkManager::signalToIconIndex(-75), 1);
+    EXPECT_EQ(NetworkManager::signalToIconIndex(-80), 1);
 }
 
 TEST(NetworkManagerStaticTest, SignalToIconIndexVeryWeak) {
-    // 0-19%: Very weak (level 0)
-    EXPECT_EQ(NetworkManager::signalToIconIndex(19), 0);
-    EXPECT_EQ(NetworkManager::signalToIconIndex(10), 0);
-    EXPECT_EQ(NetworkManager::signalToIconIndex(0), 0);
+    // Below -80 dBm: Very weak (level 0), including the -100 parse-failure value
+    EXPECT_EQ(NetworkManager::signalToIconIndex(-81), 0);
+    EXPECT_EQ(NetworkManager::signalToIconIndex(-90), 0);
+    EXPECT_EQ(NetworkManager::signalToIconIndex(-100), 0);
 }
 
 TEST(NetworkManagerStaticTest, DbmToPercentStrong) {
@@ -403,17 +403,17 @@ TEST(ConnectionStateTest, AllStatesDistinct) {
 
 TEST(NetworkManagerStaticTest, SignalToIconBoundaries) {
     // Test exact boundaries
-    EXPECT_EQ(NetworkManager::signalToIconIndex(79), 3);  // Just below 80
-    EXPECT_EQ(NetworkManager::signalToIconIndex(80), 4);  // Exactly 80
+    EXPECT_EQ(NetworkManager::signalToIconIndex(-51), 3);  // Just below -50
+    EXPECT_EQ(NetworkManager::signalToIconIndex(-50), 4);  // Exactly -50
 
-    EXPECT_EQ(NetworkManager::signalToIconIndex(59), 2);  // Just below 60
-    EXPECT_EQ(NetworkManager::signalToIconIndex(60), 3);  // Exactly 60
+    EXPECT_EQ(NetworkManager::signalToIconIndex(-61), 2);  // Just below -60
+    EXPECT_EQ(NetworkManager::signalToIconIndex(-60), 3);  // Exactly -60
 
-    EXPECT_EQ(NetworkManager::signalToIconIndex(39), 1);  // Just below 40
-    EXPECT_EQ(NetworkManager::signalToIconIndex(40), 2);  // Exactly 40
+    EXPECT_EQ(NetworkManager::signalToIconIndex(-71), 1);  // Just below -70
+    EXPECT_EQ(NetworkManager::signalToIconIndex(-70), 2);  // Exactly -70
 
-    EXPECT_EQ(NetworkManager::signalToIconIndex(19), 0);  // Just below 20
-    EXPECT_EQ(NetworkManager::signalToIconIndex(20), 1);  // Exactly 20
+    EXPECT_EQ(NetworkManager::signalToIconIndex(-81), 0);  // Just below -80
+    EXPECT_EQ(NetworkManager::signalToIconIndex(-80), 1);  // Exactly -80
 }
 
 TEST(NetworkManagerStaticTest, DbmToPercentBoundaries) {
