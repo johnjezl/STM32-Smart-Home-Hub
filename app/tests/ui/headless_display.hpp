@@ -30,8 +30,8 @@ void finishTransitions();
 /** Number of times LVGL has flushed pixels since startup. */
 uint32_t flushCount();
 
-/** Number of objects under root (inclusive) that are labels with this exact text. */
-int countLabels(_lv_obj_t* root, const std::string& text);
+/** Number of labels and text areas under root (inclusive) with this exact text. */
+int countText(_lv_obj_t* root, const std::string& text);
 
 /** Number of distinct colours in the last rendered frame. A blank screen has very few. */
 size_t frameColorCount();

@@ -17,6 +17,7 @@ std::vector<lv_color_t> s_drawBuffer(DISPLAY_WIDTH * DISPLAY_HEIGHT / 10);
 lv_disp_draw_buf_t s_drawBufDesc;
 lv_disp_drv_t s_driver;
 uint32_t s_flushCount = 0;
+lv_obj_t* s_baseScreen = nullptr;
 
 void flush(lv_disp_drv_t* driver, const lv_area_t* area, lv_color_t* pixels) {
     const int width = lv_area_get_width(area);
@@ -28,24 +29,20 @@ void flush(lv_disp_drv_t* driver, const lv_area_t* area, lv_color_t* pixels) {
     lv_disp_flush_ready(driver);
 }
 
-// A test can end mid-transition with its screens already deleted. Clear what
-// LVGL still holds so the next test starts clean.
+// Put LVGL back to how it started. The original screen must stay: LVGL's theme
+// code treats the first screen in its list as the active one, and deleting it
+// would put the top layer there, turning that layer opaque over everything.
 class ResetLvglBetweenTests : public ::testing::EmptyTestEventListener {
 public:
     void OnTestEnd(const ::testing::TestInfo&) override {
         lv_anim_del_all();
+        lv_scr_load(s_baseScreen);
 
         lv_disp_t* display = lv_disp_get_default();
-        display->scr_to_load = nullptr;
-        display->prev_scr = nullptr;
-        display->del_prev = 0;
-
-        // Set directly: lv_scr_load can't run once the active screen is deleted.
-        lv_obj_t* blank = lv_obj_create(nullptr);
-        display->act_scr = blank;
         for (uint32_t i = display->screen_cnt; i-- > 0;) {
             lv_obj_t* screen = display->screens[i];
-            if (screen != blank && screen != display->top_layer && screen != display->sys_layer) {
+            if (screen != s_baseScreen && screen != display->top_layer &&
+                screen != display->sys_layer) {
                 lv_obj_del(screen);
             }
         }
@@ -65,6 +62,7 @@ public:
         s_driver.flush_cb = flush;
         s_driver.draw_buf = &s_drawBufDesc;
         lv_disp_drv_register(&s_driver);
+        s_baseScreen = lv_scr_act();
 
         ::testing::UnitTest::GetInstance()->listeners().Append(new ResetLvglBetweenTests);
     }
@@ -98,13 +96,16 @@ uint32_t flushCount() {
     return s_flushCount;
 }
 
-int countLabels(lv_obj_t* root, const std::string& text) {
+int countText(lv_obj_t* root, const std::string& text) {
     int count = 0;
     if (lv_obj_check_type(root, &lv_label_class) && text == lv_label_get_text(root)) {
         ++count;
     }
+    if (lv_obj_check_type(root, &lv_textarea_class) && text == lv_textarea_get_text(root)) {
+        ++count;
+    }
     for (uint32_t i = 0; i < lv_obj_get_child_cnt(root); ++i) {
-        count += countLabels(lv_obj_get_child(root, static_cast<int32_t>(i)), text);
+        count += countText(lv_obj_get_child(root, static_cast<int32_t>(i)), text);
     }
     return count;
 }

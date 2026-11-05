@@ -10,6 +10,7 @@
 
 #include <lvgl.h>
 
+#include <smarthub/automation/Automation.hpp>
 #include <smarthub/automation/AutomationManager.hpp>
 #include <smarthub/core/EventBus.hpp>
 #include <smarthub/database/Database.hpp>
@@ -67,6 +68,7 @@ protected:
         deviceManager = std::make_unique<DeviceManager>(*eventBus, *database);
         deviceManager->initialize();
         automationManager = std::make_unique<AutomationManager>(*eventBus, *database, *deviceManager);
+        automationManager->initialize();
         networkManager = std::make_unique<network::NetworkManager>();
         themeManager = std::make_unique<ThemeManager>();
         displayManager = std::make_unique<DisplayManager>();
@@ -107,6 +109,28 @@ protected:
         motion = std::make_shared<MotionSensor>("motion", "Hall Motion", "local");
         motion->setRoom("living");
         deviceManager->addDevice(motion);
+
+        Automation automation;
+        automation.id = "evening";
+        automation.name = "Evening Lights";
+        automation.description = "Lights on at dusk";
+        automation.enabled = true;
+
+        Trigger trigger;
+        trigger.type = TriggerType::DeviceState;
+        trigger.deviceId = "motion";
+        trigger.property = "motion";
+        trigger.toValue = true;
+        automation.triggers.push_back(trigger);
+
+        Action action;
+        action.type = ActionType::SetDeviceState;
+        action.deviceId = "lamp";
+        action.property = "on";
+        action.value = true;
+        automation.actions.push_back(action);
+
+        automationManager->addAutomation(automation);
     }
 
     /** Register a screen, show it and draw it. Returns its container. */
@@ -123,6 +147,7 @@ protected:
         EXPECT_GT(test::frameColorCount(), MIN_COLORS) << name << " rendered blank";
 
         if (const char* dir = std::getenv("SMARTHUB_UI_FRAME_DIR")) {
+            fs::create_directories(dir);
             EXPECT_TRUE(test::saveFrame(std::string(dir) + "/" + name + ".ppm"));
         }
         return raw->container();
@@ -147,14 +172,14 @@ TEST_F(ScreenRenderTest, Dashboard) {
     auto* root = showAndRender("dashboard", std::make_unique<DashboardScreen>(
         *screenManager, *themeManager, *deviceManager));
 
-    EXPECT_GE(test::countLabels(root, "Living Room"), 1);
+    EXPECT_GE(test::countText(root, "Living Room"), 1);
 }
 
 TEST_F(ScreenRenderTest, DeviceList) {
     auto* root = showAndRender("devices", std::make_unique<DeviceListScreen>(
         *screenManager, *themeManager, *deviceManager));
 
-    EXPECT_GE(test::countLabels(root, "Reading Lamp"), 1);
+    EXPECT_GE(test::countText(root, "Reading Lamp"), 1);
 }
 
 TEST_F(ScreenRenderTest, RoomDetail) {
@@ -164,8 +189,8 @@ TEST_F(ScreenRenderTest, RoomDetail) {
             static_cast<RoomDetailScreen&>(screen).setRoom("living", "Living Room");
         });
 
-    EXPECT_GE(test::countLabels(root, "Living Room"), 1);
-    EXPECT_GE(test::countLabels(root, "Reading Lamp"), 1);
+    EXPECT_GE(test::countText(root, "Living Room"), 1);
+    EXPECT_GE(test::countText(root, "Reading Lamp"), 1);
 }
 
 TEST_F(ScreenRenderTest, LightControl) {
@@ -173,14 +198,14 @@ TEST_F(ScreenRenderTest, LightControl) {
         *screenManager, *themeManager, *deviceManager),
         [](Screen& screen) { static_cast<LightControlScreen&>(screen).setDeviceId("lamp"); });
 
-    EXPECT_GE(test::countLabels(root, "Reading Lamp"), 1);
+    EXPECT_GE(test::countText(root, "Reading Lamp"), 1);
 }
 
 TEST_F(ScreenRenderTest, SensorList) {
     auto* root = showAndRender("sensors", std::make_unique<SensorListScreen>(
         *screenManager, *themeManager, *deviceManager));
 
-    EXPECT_GE(test::countLabels(root, "Hall Sensor"), 1);
+    EXPECT_GE(test::countText(root, "Hall Sensor"), 1);
 }
 
 TEST_F(ScreenRenderTest, SensorHistory) {
@@ -188,67 +213,93 @@ TEST_F(ScreenRenderTest, SensorHistory) {
         *screenManager, *themeManager, *deviceManager),
         [](Screen& screen) { static_cast<SensorHistoryScreen&>(screen).setSensorId("thermo"); });
 
-    EXPECT_GE(test::countLabels(root, "Hall Sensor"), 1);
+    EXPECT_GE(test::countText(root, "Hall Sensor"), 1);
 }
 
 TEST_F(ScreenRenderTest, EditDevice) {
-    showAndRender("edit_device", std::make_unique<EditDeviceScreen>(
+    auto* root = showAndRender("edit_device", std::make_unique<EditDeviceScreen>(
         *screenManager, *themeManager, *deviceManager),
         [](Screen& screen) { static_cast<EditDeviceScreen&>(screen).setDeviceId("lamp"); });
+
+    EXPECT_GE(test::countText(root, "Edit Device"), 1);
+    EXPECT_GE(test::countText(root, "Reading Lamp"), 1);
 }
 
 TEST_F(ScreenRenderTest, AddDevice) {
-    showAndRender("add_device", std::make_unique<AddDeviceScreen>(
+    auto* root = showAndRender("add_device", std::make_unique<AddDeviceScreen>(
         *screenManager, *themeManager, *deviceManager, *eventBus));
+
+    EXPECT_GE(test::countText(root, "Add Device (1/4)"), 1);
+    EXPECT_GE(test::countText(root, "Switch"), 1);
 }
 
 TEST_F(ScreenRenderTest, Notifications) {
-    showAndRender("notifications", std::make_unique<NotificationScreen>(
+    auto* root = showAndRender("notifications", std::make_unique<NotificationScreen>(
         *screenManager, *themeManager, *deviceManager));
+
+    EXPECT_GE(test::countText(root, "Notifications"), 1);
 }
 
 TEST_F(ScreenRenderTest, Settings) {
-    showAndRender("settings", std::make_unique<SettingsScreen>(
+    auto* root = showAndRender("settings", std::make_unique<SettingsScreen>(
         *screenManager, *themeManager, *deviceManager));
+
+    EXPECT_GE(test::countText(root, "Settings"), 1);
+    EXPECT_GE(test::countText(root, "Security"), 1);
 }
 
 TEST_F(ScreenRenderTest, DisplaySettings) {
-    showAndRender("display_settings", std::make_unique<DisplaySettingsScreen>(
+    auto* root = showAndRender("display_settings", std::make_unique<DisplaySettingsScreen>(
         *screenManager, *themeManager, *displayManager));
+
+    EXPECT_GE(test::countText(root, "Display Settings"), 1);
 }
 
 TEST_F(ScreenRenderTest, SecuritySettings) {
-    showAndRender("security_settings", std::make_unique<SecuritySettingsScreen>(
+    auto* root = showAndRender("security_settings", std::make_unique<SecuritySettingsScreen>(
         *screenManager, *themeManager));
+
+    EXPECT_GE(test::countText(root, "Security"), 1);
 }
 
 TEST_F(ScreenRenderTest, WifiSetup) {
-    showAndRender("wifi_setup", std::make_unique<WifiSetupScreen>(
+    auto* root = showAndRender("wifi_setup", std::make_unique<WifiSetupScreen>(
         *screenManager, *themeManager, *networkManager));
+
+    EXPECT_GE(test::countText(root, "WiFi Setup"), 1);
 }
 
 TEST_F(ScreenRenderTest, About) {
-    showAndRender("about", std::make_unique<AboutScreen>(*screenManager, *themeManager));
+    auto* root = showAndRender("about", std::make_unique<AboutScreen>(*screenManager, *themeManager));
+
+    EXPECT_GE(test::countText(root, "About"), 1);
 }
 
 TEST_F(ScreenRenderTest, AutomationList) {
-    showAndRender("automations", std::make_unique<AutomationListScreen>(
+    auto* root = showAndRender("automations", std::make_unique<AutomationListScreen>(
         *screenManager, *themeManager, *automationManager));
+
+    EXPECT_GE(test::countText(root, "Automations"), 1);
+    EXPECT_GE(test::countText(root, "Evening Lights"), 1);
 }
 
 TEST_F(ScreenRenderTest, AddAutomation) {
-    showAndRender("add_automation", std::make_unique<AddAutomationScreen>(
+    auto* root = showAndRender("add_automation", std::make_unique<AddAutomationScreen>(
         *screenManager, *themeManager, *automationManager, *deviceManager));
+
+    EXPECT_GE(test::countText(root, "Add Automation (Step 1/4)"), 1);
 }
 
 TEST_F(ScreenRenderTest, EditAutomation) {
-    showAndRender("edit_automation", std::make_unique<EditAutomationScreen>(
-        *screenManager, *themeManager, *automationManager));
+    auto* root = showAndRender("edit_automation", std::make_unique<EditAutomationScreen>(
+        *screenManager, *themeManager, *automationManager),
+        [](Screen& screen) { static_cast<EditAutomationScreen&>(screen).setAutomationId("evening"); });
+
+    EXPECT_GE(test::countText(root, "Edit Automation"), 1);
+    EXPECT_GE(test::countText(root, "Evening Lights"), 1);
 }
 
-// Issue #28: re-applying the theme leaves every screen flat, for the rest of the
-// process. While this is broken it must stay disabled or later tests fail too.
-TEST_F(ScreenRenderTest, DISABLED_ThemeToggleKeepsScreensDrawing) {
+TEST_F(ScreenRenderTest, ThemeToggleKeepsScreensDrawing) {
     themeManager->toggle();
     themeManager->toggle();
 
@@ -264,8 +315,10 @@ TEST_F(ScreenRenderTest, ScreenSurvivesShowHideAndUpdates) {
         EXPECT_TRUE(screenManager->showScreen("dashboard", TransitionType::None, false));
         screenManager->update(16);
         test::render();
+        EXPECT_GT(test::frameColorCount(), MIN_COLORS);
         EXPECT_TRUE(screenManager->showScreen("about", TransitionType::None, false));
         screenManager->update(16);
         test::render();
+        EXPECT_GT(test::frameColorCount(), MIN_COLORS);
     }
 }

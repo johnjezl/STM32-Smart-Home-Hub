@@ -223,7 +223,7 @@ if(GTEST_AVAILABLE)
         target_link_libraries(test_ui PRIVATE smarthub_ui GTest::gtest GTest::gtest_main)
         add_test(NAME UI COMMAND test_ui)
 
-        # In its own process, so no other test can affect what gets drawn
+        # Quick way to see every screen; set SMARTHUB_UI_FRAME_DIR to save them
         add_executable(test_ui_render ui/test_screens_render.cpp ui/headless_display.cpp)
         target_link_libraries(test_ui_render PRIVATE smarthub_ui GTest::gtest GTest::gtest_main)
         add_test(NAME UIRender COMMAND test_ui_render)
@@ -297,7 +297,8 @@ if(GTEST_AVAILABLE)
 
     if(SMARTHUB_ENABLE_LVGL)
         target_link_libraries(smarthub_tests PRIVATE smarthub_ui)
-        target_sources(smarthub_tests PRIVATE ui/headless_display.cpp)
+        # Includes the render tests, so they also run after every other UI test
+        target_sources(smarthub_tests PRIVATE ui/headless_display.cpp ui/test_screens_render.cpp)
     else()
         # ThemeManager, DisplayManager, and AnimationManager work without LVGL
         target_sources(smarthub_tests PRIVATE

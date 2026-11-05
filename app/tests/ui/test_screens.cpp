@@ -39,6 +39,12 @@ using namespace smarthub::ui;
 
 class ScreenTest : public ::testing::Test {
 protected:
+    /** Navigation takes effect immediately, unless a test sets a duration itself. */
+    void createScreenManager() {
+        screenManager = std::make_unique<ScreenManager>(*uiManager);
+        screenManager->setTransitionDuration(0);
+    }
+
     void SetUp() override {
         testDbPath = "/tmp/screen_test_" + std::to_string(getpid()) + ".db";
 
@@ -88,8 +94,7 @@ protected:
 // ============================================================================
 
 TEST_F(ScreenTest, DashboardScreenRegistration) {
-    screenManager = std::make_unique<ScreenManager>(*uiManager);
-    screenManager->setTransitionDuration(0);
+    createScreenManager();
 
     auto dashboard = std::make_unique<DashboardScreen>(
         *screenManager, *themeManager, *deviceManager);
@@ -101,8 +106,7 @@ TEST_F(ScreenTest, DashboardScreenRegistration) {
 }
 
 TEST_F(ScreenTest, DashboardScreenNavigation) {
-    screenManager = std::make_unique<ScreenManager>(*uiManager);
-    screenManager->setTransitionDuration(0);
+    createScreenManager();
 
     auto dashboard = std::make_unique<DashboardScreen>(
         *screenManager, *themeManager, *deviceManager);
@@ -120,8 +124,7 @@ TEST_F(ScreenTest, DashboardScreenNavigation) {
 // ============================================================================
 
 TEST_F(ScreenTest, DeviceListScreenRegistration) {
-    screenManager = std::make_unique<ScreenManager>(*uiManager);
-    screenManager->setTransitionDuration(0);
+    createScreenManager();
 
     auto deviceList = std::make_unique<DeviceListScreen>(
         *screenManager, *themeManager, *deviceManager);
@@ -133,8 +136,7 @@ TEST_F(ScreenTest, DeviceListScreenRegistration) {
 }
 
 TEST_F(ScreenTest, DeviceListScreenNavigation) {
-    screenManager = std::make_unique<ScreenManager>(*uiManager);
-    screenManager->setTransitionDuration(0);
+    createScreenManager();
 
     auto dashboard = std::make_unique<DashboardScreen>(
         *screenManager, *themeManager, *deviceManager);
@@ -157,8 +159,7 @@ TEST_F(ScreenTest, DeviceListScreenNavigation) {
 // ============================================================================
 
 TEST_F(ScreenTest, LightControlScreenRegistration) {
-    screenManager = std::make_unique<ScreenManager>(*uiManager);
-    screenManager->setTransitionDuration(0);
+    createScreenManager();
 
     auto lightControl = std::make_unique<LightControlScreen>(
         *screenManager, *themeManager, *deviceManager);
@@ -170,8 +171,7 @@ TEST_F(ScreenTest, LightControlScreenRegistration) {
 }
 
 TEST_F(ScreenTest, LightControlScreenDeviceId) {
-    screenManager = std::make_unique<ScreenManager>(*uiManager);
-    screenManager->setTransitionDuration(0);
+    createScreenManager();
 
     auto lightControl = std::make_unique<LightControlScreen>(
         *screenManager, *themeManager, *deviceManager);
@@ -184,8 +184,7 @@ TEST_F(ScreenTest, LightControlScreenDeviceId) {
 }
 
 TEST_F(ScreenTest, LightControlScreenBackNavigation) {
-    screenManager = std::make_unique<ScreenManager>(*uiManager);
-    screenManager->setTransitionDuration(0);
+    createScreenManager();
 
     auto deviceList = std::make_unique<DeviceListScreen>(
         *screenManager, *themeManager, *deviceManager);
@@ -211,8 +210,7 @@ TEST_F(ScreenTest, LightControlScreenBackNavigation) {
 // ============================================================================
 
 TEST_F(ScreenTest, SensorListScreenRegistration) {
-    screenManager = std::make_unique<ScreenManager>(*uiManager);
-    screenManager->setTransitionDuration(0);
+    createScreenManager();
 
     auto sensorList = std::make_unique<SensorListScreen>(
         *screenManager, *themeManager, *deviceManager);
@@ -224,8 +222,7 @@ TEST_F(ScreenTest, SensorListScreenRegistration) {
 }
 
 TEST_F(ScreenTest, SensorListScreenNavigation) {
-    screenManager = std::make_unique<ScreenManager>(*uiManager);
-    screenManager->setTransitionDuration(0);
+    createScreenManager();
 
     auto dashboard = std::make_unique<DashboardScreen>(
         *screenManager, *themeManager, *deviceManager);
@@ -247,8 +244,7 @@ TEST_F(ScreenTest, SensorListScreenNavigation) {
 // ============================================================================
 
 TEST_F(ScreenTest, SensorHistoryScreenRegistration) {
-    screenManager = std::make_unique<ScreenManager>(*uiManager);
-    screenManager->setTransitionDuration(0);
+    createScreenManager();
 
     auto sensorHistory = std::make_unique<SensorHistoryScreen>(
         *screenManager, *themeManager, *deviceManager);
@@ -260,8 +256,7 @@ TEST_F(ScreenTest, SensorHistoryScreenRegistration) {
 }
 
 TEST_F(ScreenTest, SensorHistoryScreenSensorId) {
-    screenManager = std::make_unique<ScreenManager>(*uiManager);
-    screenManager->setTransitionDuration(0);
+    createScreenManager();
 
     auto sensorHistory = std::make_unique<SensorHistoryScreen>(
         *screenManager, *themeManager, *deviceManager);
@@ -275,8 +270,7 @@ TEST_F(ScreenTest, SensorHistoryScreenSensorId) {
 }
 
 TEST_F(ScreenTest, SensorHistoryScreenNavigation) {
-    screenManager = std::make_unique<ScreenManager>(*uiManager);
-    screenManager->setTransitionDuration(0);
+    createScreenManager();
 
     auto sensorList = std::make_unique<SensorListScreen>(
         *screenManager, *themeManager, *deviceManager);
@@ -302,8 +296,7 @@ TEST_F(ScreenTest, SensorHistoryScreenNavigation) {
 }
 
 TEST_F(ScreenTest, SensorHistoryScreenUpdateInterval) {
-    screenManager = std::make_unique<ScreenManager>(*uiManager);
-    screenManager->setTransitionDuration(0);
+    createScreenManager();
 
     auto sensorHistory = std::make_unique<SensorHistoryScreen>(
         *screenManager, *themeManager, *deviceManager);
@@ -320,8 +313,7 @@ TEST_F(ScreenTest, SensorHistoryScreenUpdateInterval) {
 }
 
 TEST_F(ScreenTest, SensorHistoryScreenSensorIdPersistence) {
-    screenManager = std::make_unique<ScreenManager>(*uiManager);
-    screenManager->setTransitionDuration(0);
+    createScreenManager();
 
     auto sensorList = std::make_unique<SensorListScreen>(
         *screenManager, *themeManager, *deviceManager);
@@ -348,8 +340,7 @@ TEST_F(ScreenTest, SensorHistoryScreenSensorIdPersistence) {
 }
 
 TEST_F(ScreenTest, SensorHistoryScreenMultipleSensors) {
-    screenManager = std::make_unique<ScreenManager>(*uiManager);
-    screenManager->setTransitionDuration(0);
+    createScreenManager();
 
     auto sensorHistory = std::make_unique<SensorHistoryScreen>(
         *screenManager, *themeManager, *deviceManager);
@@ -379,8 +370,7 @@ TEST_F(ScreenTest, SensorHistoryScreenMultipleSensors) {
 // ============================================================================
 
 TEST_F(ScreenTest, FullNavigationFlow) {
-    screenManager = std::make_unique<ScreenManager>(*uiManager);
-    screenManager->setTransitionDuration(0);
+    createScreenManager();
 
     // Register all screens
     auto dashboard = std::make_unique<DashboardScreen>(
@@ -435,8 +425,7 @@ TEST_F(ScreenTest, FullNavigationFlow) {
 }
 
 TEST_F(ScreenTest, FullNavigationFlowWithSensorHistory) {
-    screenManager = std::make_unique<ScreenManager>(*uiManager);
-    screenManager->setTransitionDuration(0);
+    createScreenManager();
 
     // Register all screens including sensor history
     auto dashboard = std::make_unique<DashboardScreen>(
@@ -494,8 +483,7 @@ TEST_F(ScreenTest, FullNavigationFlowWithSensorHistory) {
 }
 
 TEST_F(ScreenTest, TabNavigation) {
-    screenManager = std::make_unique<ScreenManager>(*uiManager);
-    screenManager->setTransitionDuration(0);
+    createScreenManager();
 
     // Register screens for tab navigation
     auto dashboard = std::make_unique<DashboardScreen>(
@@ -532,8 +520,7 @@ TEST_F(ScreenTest, TabNavigation) {
 }
 
 TEST_F(ScreenTest, CompleteAppNavigationFlow) {
-    screenManager = std::make_unique<ScreenManager>(*uiManager);
-    screenManager->setTransitionDuration(0);
+    createScreenManager();
 
     // Register ALL screens used in the app
     auto dashboard = std::make_unique<DashboardScreen>(
@@ -650,8 +637,7 @@ TEST_F(ScreenTest, CompleteAppNavigationFlow) {
 // ============================================================================
 
 TEST_F(ScreenTest, ScreenUpdateCalled) {
-    screenManager = std::make_unique<ScreenManager>(*uiManager);
-    screenManager->setTransitionDuration(0);
+    createScreenManager();
 
     auto dashboard = std::make_unique<DashboardScreen>(
         *screenManager, *themeManager, *deviceManager);
@@ -668,8 +654,7 @@ TEST_F(ScreenTest, ScreenUpdateCalled) {
 }
 
 TEST_F(ScreenTest, MultipleScreenUpdates) {
-    screenManager = std::make_unique<ScreenManager>(*uiManager);
-    screenManager->setTransitionDuration(0);
+    createScreenManager();
 
     auto sensorList = std::make_unique<SensorListScreen>(
         *screenManager, *themeManager, *deviceManager);
@@ -691,8 +676,7 @@ TEST_F(ScreenTest, MultipleScreenUpdates) {
 // ============================================================================
 
 TEST_F(ScreenTest, WifiSetupScreenRegistration) {
-    screenManager = std::make_unique<ScreenManager>(*uiManager);
-    screenManager->setTransitionDuration(0);
+    createScreenManager();
 
     auto wifiSetup = std::make_unique<WifiSetupScreen>(
         *screenManager, *themeManager, *networkManager);
@@ -704,8 +688,7 @@ TEST_F(ScreenTest, WifiSetupScreenRegistration) {
 }
 
 TEST_F(ScreenTest, WifiSetupScreenNavigation) {
-    screenManager = std::make_unique<ScreenManager>(*uiManager);
-    screenManager->setTransitionDuration(0);
+    createScreenManager();
 
     auto dashboard = std::make_unique<DashboardScreen>(
         *screenManager, *themeManager, *deviceManager);
@@ -730,8 +713,7 @@ TEST_F(ScreenTest, WifiSetupScreenNavigation) {
 }
 
 TEST_F(ScreenTest, WifiSetupScreenUpdate) {
-    screenManager = std::make_unique<ScreenManager>(*uiManager);
-    screenManager->setTransitionDuration(0);
+    createScreenManager();
 
     auto wifiSetup = std::make_unique<WifiSetupScreen>(
         *screenManager, *themeManager, *networkManager);
@@ -748,8 +730,7 @@ TEST_F(ScreenTest, WifiSetupScreenUpdate) {
 }
 
 TEST_F(ScreenTest, WifiSetupScreenFromSettings) {
-    screenManager = std::make_unique<ScreenManager>(*uiManager);
-    screenManager->setTransitionDuration(0);
+    createScreenManager();
 
     auto dashboard = std::make_unique<DashboardScreen>(
         *screenManager, *themeManager, *deviceManager);
@@ -781,8 +762,7 @@ TEST_F(ScreenTest, WifiSetupScreenFromSettings) {
 }
 
 TEST_F(ScreenTest, WifiSetupScreenName) {
-    screenManager = std::make_unique<ScreenManager>(*uiManager);
-    screenManager->setTransitionDuration(0);
+    createScreenManager();
 
     auto wifiSetup = std::make_unique<WifiSetupScreen>(
         *screenManager, *themeManager, *networkManager);
@@ -791,8 +771,7 @@ TEST_F(ScreenTest, WifiSetupScreenName) {
 }
 
 TEST_F(ScreenTest, WifiSetupScreenAutoRefresh) {
-    screenManager = std::make_unique<ScreenManager>(*uiManager);
-    screenManager->setTransitionDuration(0);
+    createScreenManager();
 
     auto wifiSetup = std::make_unique<WifiSetupScreen>(
         *screenManager, *themeManager, *networkManager);
@@ -809,8 +788,7 @@ TEST_F(ScreenTest, WifiSetupScreenAutoRefresh) {
 }
 
 TEST_F(ScreenTest, WifiSetupScreenMultipleShowHide) {
-    screenManager = std::make_unique<ScreenManager>(*uiManager);
-    screenManager->setTransitionDuration(0);
+    createScreenManager();
 
     auto dashboard = std::make_unique<DashboardScreen>(
         *screenManager, *themeManager, *deviceManager);
@@ -834,8 +812,7 @@ TEST_F(ScreenTest, WifiSetupScreenMultipleShowHide) {
 
 TEST_F(ScreenTest, WifiSetupWithNetworkManagerNotInitialized) {
     // NetworkManager not initialized - screen should still work
-    screenManager = std::make_unique<ScreenManager>(*uiManager);
-    screenManager->setTransitionDuration(0);
+    createScreenManager();
 
     auto wifiSetup = std::make_unique<WifiSetupScreen>(
         *screenManager, *themeManager, *networkManager);
@@ -902,8 +879,7 @@ TEST(DeviceTypeTest, LightTypes) {
 // ============================================================================
 
 TEST_F(ScreenTest, SettingsScreenRegistration) {
-    screenManager = std::make_unique<ScreenManager>(*uiManager);
-    screenManager->setTransitionDuration(0);
+    createScreenManager();
 
     auto settings = std::make_unique<SettingsScreen>(
         *screenManager, *themeManager, *deviceManager);
@@ -915,8 +891,7 @@ TEST_F(ScreenTest, SettingsScreenRegistration) {
 }
 
 TEST_F(ScreenTest, SettingsScreenNavigation) {
-    screenManager = std::make_unique<ScreenManager>(*uiManager);
-    screenManager->setTransitionDuration(0);
+    createScreenManager();
 
     auto dashboard = std::make_unique<DashboardScreen>(
         *screenManager, *themeManager, *deviceManager);
@@ -939,8 +914,7 @@ TEST_F(ScreenTest, SettingsScreenNavigation) {
 }
 
 TEST_F(ScreenTest, SettingsScreenUpdate) {
-    screenManager = std::make_unique<ScreenManager>(*uiManager);
-    screenManager->setTransitionDuration(0);
+    createScreenManager();
 
     auto settings = std::make_unique<SettingsScreen>(
         *screenManager, *themeManager, *deviceManager);
@@ -961,8 +935,7 @@ TEST_F(ScreenTest, SettingsScreenUpdate) {
 // ============================================================================
 
 TEST_F(ScreenTest, DisplaySettingsScreenRegistration) {
-    screenManager = std::make_unique<ScreenManager>(*uiManager);
-    screenManager->setTransitionDuration(0);
+    createScreenManager();
 
     DisplayManager displayManager;
     displayManager.initialize();
@@ -977,8 +950,7 @@ TEST_F(ScreenTest, DisplaySettingsScreenRegistration) {
 }
 
 TEST_F(ScreenTest, DisplaySettingsScreenNavigation) {
-    screenManager = std::make_unique<ScreenManager>(*uiManager);
-    screenManager->setTransitionDuration(0);
+    createScreenManager();
 
     DisplayManager displayManager;
     displayManager.initialize();
@@ -1003,8 +975,7 @@ TEST_F(ScreenTest, DisplaySettingsScreenNavigation) {
 }
 
 TEST_F(ScreenTest, DisplaySettingsScreenUpdate) {
-    screenManager = std::make_unique<ScreenManager>(*uiManager);
-    screenManager->setTransitionDuration(0);
+    createScreenManager();
 
     DisplayManager displayManager;
     displayManager.initialize();
@@ -1028,8 +999,7 @@ TEST_F(ScreenTest, DisplaySettingsScreenUpdate) {
 // ============================================================================
 
 TEST_F(ScreenTest, AboutScreenRegistration) {
-    screenManager = std::make_unique<ScreenManager>(*uiManager);
-    screenManager->setTransitionDuration(0);
+    createScreenManager();
 
     auto about = std::make_unique<AboutScreen>(*screenManager, *themeManager);
 
@@ -1040,8 +1010,7 @@ TEST_F(ScreenTest, AboutScreenRegistration) {
 }
 
 TEST_F(ScreenTest, AboutScreenNavigation) {
-    screenManager = std::make_unique<ScreenManager>(*uiManager);
-    screenManager->setTransitionDuration(0);
+    createScreenManager();
 
     auto settings = std::make_unique<SettingsScreen>(
         *screenManager, *themeManager, *deviceManager);
@@ -1062,8 +1031,7 @@ TEST_F(ScreenTest, AboutScreenNavigation) {
 }
 
 TEST_F(ScreenTest, AboutScreenSystemInfo) {
-    screenManager = std::make_unique<ScreenManager>(*uiManager);
-    screenManager->setTransitionDuration(0);
+    createScreenManager();
 
     auto about = std::make_unique<AboutScreen>(*screenManager, *themeManager);
     auto* aboutPtr = about.get();
@@ -1079,8 +1047,7 @@ TEST_F(ScreenTest, AboutScreenSystemInfo) {
 }
 
 TEST_F(ScreenTest, AboutScreenUpdate) {
-    screenManager = std::make_unique<ScreenManager>(*uiManager);
-    screenManager->setTransitionDuration(0);
+    createScreenManager();
 
     auto about = std::make_unique<AboutScreen>(*screenManager, *themeManager);
 
@@ -1100,8 +1067,7 @@ TEST_F(ScreenTest, AboutScreenUpdate) {
 // ============================================================================
 
 TEST_F(ScreenTest, SettingsNavigationToSubScreens) {
-    screenManager = std::make_unique<ScreenManager>(*uiManager);
-    screenManager->setTransitionDuration(0);
+    createScreenManager();
 
     DisplayManager displayManager;
     displayManager.initialize();
@@ -1165,8 +1131,7 @@ TEST_F(ScreenTest, SettingsNavigationToSubScreens) {
 }
 
 TEST_F(ScreenTest, CompleteSettingsFlow) {
-    screenManager = std::make_unique<ScreenManager>(*uiManager);
-    screenManager->setTransitionDuration(0);
+    createScreenManager();
 
     DisplayManager displayManager;
     displayManager.initialize();
