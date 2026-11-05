@@ -1341,11 +1341,7 @@ class SmartHubApp {
             });
 
             if (response.ok) {
-                const device = this.devices.find(d => d.id === deviceId);
-                if (device) {
-                    device.state = device.state || {};
-                    device.state.on = on;
-                }
+                await this.applyDeviceResponse(deviceId, response);
                 this.showToast(`${on ? 'Turned on' : 'Turned off'}`, 'success');
             } else {
                 this.showToast('Failed to update device', 'error');
@@ -1354,6 +1350,16 @@ class SmartHubApp {
         } catch (error) {
             console.error('Toggle error:', error);
             this.showToast('Connection error', 'error');
+            this.renderDevices();
+        }
+    }
+
+    // The server's state can change more than was asked: setting brightness also sets on.
+    async applyDeviceResponse(deviceId, response) {
+        const result = await response.json();
+        const device = this.devices.find(d => d.id === deviceId);
+        if (device && result.state) {
+            device.state = result.state;
             this.renderDevices();
         }
     }
@@ -1368,11 +1374,7 @@ class SmartHubApp {
             });
 
             if (response.ok) {
-                const device = this.devices.find(d => d.id === deviceId);
-                if (device) {
-                    device.state = device.state || {};
-                    device.state.brightness = brightness;
-                }
+                await this.applyDeviceResponse(deviceId, response);
             } else {
                 this.showToast('Failed to update device', 'error');
                 this.renderDevices();  // Put the control back to the real state

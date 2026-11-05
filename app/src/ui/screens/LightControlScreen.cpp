@@ -88,7 +88,7 @@ void LightControlScreen::createHeader() {
 
 void LightControlScreen::createContent() {
     m_content = lv_obj_create(m_container);
-    lv_obj_set_size(m_content, LV_PCT(100), lv_pct(100) - Header::HEIGHT);
+    lv_obj_set_size(m_content, LV_PCT(100), LV_VER_RES - Header::HEIGHT);
     lv_obj_align(m_content, LV_ALIGN_TOP_MID, 0, Header::HEIGHT);
     lv_obj_set_style_bg_opa(m_content, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(m_content, 0, 0);
@@ -123,6 +123,7 @@ void LightControlScreen::createContent() {
 
     // Brightness slider
     lv_obj_t* brightnessRow = lv_obj_create(m_content);
+    m_brightnessRow = brightnessRow;
     lv_obj_set_size(brightnessRow, LV_PCT(100), 80);
     lv_obj_align(brightnessRow, LV_ALIGN_TOP_MID, 0, 235);
     m_theme.applyCardStyle(brightnessRow);
@@ -139,7 +140,7 @@ void LightControlScreen::createContent() {
     lv_obj_align(m_brightnessLabel, LV_ALIGN_TOP_RIGHT, 0, 0);
 
     m_brightnessSlider = lv_slider_create(brightnessRow);
-    lv_obj_set_width(m_brightnessSlider, lv_pct(100) - 2 * ThemeManager::CARD_PADDING);
+    lv_obj_set_width(m_brightnessSlider, LV_PCT(100));
     lv_obj_align(m_brightnessSlider, LV_ALIGN_BOTTOM_MID, 0, -5);
     lv_slider_set_range(m_brightnessSlider, 0, 100);
     lv_slider_set_value(m_brightnessSlider, 100, LV_ANIM_OFF);
@@ -150,6 +151,7 @@ void LightControlScreen::createContent() {
 
     // Color temperature slider
     lv_obj_t* colorTempRow = lv_obj_create(m_content);
+    m_colorTempRow = colorTempRow;
     lv_obj_set_size(colorTempRow, LV_PCT(100), 80);
     lv_obj_align(colorTempRow, LV_ALIGN_TOP_MID, 0, 330);
     m_theme.applyCardStyle(colorTempRow);
@@ -166,7 +168,7 @@ void LightControlScreen::createContent() {
     lv_obj_align(m_colorTempLabel, LV_ALIGN_TOP_RIGHT, 0, 0);
 
     m_colorTempSlider = lv_slider_create(colorTempRow);
-    lv_obj_set_width(m_colorTempSlider, lv_pct(100) - 2 * ThemeManager::CARD_PADDING);
+    lv_obj_set_width(m_colorTempSlider, LV_PCT(100));
     lv_obj_align(m_colorTempSlider, LV_ALIGN_BOTTOM_MID, 0, -5);
     lv_slider_set_range(m_colorTempSlider, 2700, 6500);
     lv_slider_set_value(m_colorTempSlider, 4000, LV_ANIM_OFF);
@@ -181,6 +183,18 @@ void LightControlScreen::updateControls() {
     if (m_titleLabel) {
         lv_label_set_text(m_titleLabel, device->name().c_str());
     }
+
+    // Only offer what this device can do
+    auto showIf = [](lv_obj_t* row, bool show) {
+        if (!row) return;
+        if (show) {
+            lv_obj_clear_flag(row, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(row, LV_OBJ_FLAG_HIDDEN);
+        }
+    };
+    showIf(m_brightnessRow, device->hasCapability(DeviceCapability::Brightness));
+    showIf(m_colorTempRow, device->hasCapability(DeviceCapability::ColorTemperature));
 
     bool isOn = false;
     auto state = device->getState();

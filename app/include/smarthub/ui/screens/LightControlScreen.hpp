@@ -59,6 +59,8 @@ private:
     lv_obj_t* m_backBtn = nullptr;
     lv_obj_t* m_titleLabel = nullptr;
     lv_obj_t* m_powerSwitch = nullptr;
+    lv_obj_t* m_brightnessRow = nullptr;
+    lv_obj_t* m_colorTempRow = nullptr;
     lv_obj_t* m_brightnessSlider = nullptr;
     lv_obj_t* m_brightnessLabel = nullptr;
     lv_obj_t* m_colorTempSlider = nullptr;

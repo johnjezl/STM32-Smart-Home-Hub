@@ -15,6 +15,7 @@
 #include <smarthub/core/EventBus.hpp>
 #include <smarthub/database/Database.hpp>
 #include <smarthub/devices/DeviceManager.hpp>
+#include <smarthub/devices/types/ColorLightDevice.hpp>
 #include <smarthub/devices/types/DimmerDevice.hpp>
 #include <smarthub/devices/types/MotionSensor.hpp>
 #include <smarthub/devices/types/SwitchDevice.hpp>
@@ -199,6 +200,22 @@ TEST_F(ScreenRenderTest, LightControl) {
         [](Screen& screen) { static_cast<LightControlScreen&>(screen).setDeviceId("lamp"); });
 
     EXPECT_GE(test::countText(root, "Reading Lamp"), 1);
+}
+
+TEST_F(ScreenRenderTest, LightControlShowsTheControlsADeviceSupports) {
+    auto showFor = [&](const std::string& deviceId) {
+        const std::string name = "light_control_" + deviceId;
+        return showAndRender(name, std::make_unique<LightControlScreen>(
+            *screenManager, *themeManager, *deviceManager),
+            [&](Screen& screen) { static_cast<LightControlScreen&>(screen).setDeviceId(deviceId); });
+    };
+
+    deviceManager->addDevice(std::make_shared<SwitchDevice>("plug", "Plug", "local"));
+    deviceManager->addDevice(std::make_shared<ColorLightDevice>("color", "Color Light", "local"));
+
+    EXPECT_EQ(test::countVisible(showFor("plug"), &lv_slider_class), 0);
+    EXPECT_EQ(test::countVisible(showFor("lamp"), &lv_slider_class), 1);
+    EXPECT_EQ(test::countVisible(showFor("color"), &lv_slider_class), 2);
 }
 
 TEST_F(ScreenRenderTest, SensorList) {

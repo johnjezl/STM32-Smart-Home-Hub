@@ -309,9 +309,9 @@ handler.sendCommand(deviceId, "toggle", {{"toggle", true}});
 ### Dimmer Commands
 
 ```cpp
-// Set brightness (0-254)
+// Set brightness (0-100). Use "level" instead for a raw ZCL level (0-254).
 handler.sendCommand(deviceId, "brightness", {
-    {"brightness", 128},
+    {"brightness", 50},
     {"transitionTime", 10}  // 1 second (in 100ms units)
 });
 ```

@@ -115,6 +115,14 @@ lv_obj_t* findFirst(lv_obj_t* root, const lv_obj_class_t* objectClass) {
     return nullptr;
 }
 
+int countVisible(lv_obj_t* root, const lv_obj_class_t* objectClass) {
+    int count = lv_obj_check_type(root, objectClass) && lv_obj_is_visible(root) ? 1 : 0;
+    for (uint32_t i = 0; i < lv_obj_get_child_cnt(root); ++i) {
+        count += countVisible(lv_obj_get_child(root, static_cast<int32_t>(i)), objectClass);
+    }
+    return count;
+}
+
 int countText(lv_obj_t* root, const std::string& text) {
     int count = 0;
     if (lv_obj_check_type(root, &lv_label_class) && text == lv_label_get_text(root)) {

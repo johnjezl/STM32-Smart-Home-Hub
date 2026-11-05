@@ -34,6 +34,9 @@ uint32_t flushCount();
 /** The first object of this class under root (inclusive), or nullptr. */
 _lv_obj_t* findFirst(_lv_obj_t* root, const _lv_obj_class_t* objectClass);
 
+/** Number of objects of this class under root that are really visible on screen. */
+int countVisible(_lv_obj_t* root, const _lv_obj_class_t* objectClass);
+
 /** Number of labels and text areas under root (inclusive) with this exact text. */
 int countText(_lv_obj_t* root, const std::string& text);
 

@@ -164,7 +164,7 @@ jobs:
   build-m4:
     name: M4 Firmware
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 60  # Long enough for a slow first download, which fills the cache
 
     steps:
       - name: Checkout repository

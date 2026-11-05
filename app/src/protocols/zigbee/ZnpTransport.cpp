@@ -205,6 +205,10 @@ void ZnpTransport::close() {
             m_readerThread.join();
         }
 
+        // Take the lock so this can't land between the thread's check and its sleep
+        {
+            std::lock_guard<std::mutex> lock(m_indicationMutex);
+        }
         m_indicationCv.notify_all();
         if (m_indicationThread.joinable()) {
             m_indicationThread.join();
