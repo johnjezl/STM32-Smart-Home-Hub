@@ -434,9 +434,9 @@ class SmartHubApp {
                     ${hasBrightness ? `
                         <div class="brightness-control">
                             <input type="range" class="brightness-slider"
-                                min="0" max="100" value="${brightness || 100}"
+                                min="0" max="100" value="${brightness ?? 100}"
                                 data-device-id="${device.id}">
-                            <span class="brightness-value">${brightness || 100}%</span>
+                            <span class="brightness-value">${brightness ?? 100}%</span>
                         </div>
                     ` : ''}
                     <button class="device-edit-btn" data-device-id="${device.id}" title="Edit">✏️</button>
@@ -1360,6 +1360,7 @@ class SmartHubApp {
         const device = this.devices.find(d => d.id === deviceId);
         if (device && result.state) {
             device.state = result.state;
+            this.renderRooms();
             this.renderDevices();
         }
     }
