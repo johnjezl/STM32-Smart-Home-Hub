@@ -40,7 +40,15 @@ jobs:
             nlohmann-json3-dev \
             libgtest-dev \
             libdrm-dev \
+            ccache \
             lcov
+
+      - name: Restore compiler cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ccache-native-${{ github.sha }}
+          restore-keys: ccache-native-
 
       - name: Configure CMake
         working-directory: app
@@ -48,13 +56,17 @@ jobs:
           cmake -B build \
             -G Ninja \
             -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DSMARTHUB_BUILD_TESTS=ON \
             -DSMARTHUB_NATIVE_BUILD=ON \
             -DSMARTHUB_FETCH_LVGL=ON
 
       - name: Build
         working-directory: app
-        run: cmake --build build
+        run: |
+          cmake --build build
+          ccache --show-stats
 
       - name: Run tests
         working-directory: app/build
@@ -78,6 +90,7 @@ jobs:
         with:
           name: ui-frames
           path: ui-frames/
+          if-no-files-found: error
           retention-days: 7
 
   # Cross-compilation build (ARM32)
@@ -209,7 +222,15 @@ jobs:
             nlohmann-json3-dev \
             libgtest-dev \
             libdrm-dev \
+            ccache \
             lcov
+
+      - name: Restore compiler cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ccache-coverage-${{ github.sha }}
+          restore-keys: ccache-coverage-
 
       - name: Configure with coverage
         working-directory: app
@@ -217,13 +238,17 @@ jobs:
           cmake -B build-coverage \
             -G Ninja \
             -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DSMARTHUB_BUILD_TESTS=ON \
             -DSMARTHUB_COVERAGE=ON \
             -DSMARTHUB_FETCH_LVGL=ON
 
       - name: Build with coverage
         working-directory: app
-        run: cmake --build build-coverage
+        run: |
+          cmake --build build-coverage
+          ccache --show-stats
 
       - name: Run tests with coverage
         working-directory: app/build-coverage
