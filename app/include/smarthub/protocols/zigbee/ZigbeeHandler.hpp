@@ -25,6 +25,10 @@ public:
      * @param config Configuration JSON containing "port", "baudRate", etc.
      */
     ZigbeeHandler(EventBus& eventBus, const nlohmann::json& config);
+
+    /** Use an existing coordinator instead of opening the configured port (for testing). */
+    ZigbeeHandler(EventBus& eventBus, const nlohmann::json& config,
+                  std::unique_ptr<ZigbeeCoordinator> coordinator);
     ~ZigbeeHandler() override;
 
     // Non-copyable

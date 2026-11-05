@@ -27,6 +27,13 @@ ZigbeeHandler::ZigbeeHandler(EventBus& eventBus, const nlohmann::json& config)
 {
 }
 
+ZigbeeHandler::ZigbeeHandler(EventBus& eventBus, const nlohmann::json& config,
+                             std::unique_ptr<ZigbeeCoordinator> coordinator)
+    : ZigbeeHandler(eventBus, config)
+{
+    m_coordinator = std::move(coordinator);
+}
+
 ZigbeeHandler::~ZigbeeHandler() {
     shutdown();
 }
@@ -47,8 +54,10 @@ bool ZigbeeHandler::initialize() {
 
     LOG_INFO("Initializing Zigbee handler on {} at {} baud", port, baudRate);
 
-    // Create coordinator
-    m_coordinator = std::make_unique<ZigbeeCoordinator>(port, baudRate);
+    // Create coordinator, unless one was injected
+    if (!m_coordinator) {
+        m_coordinator = std::make_unique<ZigbeeCoordinator>(port, baudRate);
+    }
 
     // Set up callbacks
     m_coordinator->setDeviceAnnouncedCallback(

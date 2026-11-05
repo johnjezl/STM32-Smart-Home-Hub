@@ -178,6 +178,11 @@ if(GTEST_AVAILABLE)
     target_link_libraries(test_zigbee PRIVATE smarthub_lib GTest::gtest GTest::gtest_main)
     add_test(NAME Zigbee COMMAND test_zigbee)
 
+    # Zigbee flows against a fake coordinator (no hardware)
+    add_executable(test_zigbee_flows protocols/test_zigbee_flows.cpp)
+    target_link_libraries(test_zigbee_flows PRIVATE smarthub_lib GTest::gtest GTest::gtest_main)
+    add_test(NAME ZigbeeFlows COMMAND test_zigbee_flows)
+
     # WiFi Protocol tests
     add_executable(test_wifi protocols/test_wifi.cpp)
     target_link_libraries(test_wifi PRIVATE smarthub_lib GTest::gtest GTest::gtest_main)
@@ -297,6 +302,7 @@ if(GTEST_AVAILABLE)
         protocols/test_mqtt.cpp
         protocols/test_protocol_factory.cpp
         protocols/test_zigbee.cpp
+        protocols/test_zigbee_flows.cpp
         protocols/test_wifi.cpp
         rpmsg/test_rpmsg.cpp
         network/test_network.cpp
