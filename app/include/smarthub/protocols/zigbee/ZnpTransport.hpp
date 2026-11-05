@@ -137,6 +137,7 @@ public:
 
 private:
     void readerThread();
+    void indicationThread();
     void processReceivedData();
     void dispatchFrame(const ZnpFrame& frame);
 
@@ -145,19 +146,30 @@ private:
     int m_baudRate;
 
     std::thread m_readerThread;
+    std::thread m_indicationThread;
     std::atomic<bool> m_running{false};
 
     // Receive buffer
     std::vector<uint8_t> m_rxBuffer;
     std::mutex m_rxMutex;
 
-    // Synchronous request/response handling
+    // Writes to the serial port, from any thread
+    std::mutex m_writeMutex;
+
+    // Synchronous request/response handling. One request at a time.
+    std::mutex m_requestSerialMutex;
     std::mutex m_requestMutex;
     std::condition_variable m_responseCv;
     std::optional<ZnpFrame> m_pendingResponse;
     uint8_t m_expectedCmd0 = 0;
     uint8_t m_expectedCmd1 = 0;
     bool m_waitingForResponse = false;
+
+    // Indications are delivered on their own thread, in order. The reader thread has
+    // to stay free: a callback can make a request, and only the reader delivers its reply.
+    std::queue<ZnpFrame> m_indications;
+    std::mutex m_indicationMutex;
+    std::condition_variable m_indicationCv;
 
     // Indication callback
     IndicationCallback m_indicationCallback;

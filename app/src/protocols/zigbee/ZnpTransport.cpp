@@ -185,6 +185,7 @@ bool ZnpTransport::open() {
     // Start reader thread
     m_running = true;
     m_readerThread = std::thread(&ZnpTransport::readerThread, this);
+    m_indicationThread = std::thread(&ZnpTransport::indicationThread, this);
 
     LOG_INFO("ZNP transport opened on {}", m_port);
     return true;
@@ -203,10 +204,19 @@ void ZnpTransport::close() {
         if (m_readerThread.joinable()) {
             m_readerThread.join();
         }
+
+        m_indicationCv.notify_all();
+        if (m_indicationThread.joinable()) {
+            m_indicationThread.join();
+        }
     }
 
     m_serialPort->close();
     m_rxBuffer.clear();
+    {
+        std::lock_guard<std::mutex> lock(m_indicationMutex);
+        m_indications = {};
+    }
 
     LOG_INFO("ZNP transport closed");
 }
@@ -221,6 +231,7 @@ bool ZnpTransport::send(const ZnpFrame& frame) {
 
     LOG_DEBUG("TX: {}", frame.toString());
 
+    std::lock_guard<std::mutex> writeLock(m_writeMutex);
     ssize_t written = m_serialPort->write(data.data(), data.size());
     if (written != static_cast<ssize_t>(data.size())) {
         LOG_ERROR("Failed to write frame: wrote {} of {} bytes",
@@ -236,6 +247,9 @@ std::optional<ZnpFrame> ZnpTransport::request(const ZnpFrame& frame, int timeout
         LOG_ERROR("request() called with non-SREQ frame");
         return std::nullopt;
     }
+
+    // A second caller would overwrite the response this one is waiting for
+    std::lock_guard<std::mutex> serialLock(m_requestSerialMutex);
 
     std::unique_lock<std::mutex> lock(m_requestMutex);
 
@@ -309,6 +323,27 @@ void ZnpTransport::readerThread() {
     }
 }
 
+void ZnpTransport::indicationThread() {
+    for (;;) {
+        ZnpFrame frame;
+        {
+            std::unique_lock<std::mutex> lock(m_indicationMutex);
+            m_indicationCv.wait(lock, [this] { return !m_running || !m_indications.empty(); });
+            if (!m_running) {
+                return;
+            }
+            frame = std::move(m_indications.front());
+            m_indications.pop();
+        }
+
+        std::lock_guard<std::mutex> lock(m_callbackMutex);
+        if (m_indicationCallback) {
+            LOG_DEBUG("Indication: {}", frame.toString());
+            m_indicationCallback(frame);
+        }
+    }
+}
+
 void ZnpTransport::processReceivedData() {
     // Try to find and parse complete frames in the buffer
     while (m_rxBuffer.size() >= ZnpFrame::MIN_FRAME_SIZE) {
@@ -362,13 +397,11 @@ void ZnpTransport::dispatchFrame(const ZnpFrame& frame) {
             LOG_WARN("Unexpected response: {}", frame.toString());
         }
     } else if (frame.isIndication()) {
-        // Dispatch to indication callback
-        std::lock_guard<std::mutex> lock(m_callbackMutex);
-
-        if (m_indicationCallback) {
-            LOG_DEBUG("Indication: {}", frame.toString());
-            m_indicationCallback(frame);
+        {
+            std::lock_guard<std::mutex> lock(m_indicationMutex);
+            m_indications.push(frame);
         }
+        m_indicationCv.notify_one();
     }
 }
 
