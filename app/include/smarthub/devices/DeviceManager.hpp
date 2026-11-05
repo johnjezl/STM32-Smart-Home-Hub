@@ -215,6 +215,8 @@ public:
 private:
     void setupEventHandlers();
     void onDeviceDiscovered(DevicePtr device);
+    void applyStateChange(const DevicePtr& device, const std::string& property,
+                          const nlohmann::json& value);
     void onDeviceStateChanged(const std::string& deviceId,
                               const std::string& property,
                               const nlohmann::json& value);

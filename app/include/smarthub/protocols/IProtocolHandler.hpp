@@ -79,7 +79,7 @@ public:
     virtual void stopDiscovery() = 0;
     virtual bool isDiscovering() const = 0;
 
-    // Device operations
+    // Device operations. deviceAddress is the device's ID.
     virtual bool sendCommand(
         const std::string& deviceAddress,
         const std::string& command,

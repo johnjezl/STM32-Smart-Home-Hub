@@ -22,7 +22,7 @@ ColorLightDevice::ColorLightDevice(const std::string& id,
     addCapability(DeviceCapability::ColorHSV);
 
     // Default to warm white
-    setStateInternal("color_temp", 2700);
+    setStateInternal("colorTemp", 2700);
     setStateInternal("color_r", 255);
     setStateInternal("color_g", 255);
     setStateInternal("color_b", 255);
@@ -32,7 +32,7 @@ ColorLightDevice::ColorLightDevice(const std::string& id,
 }
 
 int ColorLightDevice::colorTemperature() const {
-    auto state = getProperty("color_temp");
+    auto state = getProperty("colorTemp");
     if (state.is_number()) {
         return state.get<int>();
     }
@@ -41,7 +41,7 @@ int ColorLightDevice::colorTemperature() const {
 
 void ColorLightDevice::setColorTemperature(int kelvin) {
     kelvin = std::clamp(kelvin, 1000, 10000);
-    setState("color_temp", kelvin);
+    setState("colorTemp", kelvin);
 }
 
 RGB ColorLightDevice::colorRGB() const {

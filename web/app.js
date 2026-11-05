@@ -1349,10 +1349,12 @@ class SmartHubApp {
                 this.showToast(`${on ? 'Turned on' : 'Turned off'}`, 'success');
             } else {
                 this.showToast('Failed to update device', 'error');
+                this.renderDevices();  // Put the control back to the real state
             }
         } catch (error) {
             console.error('Toggle error:', error);
             this.showToast('Connection error', 'error');
+            this.renderDevices();
         }
     }
 
@@ -1371,9 +1373,14 @@ class SmartHubApp {
                     device.state = device.state || {};
                     device.state.brightness = brightness;
                 }
+            } else {
+                this.showToast('Failed to update device', 'error');
+                this.renderDevices();  // Put the control back to the real state
             }
         } catch (error) {
             console.error('Brightness error:', error);
+            this.showToast('Connection error', 'error');
+            this.renderDevices();
         }
     }
 

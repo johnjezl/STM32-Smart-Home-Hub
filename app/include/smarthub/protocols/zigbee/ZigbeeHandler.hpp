@@ -15,6 +15,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <shared_mutex>
 #include <thread>
 
 namespace smarthub::zigbee {
@@ -56,7 +57,7 @@ public:
 
     ProtocolState state() const override;
     bool isConnected() const override;
-    std::string lastError() const override { return m_lastError; }
+    std::string lastError() const override;
 
     bool supportsDiscovery() const override { return true; }
     void startDiscovery() override;
@@ -108,6 +109,7 @@ private:
     void onDeviceAnnounced(uint16_t nwkAddr, uint64_t ieeeAddr);
     void startPairing(uint16_t nwkAddr, uint64_t ieeeAddr);
     void stopPairing();
+    void fail(const std::string& message);
     uint64_t pairDevice(uint64_t ieeeAddr);  // Returns the attempt it last worked on
     void finishPairing(uint64_t ieeeAddr);
     void reportPairingFailure(uint64_t ieeeAddr, const std::string& message);
@@ -148,9 +150,11 @@ private:
     ZigbeeDeviceDatabase m_deviceDb;
 
     // State
-    bool m_initialized = false;
+    std::atomic<bool> m_initialized{false};
     std::atomic<bool> m_discovering{false};
     std::string m_lastError;
+    mutable std::mutex m_errorMutex;
+    std::shared_mutex m_coordinatorMutex;
 
     // Pairing, one background thread per joining device
     struct PairingTask {

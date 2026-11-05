@@ -181,7 +181,7 @@ The touch UI, web API and automations all go through `DeviceManager::setDeviceSt
 | `brightness` | 0-100 | Level, 0-254 |
 | `colorTemp` | Kelvin | Mireds |
 
-Reports are converted back to these units. Other properties, including `hue` and `saturation`, are rejected for now.
+Reports are converted back to these units. Other properties, including `hue` and `saturation`, are rejected for now, as is anything the device has no capability for, like switching a sensor on. Setting brightness also updates `on`, because the level command switches the light.
 
 Success means the radio accepted the command, not that the device acted on it. The device's next report confirms the real state.
 

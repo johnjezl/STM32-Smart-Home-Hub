@@ -211,7 +211,10 @@ void ZnpTransport::close() {
         }
     }
 
-    m_serialPort->close();
+    {
+        std::lock_guard<std::mutex> writeLock(m_writeMutex);
+        m_serialPort->close();
+    }
     m_rxBuffer.clear();
     {
         std::lock_guard<std::mutex> lock(m_indicationMutex);

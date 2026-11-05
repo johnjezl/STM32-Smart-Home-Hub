@@ -334,7 +334,7 @@ Properties vary by device type:
 |------------|------------|
 | switch | on (boolean) |
 | dimmer | on (boolean), brightness (0-100) |
-| color_light | on, brightness, color_temp, hue, saturation |
+| color_light | on, brightness, colorTemp (kelvin) |
 | thermostat | target_temp, mode (heat/cool/auto/off) |
 | lock | locked (boolean) |
 

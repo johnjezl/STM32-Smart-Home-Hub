@@ -40,8 +40,13 @@ const FakeZigbeeDevice PLUG{
     0x2222, 0x00124B0000002222ULL,
     {{1, {zcl::cluster::ON_OFF}}}};
 
+const FakeZigbeeDevice MOTION{
+    0x4444, 0x00124B0000004444ULL,
+    {{1, {zcl::cluster::IAS_ZONE}}}};
+
 constexpr const char* LIGHT_ID = "zigbee_00124b0000001234";
 constexpr const char* PLUG_ID = "zigbee_00124b0000002222";
+constexpr const char* MOTION_ID = "zigbee_00124b0000004444";
 
 template <typename Predicate>
 bool eventually(Predicate predicate, std::chrono::milliseconds timeout = 10s) {
@@ -65,6 +70,7 @@ protected:
 
         fake.addDevice(LIGHT);
         fake.addDevice(PLUG);
+        fake.addDevice(MOTION);
 
         // Same name as the real handler, so devices find it by their protocol
         ProtocolFactory::instance().registerProtocol("zigbee",
@@ -88,7 +94,8 @@ protected:
         ProtocolFactory::instance().registerProtocol("zigbee",
             [](EventBus& bus, const nlohmann::json& config) -> ProtocolHandlerPtr {
                 return std::make_shared<ZigbeeHandler>(bus, config);
-            });
+            },
+            { "zigbee", "1.0.0", "Zigbee protocol via CC2652P coordinator" });
     }
 
     void loadAndPair() {
@@ -187,6 +194,31 @@ TEST_F(ZigbeeControlTest, ColorTemperatureInKelvinBecomesMireds) {
     EXPECT_EQ(state(LIGHT_ID, "colorTemp"), 4000);
 }
 
+TEST_F(ZigbeeControlTest, BrightnessAlsoSetsWhetherTheLightIsOn) {
+    loadAndPair();
+
+    ASSERT_TRUE(manager->setDeviceState(LIGHT_ID, "brightness", 50));
+    EXPECT_EQ(state(LIGHT_ID, "on"), true);
+
+    ASSERT_TRUE(manager->setDeviceState(LIGHT_ID, "brightness", 0));
+    EXPECT_EQ(state(LIGHT_ID, "on"), false);
+
+    EXPECT_EQ(airFrames().size(), 2u);  // Level commands already switch it; no extra frames
+}
+
+TEST_F(ZigbeeControlTest, DevicesCantBeSentCommandsTheyDontSupport) {
+    loadAndPair();
+    fake.announceDevice(MOTION);
+    ASSERT_TRUE(eventually([&] { return manager->deviceCount() == 3; }));
+    fake.clearSentFrames();
+
+    EXPECT_FALSE(manager->setDeviceState(MOTION_ID, "on", true));
+    EXPECT_FALSE(manager->setDeviceState(PLUG_ID, "brightness", 50));
+
+    EXPECT_TRUE(airFrames().empty());
+    EXPECT_TRUE(state(MOTION_ID, "on").is_null());
+}
+
 TEST_F(ZigbeeControlTest, InvalidColorTemperatureIsRejected) {
     loadAndPair();
 
@@ -275,6 +307,29 @@ TEST_F(ZigbeeControlTest, LocalDevicesChangeDirectly) {
     EXPECT_EQ(device->getProperty("on"), true);
 }
 
+TEST_F(ZigbeeControlTest, ReportConfirmingACommandPublishesNothing) {
+    loadAndPair();
+    std::atomic<int> onEvents{0};
+    std::atomic<int> levelEvents{0};
+    eventBus.subscribe("device.state", [&](const Event& event) {
+        const auto& change = static_cast<const DeviceStateEvent&>(event);
+        if (change.property == "on") ++onEvents;
+        if (change.property == "brightness") ++levelEvents;
+    });
+
+    ASSERT_TRUE(manager->setDeviceState(PLUG_ID, "on", true));
+    ASSERT_EQ(onEvents.load(), 1);
+
+    fake.reportAttribute(PLUG.nwkAddr, 1, zcl::cluster::ON_OFF,
+                         zcl::attr::onoff::ON_OFF, zcl::datatype::BOOLEAN, {0x01});
+    // A level report on another device shows when the first has been handled.
+    fake.reportAttribute(LIGHT.nwkAddr, 3, zcl::cluster::LEVEL_CONTROL,
+                         zcl::attr::level::CURRENT_LEVEL, zcl::datatype::UINT8, {127});
+    ASSERT_TRUE(eventually([&] { return levelEvents.load() == 1; }));
+
+    EXPECT_EQ(onEvents.load(), 1);
+}
+
 TEST_F(ZigbeeControlTest, EventsOnlyPublishRealChanges) {
     loadAndPair();
     std::atomic<int> events{0};
@@ -331,6 +386,46 @@ TEST_F(ZigbeeControlTest, AutomationActionReachesTheRadio) {
 
     ASSERT_TRUE(eventually([&] { return !airFrames().empty(); }));
     EXPECT_EQ(airFrames()[0].zclCommand, zcl::cmd::onoff::ON);
+}
+
+TEST_F(ZigbeeControlTest, ConcurrentFailuresAreSafe) {
+    loadAndPair();
+    // The handler doesn't know this one, so each command fails and records an error.
+    ASSERT_TRUE(manager->addDevice(std::make_shared<SwitchDevice>("unpaired", "Unpaired", "zigbee")));
+
+    std::vector<std::thread> threads;
+    for (int t = 0; t < 4; ++t) {
+        threads.emplace_back([&] {
+            for (int i = 0; i < 25; ++i) {
+                EXPECT_FALSE(manager->setDeviceState("unpaired", "on", true));
+            }
+        });
+    }
+    for (auto& thread : threads) {
+        thread.join();
+    }
+}
+
+TEST_F(ZigbeeControlTest, CommandsDuringUnloadAreSafe) {
+    loadAndPair();
+
+    std::atomic<bool> stop{false};
+    std::thread commands([&] {
+        bool on = true;
+        while (!stop) {
+            manager->setDeviceState(PLUG_ID, "on", on);
+            on = !on;
+        }
+    });
+
+    std::this_thread::sleep_for(100ms);
+    manager->unloadProtocol("zigbee");
+    std::this_thread::sleep_for(50ms);
+    stop = true;
+    commands.join();
+
+    // Nothing left to send through, so it has to say so.
+    EXPECT_FALSE(manager->setDeviceState(PLUG_ID, "on", true));
 }
 
 TEST_F(ZigbeeControlTest, ConcurrentCommandsAllSucceed) {

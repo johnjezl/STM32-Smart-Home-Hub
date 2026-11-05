@@ -839,6 +839,24 @@ TEST_F(ZigbeeCommandTest, UnknownCommandSendsNothing) {
     EXPECT_TRUE(airFrames(fake).empty());
 }
 
+// A command is in the middle of writing to the radio when shutdown starts.
+TEST_F(ZigbeeCommandTest, CommandInProgressSurvivesShutdown) {
+    std::atomic<bool> writing{false};
+    fake.setResponder(ZnpSubsystem::AF, cmd::af::DATA_REQUEST, [&](const ZnpFrame&) {
+        writing = true;
+        std::this_thread::sleep_for(300ms);
+        return std::vector<uint8_t>{0};
+    });
+
+    std::thread command([&] { handler->sendCommand(idOf(LIGHT), "on", {{"on", true}}); });
+    ASSERT_TRUE(eventually([&] { return writing.load(); }));
+
+    handler->shutdown();
+    command.join();
+
+    EXPECT_FALSE(handler->isConnected());
+}
+
 // ---- Incoming reports ------------------------------------------------------
 
 class ZigbeeReportTest : public ZigbeeHandlerFlowTest {};

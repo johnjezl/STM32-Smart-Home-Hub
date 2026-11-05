@@ -70,7 +70,7 @@ protected:
         colorLight->setRoom("Office");
         colorLight->setState("on", true);
         colorLight->setState("brightness", 100);
-        colorLight->setState("color_temp", 4000);
+        colorLight->setState("colorTemp", 4000);
         m_deviceManager->addDevice(colorLight);
     }
 
@@ -216,10 +216,10 @@ TEST_F(WebApiTest, SetDeviceState_ColorTemperature) {
     auto device = m_deviceManager->getDevice("test-color-1");
     ASSERT_NE(device, nullptr);
 
-    device->setState("color_temp", 5000);
+    device->setState("colorTemp", 5000);
 
     auto state = device->getState();
-    EXPECT_EQ(state["color_temp"].get<int>(), 5000);
+    EXPECT_EQ(state["colorTemp"].get<int>(), 5000);
 }
 
 // ============================================================================

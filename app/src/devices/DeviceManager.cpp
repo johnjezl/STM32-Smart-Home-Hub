@@ -408,6 +408,13 @@ std::optional<std::string> commandForProperty(const std::string& property,
     return std::nullopt;
 }
 
+/** Whether a device can have this property changed. Call for properties that have a command. */
+bool canControl(const DevicePtr& device, const std::string& property) {
+    if (property == "on") return device->hasCapability(DeviceCapability::OnOff);
+    if (property == "brightness") return device->hasCapability(DeviceCapability::Brightness);
+    return device->hasCapability(DeviceCapability::ColorTemperature);
+}
+
 } // namespace
 
 bool DeviceManager::setDeviceState(const std::string& deviceId, const std::string& property,
@@ -444,16 +451,14 @@ bool DeviceManager::setDeviceState(const std::string& deviceId, const std::strin
             LOG_WARN("%s can't change %s", device->protocol().c_str(), property.c_str());
             return false;
         }
-
-        // Handlers address devices by ID unless the device has its own address
-        std::string address = device->protocolAddress();
-        if (address.empty()) {
-            address = deviceId;
+        if (!canControl(device, property)) {
+            LOG_WARN("%s doesn't support %s", deviceId.c_str(), property.c_str());
+            return false;
         }
 
         nlohmann::json params;
         params[property] = value;
-        if (!protocol->sendCommand(address, *command, params)) {
+        if (!protocol->sendCommand(deviceId, *command, params)) {
             LOG_WARN("Failed to set %s.%s", deviceId.c_str(), property.c_str());
             return false;
         }
@@ -464,17 +469,28 @@ bool DeviceManager::setDeviceState(const std::string& deviceId, const std::strin
         return false;
     }
 
-    // Only publish real changes, so an automation can't keep re-triggering itself
+    applyStateChange(device, property, value);
+
+    // Setting a level also switches a light on or off
+    if (property == "brightness" && device->hasCapability(DeviceCapability::OnOff)) {
+        applyStateChange(device, "on", value.get<double>() > 0);
+    }
+    return true;
+}
+
+void DeviceManager::applyStateChange(const DevicePtr& device, const std::string& property,
+                                     const nlohmann::json& value) {
+    // Only publish real changes. A device's report confirming a command isn't news, and an
+    // automation shouldn't keep re-triggering itself.
     const bool changed = device->getProperty(property) != value;
     device->setState(property, value);
     if (changed) {
         DeviceStateEvent event;
-        event.deviceId = deviceId;
+        event.deviceId = device->id();
         event.property = property;
         event.value = value;
         m_eventBus.publish(event);
     }
-    return true;
 }
 
 bool DeviceManager::saveAllDevices() {
@@ -797,15 +813,8 @@ void DeviceManager::onDeviceStateChanged(const std::string& deviceId,
     }
 
     if (device) {
-        device->setState(property, value);
         device->updateLastSeen();
-
-        // Publish state change event
-        DeviceStateEvent event;
-        event.deviceId = deviceId;
-        event.property = property;
-        event.value = value;
-        m_eventBus.publish(event);
+        applyStateChange(device, property, value);
     }
 }
 

@@ -94,6 +94,7 @@ protected:
 
         EXPECT_EQ(protocol->commandCount, 1);
         EXPECT_EQ(protocol->lastCommand, "on");
+        EXPECT_EQ(protocol->lastCommandAddress, "lamp");
         EXPECT_EQ(lamp->getProperty("on"), true);
         EXPECT_TRUE(lv_obj_has_state(sw, LV_STATE_CHECKED));
     }

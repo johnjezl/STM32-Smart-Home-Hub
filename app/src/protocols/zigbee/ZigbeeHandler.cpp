@@ -117,6 +117,17 @@ ZigbeeHandler::ZigbeeHandler(EventBus& eventBus, const nlohmann::json& config,
     m_coordinatorFactory = std::move(coordinatorFactory);
 }
 
+void ZigbeeHandler::fail(const std::string& message) {
+    LOG_ERROR("%s", message.c_str());
+    std::lock_guard<std::mutex> lock(m_errorMutex);
+    m_lastError = message;
+}
+
+std::string ZigbeeHandler::lastError() const {
+    std::lock_guard<std::mutex> lock(m_errorMutex);
+    return m_lastError;
+}
+
 ZigbeeHandler::~ZigbeeHandler() {
     shutdown();
 }
@@ -173,18 +184,18 @@ bool ZigbeeHandler::initialize() {
 
     // Initialize coordinator
     if (!m_coordinator->initialize()) {
-        m_lastError = "Failed to initialize Zigbee coordinator";
-        LOG_ERROR("{}", m_lastError);
+        fail("Failed to initialize Zigbee coordinator");
         stopPairing();
+        std::unique_lock<std::shared_mutex> lock(m_coordinatorMutex);
         m_coordinator.reset();
         return false;
     }
 
     // Start network
     if (!m_coordinator->startNetwork()) {
-        m_lastError = "Failed to start Zigbee network";
-        LOG_ERROR("{}", m_lastError);
+        fail("Failed to start Zigbee network");
         stopPairing();
+        std::unique_lock<std::shared_mutex> lock(m_coordinatorMutex);
         m_coordinator.reset();
         return false;
     }
@@ -217,8 +228,13 @@ void ZigbeeHandler::shutdown() {
         stopDiscovery();
     }
 
+    m_initialized = false;
     if (m_coordinator) {
+        // This waits for callbacks, which can be sending commands, so hold no lock yet.
+        // Requests still in progress fail once the transport closes.
         m_coordinator->shutdown();
+
+        std::unique_lock<std::shared_mutex> lock(m_coordinatorMutex);
         m_coordinator.reset();
     }
 
@@ -251,8 +267,7 @@ ProtocolState ZigbeeHandler::state() const {
 
 void ZigbeeHandler::startDiscovery() {
     if (!m_initialized || !m_coordinator) {
-        m_lastError = "Cannot start discovery: handler not initialized";
-        LOG_ERROR("{}", m_lastError);
+        fail("Cannot start discovery: handler not initialized");
         return;
     }
 
@@ -262,8 +277,7 @@ void ZigbeeHandler::startDiscovery() {
     if (m_coordinator->permitJoin(60)) {
         m_discovering = true;
     } else {
-        m_lastError = "Failed to enable permit join";
-        LOG_ERROR("{}", m_lastError);
+        fail("Failed to enable permit join");
     }
 }
 
@@ -282,17 +296,18 @@ void ZigbeeHandler::stopDiscovery() {
 bool ZigbeeHandler::sendCommand(const std::string& deviceAddress,
                                  const std::string& command,
                                  const nlohmann::json& params) {
+    // Any thread can get here, so keep the coordinator from going away during shutdown
+    std::shared_lock<std::shared_mutex> coordinatorLock(m_coordinatorMutex);
+
     if (!m_initialized || !m_coordinator) {
-        m_lastError = "Cannot send command: handler not initialized";
-        LOG_ERROR("{}", m_lastError);
+        fail("Cannot send command: handler not initialized");
         return false;
     }
 
     // Look up IEEE address from device ID
     auto ieeeOpt = deviceIdToIeee(deviceAddress);
     if (!ieeeOpt) {
-        m_lastError = "Unknown device address: " + deviceAddress;
-        LOG_ERROR("{}", m_lastError);
+        fail("Unknown device address: " + deviceAddress);
         return false;
     }
 
@@ -301,8 +316,7 @@ bool ZigbeeHandler::sendCommand(const std::string& deviceAddress,
     // Get device info from coordinator
     auto deviceInfo = m_coordinator->getDevice(ieeeAddr);
     if (!deviceInfo) {
-        m_lastError = "Device " + deviceAddress + " not found in coordinator";
-        LOG_ERROR("{}", m_lastError);
+        fail("Device " + deviceAddress + " not found in coordinator");
         return false;
     }
 
@@ -327,8 +341,7 @@ bool ZigbeeHandler::sendCommand(const std::string& deviceAddress,
         return handleColorCommand(deviceInfo->networkAddress, endpoint, params);
     }
 
-    m_lastError = "Unknown command: " + command;
-    LOG_ERROR("{}", m_lastError);
+    fail("Unknown command: " + command);
     return false;
 }
 
@@ -365,7 +378,7 @@ bool ZigbeeHandler::isConnected() const {
 nlohmann::json ZigbeeHandler::getStatus() const {
     nlohmann::json status;
     status["protocol"] = "zigbee";
-    status["initialized"] = m_initialized;
+    status["initialized"] = m_initialized.load();
     status["connected"] = isConnected();
     status["discovering"] = m_discovering.load();
 
@@ -1036,14 +1049,12 @@ bool ZigbeeHandler::handleOnOffCommand(uint16_t nwkAddr, uint8_t endpoint,
 bool ZigbeeHandler::handleBrightnessCommand(uint16_t nwkAddr, uint8_t endpoint,
                                              const nlohmann::json& params) {
     if (!params.contains("brightness") && !params.contains("level")) {
-        m_lastError = "Brightness command missing brightness/level parameter";
-        LOG_ERROR("{}", m_lastError);
+        fail("Brightness command missing brightness/level parameter");
         return false;
     }
 
     if (params.contains("brightness") && !params["brightness"].is_number()) {
-        m_lastError = "Brightness must be a number";
-        LOG_ERROR("%s", m_lastError.c_str());
+        fail("Brightness must be a number");
         return false;
     }
 
@@ -1062,8 +1073,7 @@ bool ZigbeeHandler::handleColorCommand(uint16_t nwkAddr, uint8_t endpoint,
 
     if (params.contains("colorTemp")) {
         if (!params["colorTemp"].is_number() || params["colorTemp"].get<double>() <= 0) {
-            m_lastError = "Color temperature must be a positive number of kelvin";
-            LOG_ERROR("%s", m_lastError.c_str());
+            fail("Color temperature must be a positive number of kelvin");
             return false;
         }
         return m_coordinator->setColorTemp(nwkAddr, endpoint,
@@ -1076,8 +1086,7 @@ bool ZigbeeHandler::handleColorCommand(uint16_t nwkAddr, uint8_t endpoint,
         return m_coordinator->setHueSat(nwkAddr, endpoint, hue, sat, transitionTime);
     }
 
-    m_lastError = "Color command missing color parameters";
-    LOG_ERROR("{}", m_lastError);
+    fail("Color command missing color parameters");
     return false;
 }
 
