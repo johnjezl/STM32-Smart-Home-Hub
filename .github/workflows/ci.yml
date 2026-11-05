@@ -230,9 +230,9 @@ jobs:
         run: |
           ctest --output-on-failure
           # Generate coverage report
-          lcov --capture --directory . --output-file coverage.info --ignore-errors mismatch || true
-          lcov --remove coverage.info '/usr/*' '*/third_party/*' '*/tests/*' --output-file coverage.info --ignore-errors unused || true
-          lcov --list coverage.info || true
+          lcov --capture --directory . --output-file coverage.info --ignore-errors mismatch
+          lcov --remove coverage.info '/usr/*' '*/third_party/*' '*/_deps/*' '*/tests/*' --output-file coverage.info --ignore-errors unused
+          lcov --list coverage.info
 
       - name: Upload coverage report
         if: always()

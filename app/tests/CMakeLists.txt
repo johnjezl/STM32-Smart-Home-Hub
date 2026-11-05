@@ -314,10 +314,16 @@ if(GTEST_AVAILABLE)
     # Note: SMARTHUB_COVERAGE option is defined in the parent CMakeLists.txt
     if(SMARTHUB_COVERAGE AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
         # Use PUBLIC for link options so coverage links propagate to test executables
-        target_compile_options(smarthub_lib PRIVATE --coverage -fprofile-arcs -ftest-coverage)
+        # Atomic counters: tests are threaded, and racing counters go negative, which lcov rejects
+        set(COVERAGE_FLAGS --coverage -fprofile-arcs -ftest-coverage -fprofile-update=atomic)
+        target_compile_options(smarthub_lib PRIVATE ${COVERAGE_FLAGS})
         target_link_options(smarthub_lib PUBLIC --coverage)
-        target_compile_options(smarthub_tests PRIVATE --coverage -fprofile-arcs -ftest-coverage)
+        target_compile_options(smarthub_tests PRIVATE ${COVERAGE_FLAGS})
         target_link_options(smarthub_tests PRIVATE --coverage)
+        if(TARGET smarthub_ui)
+            target_compile_options(smarthub_ui PRIVATE ${COVERAGE_FLAGS})
+            target_link_options(smarthub_ui PUBLIC --coverage)
+        endif()
 
         # Coverage target
         find_program(LCOV lcov)
