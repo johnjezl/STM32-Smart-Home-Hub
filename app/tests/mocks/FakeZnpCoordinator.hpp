@@ -14,6 +14,7 @@
 #include <smarthub/protocols/zigbee/ZclConstants.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
@@ -23,6 +24,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <utility>
 #include <vector>
 
@@ -38,7 +40,7 @@ struct FakeZigbeeDevice {
 
 class FakeZnpCoordinator {
 public:
-    /** Returns the SRSP payload, or nullopt to send no SRSP at all. */
+    /** Returns the SRSP payload, or nullopt to send no SRSP at all. May call this fake. */
     using Responder = std::function<std::optional<std::vector<uint8_t>>(const ZnpFrame&)>;
 
     static constexpr uint64_t COORDINATOR_IEEE = 0x00124B0000000001ULL;
@@ -58,6 +60,22 @@ public:
     void setResponder(ZnpSubsystem subsystem, uint8_t command, Responder responder) {
         std::lock_guard<std::mutex> lock(m_mutex);
         m_responders[{subsystem, command}] = std::move(responder);
+    }
+
+    /** Hold back a device's reply about this endpoint until releaseDescriptors(). */
+    void holdDescriptor(uint16_t nwkAddr, uint8_t endpoint) {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_heldEndpoints.insert({nwkAddr, endpoint});
+    }
+
+    void releaseDescriptors() {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_heldEndpoints.clear();
+        for (const auto& frame : m_heldFrames) {
+            queueFrame(frame);
+        }
+        m_heldFrames.clear();
+        m_rxCv.notify_all();
     }
 
     /** When set, every SREQ goes unanswered, like a dead or missing radio. */
@@ -207,23 +225,29 @@ private:
     }
 
     void onHostWrite(const uint8_t* data, size_t len) {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        m_tx.insert(m_tx.end(), data, data + len);
+        std::vector<ZnpFrame> requests;
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            m_tx.insert(m_tx.end(), data, data + len);
 
-        size_t start = 0;
-        size_t frameLen = 0;
-        while (ZnpFrame::findFrame(m_tx.data(), m_tx.size(), start, frameLen)) {
-            auto frame = ZnpFrame::parse(m_tx.data() + start, frameLen);
-            m_tx.erase(m_tx.begin(), m_tx.begin() + start + frameLen);
-            if (frame) {
-                m_sent.push_back(*frame);
-                m_sentCv.notify_all();
-                if (frame->isRequest() && !m_unresponsive) {
-                    respond(*frame);
+            size_t start = 0;
+            size_t frameLen = 0;
+            while (ZnpFrame::findFrame(m_tx.data(), m_tx.size(), start, frameLen)) {
+                auto frame = ZnpFrame::parse(m_tx.data() + start, frameLen);
+                m_tx.erase(m_tx.begin(), m_tx.begin() + start + frameLen);
+                if (frame) {
+                    m_sent.push_back(*frame);
+                    if (frame->isRequest() && !m_unresponsive) {
+                        requests.push_back(*frame);
+                    }
                 }
             }
+            m_sentCv.notify_all();
         }
-        m_rxCv.notify_all();
+
+        for (const auto& request : requests) {
+            respond(request);
+        }
     }
 
     ssize_t onHostRead(uint8_t* buffer, size_t maxLen, int timeoutMs) {
@@ -242,18 +266,26 @@ private:
         m_rx.insert(m_rx.end(), bytes.begin(), bytes.end());
     }
 
-    // Called with m_mutex held.
     void respond(const ZnpFrame& req) {
-        auto responder = m_responders.find({req.subsystem(), req.command()});
-        std::optional<std::vector<uint8_t>> payload =
-            responder != m_responders.end() ? responder->second(req) : defaultResponse(req);
+        Responder responder;
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            auto found = m_responders.find({req.subsystem(), req.command()});
+            if (found != m_responders.end()) responder = found->second;
+        }
 
+        // Unlocked, so responders can call back into the fake.
+        std::optional<std::vector<uint8_t>> payload =
+            responder ? responder(req) : defaultResponse(req);
+
+        std::lock_guard<std::mutex> lock(m_mutex);
         if (payload) {
             queueFrame(ZnpFrame(ZnpType::SRSP, req.subsystem(), req.command(), *payload));
         }
         if (req.subsystem() == ZnpSubsystem::ZDO) {
             answerZdoRequest(req);
         }
+        m_rxCv.notify_all();
     }
 
     std::vector<uint8_t> defaultResponse(const ZnpFrame& req) const {
@@ -324,7 +356,11 @@ private:
                 rsp.appendWord(cluster);
             }
             rsp.appendByte(0);      // NumOutClusters
-            queueFrame(rsp);
+            if (m_heldEndpoints.count({device->second.nwkAddr, endpoint}) > 0) {
+                m_heldFrames.push_back(rsp);
+            } else {
+                queueFrame(rsp);
+            }
         }
     }
 
@@ -337,6 +373,8 @@ private:
     std::vector<ZnpFrame> m_sent;
     std::map<uint16_t, FakeZigbeeDevice> m_devices;
     std::map<std::pair<ZnpSubsystem, uint8_t>, Responder> m_responders;
+    std::set<std::pair<uint16_t, uint8_t>> m_heldEndpoints;
+    std::vector<ZnpFrame> m_heldFrames;
     bool m_unresponsive = false;
     size_t m_maxReadChunk = SIZE_MAX;
     uint8_t m_zclSeq = 0;

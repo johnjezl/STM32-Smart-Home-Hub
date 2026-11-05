@@ -10,6 +10,7 @@
 #include "ZigbeeCoordinator.hpp"
 #include "ZigbeeDeviceDatabase.hpp"
 #include <map>
+#include <functional>
 #include <memory>
 
 namespace smarthub::zigbee {
@@ -26,9 +27,11 @@ public:
      */
     ZigbeeHandler(EventBus& eventBus, const nlohmann::json& config);
 
-    /** Use an existing coordinator instead of opening the configured port (for testing). */
+    using CoordinatorFactory = std::function<std::unique_ptr<ZigbeeCoordinator>()>;
+
+    /** Create coordinators with this instead of opening the configured port (for testing). */
     ZigbeeHandler(EventBus& eventBus, const nlohmann::json& config,
-                  std::unique_ptr<ZigbeeCoordinator> coordinator);
+                  CoordinatorFactory coordinatorFactory);
     ~ZigbeeHandler() override;
 
     // Non-copyable
@@ -123,6 +126,7 @@ private:
     nlohmann::json m_config;
 
     // Coordinator
+    CoordinatorFactory m_coordinatorFactory;
     std::unique_ptr<ZigbeeCoordinator> m_coordinator;
 
     // Device database

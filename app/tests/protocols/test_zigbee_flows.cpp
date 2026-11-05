@@ -15,10 +15,13 @@
 #include <smarthub/protocols/zigbee/ZigbeeCoordinator.hpp>
 #include <smarthub/protocols/zigbee/ZigbeeHandler.hpp>
 
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstdio>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -44,6 +47,12 @@ const FakeZigbeeDevice CLIMATE{
 const FakeZigbeeDevice MOTION{
     0x4444, 0x00124B0000004444ULL,
     {{1, {zcl::cluster::IAS_ZONE}}}};
+
+// Endpoint 1 only has Basic; the light is on endpoint 11.
+const FakeZigbeeDevice MULTI_ENDPOINT_LIGHT{
+    0x5555, 0x00124B0000005555ULL,
+    {{1, {zcl::cluster::BASIC}},
+     {11, {zcl::cluster::ON_OFF, zcl::cluster::LEVEL_CONTROL}}}};
 
 std::string idOf(const FakeZigbeeDevice& device) {
     char id[32];
@@ -151,7 +160,7 @@ protected:
     };
 
     void SetUp() override {
-        for (const auto& device : {LIGHT, PLUG, CLIMATE, MOTION}) {
+        for (const auto& device : {LIGHT, PLUG, CLIMATE, MOTION, MULTI_ENDPOINT_LIGHT}) {
             fake.addDevice(device);
         }
         handler = makeHandler(fake);
@@ -160,7 +169,7 @@ protected:
 
     std::unique_ptr<ZigbeeHandler> makeHandler(FakeZnpCoordinator& radio) {
         auto created = std::make_unique<ZigbeeHandler>(
-            eventBus, nlohmann::json::object(), coordinatorFor(radio));
+            eventBus, handlerConfig, [&radio] { return coordinatorFor(radio); });
 
         created->setDeviceDiscoveredCallback([this](DevicePtr device) {
             std::lock_guard<std::mutex> lock(mutex);
@@ -216,6 +225,8 @@ protected:
         eventually([&] { return stateOf(id, property).has_value(); });
         return stateOf(id, property).value_or(nlohmann::json());
     }
+
+    nlohmann::json handlerConfig = nlohmann::json::object();
 
     std::mutex mutex;
     std::vector<DevicePtr> discovered;
@@ -277,6 +288,72 @@ TEST_F(ZigbeeHandlerFlowTest, DeviceTypeComesFromClusters) {
     EXPECT_EQ(motion->type(), DeviceType::MotionSensor);
 }
 
+TEST_F(ZigbeeHandlerFlowTest, PairingWaitsForEveryEndpoint) {
+    fake.holdDescriptor(MULTI_ENDPOINT_LIGHT.nwkAddr, 11);
+    fake.announceDevice(MULTI_ENDPOINT_LIGHT);
+
+    // Endpoint 1 alone would make this an unknown device. It must keep waiting.
+    ASSERT_TRUE(fake.waitForSent(ZnpSubsystem::ZDO, cmd::zdo::SIMPLE_DESC_REQ, 2));
+    std::this_thread::sleep_for(500ms);
+    EXPECT_EQ(discoveredCount(), 0u);
+
+    fake.releaseDescriptors();
+
+    ASSERT_TRUE(eventually([&] { return discoveredCount() == 1; }, 10s));
+    std::lock_guard<std::mutex> lock(mutex);
+    EXPECT_EQ(discovered[0]->type(), DeviceType::Dimmer);
+}
+
+TEST_F(ZigbeeHandlerFlowTest, CommandsGoToTheEndpointWithTheCluster) {
+    ASSERT_NE(pair(MULTI_ENDPOINT_LIGHT), nullptr);
+    fake.clearSentFrames();
+
+    ASSERT_TRUE(handler->sendCommand(idOf(MULTI_ENDPOINT_LIGHT), "on", {{"on", true}}));
+
+    auto frames = airFrames(fake);
+    ASSERT_EQ(frames.size(), 1u);
+    EXPECT_EQ(frames[0].endpoint, 11);
+}
+
+TEST_F(ZigbeeHandlerFlowTest, PairingReportingUsesTheEndpointWithTheCluster) {
+    ASSERT_NE(pair(MULTI_ENDPOINT_LIGHT), nullptr);
+
+    bool configured = false;
+    for (const auto& frame : airFrames(fake)) {
+        if (frame.zclCommand == zcl::global_cmd::CONFIGURE_REPORTING) {
+            EXPECT_EQ(frame.endpoint, 11);
+            configured = true;
+        }
+    }
+    EXPECT_TRUE(configured);
+}
+
+TEST_F(ZigbeeHandlerFlowTest, ReinitializingUsesTheFactoryAgain) {
+    handler->shutdown();
+    EXPECT_FALSE(handler->isConnected());
+
+    ASSERT_TRUE(handler->initialize());
+
+    EXPECT_TRUE(handler->isConnected());
+    EXPECT_EQ(fake.sentFrames(ZnpSubsystem::SYS, cmd::sys::PING).size(), 2u);
+}
+
+TEST_F(ZigbeeHandlerFlowTest, ResponderCanCallBackIntoTheFake) {
+    // Shared, because shutdown sends this request again after the test body returns.
+    auto answered = std::make_shared<std::atomic<bool>>(false);
+    fake.setResponder(ZnpSubsystem::ZDO, cmd::zdo::MGMT_PERMIT_JOIN_REQ,
+                      [this, answered](const ZnpFrame&) {
+                          *answered = !fake.sentFrames(ZnpSubsystem::ZDO,
+                                                       cmd::zdo::MGMT_PERMIT_JOIN_REQ).empty();
+                          return std::vector<uint8_t>{0};
+                      });
+
+    handler->startDiscovery();
+
+    EXPECT_TRUE(*answered);
+    EXPECT_TRUE(handler->isDiscovering());
+}
+
 TEST_F(ZigbeeHandlerFlowTest, PairingConfiguresAttributeReporting) {
     ASSERT_NE(pair(LIGHT), nullptr);
 
@@ -304,6 +381,35 @@ TEST_F(ZigbeeHandlerFlowTest, LeavingMarksDeviceOffline) {
     std::lock_guard<std::mutex> lock(mutex);
     EXPECT_EQ(availabilityChanges[0].first, idOf(PLUG));
     EXPECT_EQ(availabilityChanges[0].second, DeviceAvailability::Offline);
+}
+
+// ---- Devices that don't finish answering -----------------------------------
+
+class ZigbeePairingTimeoutTest : public ZigbeeHandlerFlowTest {
+protected:
+    void SetUp() override {
+        handlerConfig["pairingTimeoutMs"] = 300;
+        ZigbeeHandlerFlowTest::SetUp();
+    }
+};
+
+TEST_F(ZigbeePairingTimeoutTest, UsesWhatArrivedWhenAnEndpointNeverAnswers) {
+    fake.holdDescriptor(MULTI_ENDPOINT_LIGHT.nwkAddr, 1);
+
+    auto device = pair(MULTI_ENDPOINT_LIGHT);
+
+    ASSERT_NE(device, nullptr);
+    EXPECT_EQ(device->type(), DeviceType::Dimmer);
+}
+
+TEST_F(ZigbeePairingTimeoutTest, NoDeviceWhenNoEndpointAnswers) {
+    fake.holdDescriptor(MULTI_ENDPOINT_LIGHT.nwkAddr, 1);
+    fake.holdDescriptor(MULTI_ENDPOINT_LIGHT.nwkAddr, 11);
+
+    fake.announceDevice(MULTI_ENDPOINT_LIGHT);
+
+    std::this_thread::sleep_for(800ms);  // Past the timeout, with the pairing thread done
+    EXPECT_EQ(discoveredCount(), 0u);
 }
 
 // ---- Commands --------------------------------------------------------------

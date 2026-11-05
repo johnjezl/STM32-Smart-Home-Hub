@@ -21,6 +21,48 @@ namespace smarthub::zigbee {
 // Construction / Destruction
 // ============================================================================
 
+namespace {
+
+/** True once every application endpoint has reported its clusters. */
+bool allEndpointsDescribed(const ZigbeeDeviceInfo& info) {
+    bool any = false;
+    for (uint8_t endpoint : info.endpoints) {
+        if (endpoint == 0) continue;  // ZDO
+        if (info.inClusters.find(endpoint) == info.inClusters.end()) return false;
+        any = true;
+    }
+    return any;
+}
+
+/** The first endpoint with a cluster we use, or else the first application endpoint. */
+std::optional<uint8_t> primaryEndpoint(const ZigbeeDeviceInfo& info) {
+    std::optional<uint8_t> fallback;
+    for (uint8_t endpoint : info.endpoints) {
+        if (endpoint == 0) continue;  // ZDO
+        if (!fallback) fallback = endpoint;
+
+        auto clusters = info.inClusters.find(endpoint);
+        if (clusters == info.inClusters.end()) continue;
+        for (uint16_t cluster : clusters->second) {
+            switch (cluster) {
+                case zcl::cluster::ON_OFF:
+                case zcl::cluster::LEVEL_CONTROL:
+                case zcl::cluster::COLOR_CONTROL:
+                case zcl::cluster::TEMPERATURE_MEASUREMENT:
+                case zcl::cluster::RELATIVE_HUMIDITY:
+                case zcl::cluster::IAS_ZONE:
+                case zcl::cluster::OCCUPANCY_SENSING:
+                    return endpoint;
+                default:
+                    break;
+            }
+        }
+    }
+    return fallback;
+}
+
+} // namespace
+
 ZigbeeHandler::ZigbeeHandler(EventBus& eventBus, const nlohmann::json& config)
     : m_eventBus(eventBus)
     , m_config(config)
@@ -28,10 +70,10 @@ ZigbeeHandler::ZigbeeHandler(EventBus& eventBus, const nlohmann::json& config)
 }
 
 ZigbeeHandler::ZigbeeHandler(EventBus& eventBus, const nlohmann::json& config,
-                             std::unique_ptr<ZigbeeCoordinator> coordinator)
+                             CoordinatorFactory coordinatorFactory)
     : ZigbeeHandler(eventBus, config)
 {
-    m_coordinator = std::move(coordinator);
+    m_coordinatorFactory = std::move(coordinatorFactory);
 }
 
 ZigbeeHandler::~ZigbeeHandler() {
@@ -54,10 +96,10 @@ bool ZigbeeHandler::initialize() {
 
     LOG_INFO("Initializing Zigbee handler on {} at {} baud", port, baudRate);
 
-    // Create coordinator, unless one was injected
-    if (!m_coordinator) {
-        m_coordinator = std::make_unique<ZigbeeCoordinator>(port, baudRate);
-    }
+    // Create coordinator
+    m_coordinator = m_coordinatorFactory
+        ? m_coordinatorFactory()
+        : std::make_unique<ZigbeeCoordinator>(port, baudRate);
 
     // Set up callbacks
     m_coordinator->setDeviceAnnouncedCallback(
@@ -330,14 +372,16 @@ void ZigbeeHandler::onDeviceAnnounced(uint16_t nwkAddr, uint64_t ieeeAddr) {
     // IMPORTANT: Don't block here! This callback runs on the ZNP reader thread.
     // Blocking would prevent reception of the Active Endpoints and Simple Descriptor responses.
     // Spawn a separate thread to wait for cluster info.
-    std::thread([this, nwkAddr, ieeeAddr]() {
-        // Wait for cluster info to be populated (up to 30 seconds)
+    const int timeoutMs = m_config.value("pairingTimeoutMs", 30000);
+    std::thread([this, nwkAddr, ieeeAddr, timeoutMs]() {
+        // Wait for every endpoint's clusters. Stopping at the first could classify
+        // the device from an endpoint that isn't the one doing the work.
         std::optional<ZigbeeDeviceInfo> deviceInfo;
-        for (int i = 0; i < 300; ++i) {
+        for (int elapsedMs = 0; elapsedMs < timeoutMs; elapsedMs += 100) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
             deviceInfo = m_coordinator->getDeviceByNwkAddr(nwkAddr);
-            if (deviceInfo && !deviceInfo->inClusters.empty()) {
-                LOG_INFO("Got cluster info after {} ms", (i + 1) * 100);
+            if (deviceInfo && allEndpointsDescribed(*deviceInfo)) {
+                LOG_INFO("Got cluster info after %d ms", elapsedMs + 100);
                 break;
             }
         }
@@ -348,7 +392,7 @@ void ZigbeeHandler::onDeviceAnnounced(uint16_t nwkAddr, uint64_t ieeeAddr) {
         }
 
         if (deviceInfo->inClusters.empty()) {
-            LOG_ERROR("No cluster info received for 0x{:04X} after 30s timeout - cannot determine device type", nwkAddr);
+            LOG_ERROR("No cluster info received for 0x%04X after %d ms - cannot determine device type", nwkAddr, timeoutMs);
             // Publish error event for UI
             if (m_discovering) {
                 DeviceStateEvent errorEvent;
@@ -358,6 +402,10 @@ void ZigbeeHandler::onDeviceAnnounced(uint16_t nwkAddr, uint64_t ieeeAddr) {
                 m_eventBus.publish(errorEvent);
             }
             return;
+        }
+
+        if (!allEndpointsDescribed(*deviceInfo)) {
+            LOG_WARN("Not all endpoints of 0x%04X reported clusters; using what arrived", nwkAddr);
         }
 
         // Create SmartHub device from Zigbee device info
@@ -374,22 +422,15 @@ void ZigbeeHandler::onDeviceAnnounced(uint16_t nwkAddr, uint64_t ieeeAddr) {
             m_ieeeToDeviceId[ieeeAddr] = deviceId;
             m_deviceIdToIeee[deviceId] = ieeeAddr;
 
-            // Store primary endpoint (first application endpoint)
-            if (!deviceInfo->endpoints.empty()) {
-                // Skip endpoint 0 (ZDO)
-                for (uint8_t ep : deviceInfo->endpoints) {
-                    if (ep != 0) {
-                        m_deviceEndpoints[ieeeAddr] = ep;
-                        break;
-                    }
-                }
+            // Store primary endpoint
+            if (auto primary = primaryEndpoint(*deviceInfo)) {
+                m_deviceEndpoints[ieeeAddr] = *primary;
             }
         }
 
         // Set up attribute reporting for the device type
         DeviceType type = inferDeviceType(*deviceInfo);
-        uint8_t endpoint = m_deviceEndpoints[ieeeAddr];
-        setupReporting(nwkAddr, endpoint, type);
+        setupReporting(nwkAddr, primaryEndpoint(*deviceInfo).value_or(0), type);
 
         // If in discovery mode, store as pending and notify via pending callback
         // Don't auto-add - let the UI wizard complete first
