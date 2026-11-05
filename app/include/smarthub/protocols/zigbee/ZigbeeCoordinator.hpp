@@ -175,6 +175,18 @@ public:
     bool requestDeviceInfo(uint16_t nwkAddr);
 
     /**
+     * Lookup network address by IEEE address (queries coordinator)
+     * This is used to find device addresses after restart
+     */
+    void lookupNetworkAddress(uint64_t ieeeAddr);
+
+    /**
+     * Query all associated devices from coordinator
+     * This populates device maps by getting the neighbor table
+     */
+    void queryAssociatedDevices();
+
+    /**
      * Leave request - ask a device to leave the network
      */
     bool leaveRequest(uint64_t ieeeAddr);
@@ -253,6 +265,9 @@ private:
     void handleIndication(const ZnpFrame& frame);
     void handleStateChange(const ZnpFrame& frame);
     void handleDeviceAnnounce(const ZnpFrame& frame);
+    void handleIeeeAddrRsp(const ZnpFrame& frame);
+    void handleNwkAddrRsp(const ZnpFrame& frame);
+    void handleMgmtLqiRsp(const ZnpFrame& frame);
     void handleDeviceLeave(const ZnpFrame& frame);
     void handleIncomingMessage(const ZnpFrame& frame);
     void handleTcDeviceInd(const ZnpFrame& frame);

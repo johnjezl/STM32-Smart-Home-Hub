@@ -144,34 +144,42 @@ void SensorHistoryScreen::loadSensorData() {
             lv_label_set_text(m_subtitleLabel, device->name().c_str());
         }
 
-        // Update current value
-        auto value = device->getProperty("value");
-        if (value.is_number() && m_currentValueLabel) {
-            char buf[32];
-            std::string unit;
+        // Update current value based on device type
+        if (m_currentValueLabel) {
+            char buf[64];
+            bool hasValue = false;
 
-            switch (device->type()) {
-                case DeviceType::TemperatureSensor:
-                    unit = "°F";
-                    snprintf(buf, sizeof(buf), "%.1f%s", value.get<float>(), unit.c_str());
+            if (device->type() == DeviceType::TemperatureSensor) {
+                auto temp = device->getProperty("temperature");
+                auto humidity = device->getProperty("humidity");
+                if (temp.is_number()) {
+                    float tempF = temp.get<float>() * 9.0f / 5.0f + 32.0f;
+                    if (humidity.is_number()) {
+                        snprintf(buf, sizeof(buf), "%.1f°F / %.0f%%", tempF, humidity.get<float>());
+                    } else {
+                        snprintf(buf, sizeof(buf), "%.1f°F", tempF);
+                    }
+                    hasValue = true;
                     if (m_chart) {
                         m_chart->setYAxis("Temperature", "°F");
                         m_chart->setYRange(50, 90);
                     }
-                    break;
-                case DeviceType::HumiditySensor:
-                    unit = "%";
-                    snprintf(buf, sizeof(buf), "%.0f%s", value.get<float>(), unit.c_str());
+                }
+            } else if (device->type() == DeviceType::HumiditySensor) {
+                auto humidity = device->getProperty("humidity");
+                if (humidity.is_number()) {
+                    snprintf(buf, sizeof(buf), "%.0f%%", humidity.get<float>());
+                    hasValue = true;
                     if (m_chart) {
                         m_chart->setYAxis("Humidity", "%");
                         m_chart->setYRange(0, 100);
                     }
-                    break;
-                default:
-                    snprintf(buf, sizeof(buf), "%.1f", value.get<float>());
-                    break;
+                }
             }
-            lv_label_set_text(m_currentValueLabel, buf);
+
+            if (hasValue) {
+                lv_label_set_text(m_currentValueLabel, buf);
+            }
         }
 
         // Update chart title
@@ -193,17 +201,23 @@ void SensorHistoryScreen::generateMockData() {
     m_historyData.clear();
 
     auto device = m_deviceManager.getDevice(m_sensorId);
-    float baseValue = 72.0f;  // Default base temp
+    float baseValue = 72.0f;  // Default base temp (in Fahrenheit for display)
     float variation = 5.0f;
 
     if (device) {
-        auto value = device->getProperty("value");
-        if (value.is_number()) {
-            baseValue = value.get<float>();
-        }
-
-        if (device->type() == DeviceType::HumiditySensor) {
-            baseValue = 45.0f;
+        if (device->type() == DeviceType::TemperatureSensor) {
+            auto temp = device->getProperty("temperature");
+            if (temp.is_number()) {
+                // Convert Celsius to Fahrenheit for chart display
+                baseValue = temp.get<float>() * 9.0f / 5.0f + 32.0f;
+            }
+        } else if (device->type() == DeviceType::HumiditySensor) {
+            auto humidity = device->getProperty("humidity");
+            if (humidity.is_number()) {
+                baseValue = humidity.get<float>();
+            } else {
+                baseValue = 45.0f;
+            }
             variation = 15.0f;
         }
     }

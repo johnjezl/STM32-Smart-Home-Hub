@@ -25,18 +25,22 @@ struct RoomData {
     std::string id;
     std::string name;
     float temperature = 0.0f;     // Current temp in Fahrenheit
+    float humidity = 0.0f;        // Current humidity percentage
     int activeDevices = 0;        // Number of active lights/switches
     bool hasTemperature = false;  // Whether temp sensor is available
+    bool hasHumidity = false;     // Whether humidity data is available
+    bool hasMotion = false;       // Whether motion/presence is detected
 };
 
 /**
  * RoomCard widget for dashboard
  *
  * Layout (~180x100):
- * +-------------+
- * | Living Rm   |
- * | 72°F   💡3  |
- * +-------------+
+ * +----------------+
+ * | Living Rm      |
+ * | 72°F / 45%  💡3|
+ * +----------------+
+ * Border highlighted when motion detected
  */
 class RoomCard {
 public:

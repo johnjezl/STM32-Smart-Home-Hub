@@ -43,6 +43,8 @@ private:
 #ifdef SMARTHUB_ENABLE_LVGL
     void createHeader();
     void createContent();
+    void createSensorPanel();
+    void refreshSensorPanel();
     void refreshDeviceList();
 
     lv_obj_t* createDeviceRow(lv_obj_t* parent, const std::string& deviceId,
@@ -67,6 +69,14 @@ private:
     lv_obj_t* m_editBtn = nullptr;
     lv_obj_t* m_titleLabel = nullptr;
     lv_obj_t* m_content = nullptr;
+
+    // Sensor summary panel
+    lv_obj_t* m_sensorPanel = nullptr;
+    lv_obj_t* m_tempValueLabel = nullptr;
+    lv_obj_t* m_humidityValueLabel = nullptr;
+    lv_obj_t* m_motionIndicator = nullptr;
+    lv_obj_t* m_motionLabel = nullptr;
+
     lv_obj_t* m_deviceList = nullptr;
     lv_obj_t* m_emptyLabel = nullptr;
 #endif

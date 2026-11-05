@@ -40,8 +40,11 @@ class SmartHubApp {
     }
 
     init() {
+        console.log('init called');
         this.checkAuth();
+        console.log('checkAuth done, setting up listeners');
         this.setupEventListeners();
+        console.log('init complete');
     }
 
     setupEventListeners() {
@@ -146,24 +149,12 @@ class SmartHubApp {
     // ==================== Authentication ====================
 
     async checkAuth() {
-        try {
-            const response = await fetch('/api/auth/me', {
-                credentials: 'include'
-            });
-
-            if (response.ok) {
-                this.currentUser = await response.json();
-                this.showDashboard();
-            } else {
-                // For demo: skip login and go directly to dashboard
-                this.currentUser = { username: 'Demo User' };
-                this.showDashboard();
-            }
-        } catch (error) {
-            // For demo: skip login and go directly to dashboard
-            this.currentUser = { username: 'Demo User' };
-            this.showDashboard();
-        }
+        console.log('checkAuth called');
+        // Authentication disabled - go directly to dashboard
+        this.currentUser = { username: 'User' };
+        console.log('calling showDashboard');
+        this.showDashboard();
+        console.log('showDashboard returned');
     }
 
     async login() {
@@ -215,8 +206,10 @@ class SmartHubApp {
     }
 
     showDashboard() {
+        console.log('showDashboard called');
         document.getElementById('login-screen').classList.add('hidden');
         document.getElementById('dashboard-screen').classList.remove('hidden');
+        console.log('screens toggled');
 
         if (this.currentUser) {
             document.getElementById('user-name').textContent = this.currentUser.username || 'User';
@@ -259,8 +252,6 @@ class SmartHubApp {
             if (response.ok) {
                 const devices = await response.json();
                 await this.processDevices(devices);
-            } else if (response.status === 401) {
-                this.logout();
             }
         } catch (error) {
             console.error('Failed to load devices:', error);
@@ -365,16 +356,37 @@ class SmartHubApp {
         this.rooms.forEach(room => {
             const roomDevices = [...this.devices, ...this.sensors].filter(d => d.room === room.name);
             const activeCount = roomDevices.filter(d => d.state?.on).length;
+
+            // Find temperature/humidity sensor
             const tempSensor = roomDevices.find(d => d.type?.includes('temperature'));
-            const temp = tempSensor?.state?.value;
+            const tempC = tempSensor?.state?.temperature;
+            const humidity = tempSensor?.state?.humidity;
+            const temp = tempC !== undefined ? (tempC * 9/5 + 32).toFixed(0) : null;
+
+            // Build climate string: "72° / 45%" or just "72°" or just "45%"
+            let climateStr = '';
+            if (temp && humidity !== undefined) {
+                climateStr = `${temp}° / ${Math.round(humidity)}%`;
+            } else if (temp) {
+                climateStr = `${temp}°`;
+            } else if (humidity !== undefined) {
+                climateStr = `${Math.round(humidity)}%`;
+            }
+
+            // Check for motion/presence
+            const motionSensor = roomDevices.find(d =>
+                d.type?.includes('motion') || d.type?.includes('presence'));
+            const hasMotion = motionSensor?.state?.motion ||
+                              motionSensor?.state?.presence ||
+                              motionSensor?.state?.active;
 
             const card = document.createElement('div');
-            card.className = 'room-card';
+            card.className = 'room-card' + (hasMotion ? ' motion-active' : '');
             card.innerHTML = `
                 <button class="room-card-menu" data-room-id="${room.id}">⋮</button>
                 <div class="room-header">
                     <div class="room-name">${room.name}</div>
-                    <div class="room-temp">${temp ? `${temp}°` : ''}</div>
+                    <div class="room-climate">${climateStr}</div>
                 </div>
                 <div class="room-devices">
                     ${roomDevices.slice(0, 6).map(d => `
@@ -393,8 +405,175 @@ class SmartHubApp {
                 this.openEditRoomModal(room);
             });
 
+            // Add click handler to open room detail
+            card.addEventListener('click', (e) => {
+                if (!e.target.closest('.room-card-menu')) {
+                    this.openRoomDetailModal(room);
+                }
+            });
+
             container.appendChild(card);
         });
+    }
+
+    openRoomDetailModal(room) {
+        // Set room name in header
+        document.getElementById('room-detail-name').textContent = room.name;
+
+        // Get devices in this room
+        const roomDevices = [...this.devices, ...this.sensors].filter(d => d.room === room.name);
+
+        // Find sensor data
+        const tempSensor = roomDevices.find(d => d.type?.includes('temperature'));
+        const motionSensor = roomDevices.find(d =>
+            d.type?.includes('motion') || d.type?.includes('presence'));
+
+        // Update temperature
+        const tempSection = document.getElementById('room-temp-section');
+        const tempValue = document.getElementById('room-detail-temp');
+        if (tempSensor?.state?.temperature !== undefined) {
+            const tempF = (tempSensor.state.temperature * 9/5 + 32).toFixed(0);
+            tempValue.textContent = `${tempF}°F`;
+            tempSection.classList.remove('hidden');
+        } else {
+            tempValue.textContent = '--°F';
+        }
+
+        // Update humidity
+        const humiditySection = document.getElementById('room-humidity-section');
+        const humidityValue = document.getElementById('room-detail-humidity');
+        if (tempSensor?.state?.humidity !== undefined) {
+            humidityValue.textContent = `${Math.round(tempSensor.state.humidity)}%`;
+            humiditySection.classList.remove('hidden');
+        } else {
+            humidityValue.textContent = '--%';
+        }
+
+        // Update motion indicator
+        const motionSection = document.getElementById('room-motion-section');
+        const motionIndicator = document.getElementById('room-motion-indicator');
+        const motionLabel = document.getElementById('room-motion-label');
+
+        if (motionSensor) {
+            const hasMotion = motionSensor.state?.motion ||
+                              motionSensor.state?.presence ||
+                              motionSensor.state?.active;
+
+            if (hasMotion) {
+                motionIndicator.classList.add('active');
+                motionLabel.textContent = 'Motion';
+                motionLabel.classList.add('active');
+            } else {
+                motionIndicator.classList.remove('active');
+                motionLabel.textContent = 'No Motion';
+                motionLabel.classList.remove('active');
+            }
+            motionSection.classList.remove('hidden');
+        } else {
+            motionSection.classList.add('hidden');
+        }
+
+        // Show/hide sensor panel based on whether we have any sensors
+        const sensorPanel = document.getElementById('room-sensor-panel');
+        const hasSensors = tempSensor || motionSensor;
+        if (hasSensors) {
+            sensorPanel.classList.remove('hidden');
+        } else {
+            sensorPanel.classList.add('hidden');
+        }
+
+        // Render devices list
+        const devicesList = document.getElementById('room-devices-list');
+        const emptyDevices = document.getElementById('room-empty-devices');
+        devicesList.innerHTML = '';
+
+        // Filter to controllable devices (non-sensors) and sensors separately
+        const controllableDevices = roomDevices.filter(d => !this.isSensor(d.type));
+        const sensorDevices = roomDevices.filter(d => this.isSensor(d.type));
+
+        if (roomDevices.length === 0) {
+            emptyDevices.classList.remove('hidden');
+        } else {
+            emptyDevices.classList.add('hidden');
+
+            // Render controllable devices with toggles
+            controllableDevices.forEach(device => {
+                const isOn = device.state?.on || false;
+                const row = document.createElement('div');
+                row.className = 'room-device-row';
+                row.innerHTML = `
+                    <div class="room-device-info">
+                        <div class="room-device-icon ${isOn ? 'on' : ''}">
+                            ${this.getDeviceIcon(device.type)}
+                        </div>
+                        <div>
+                            <div class="room-device-name">${device.name}</div>
+                            <div class="room-device-type">${device.type}</div>
+                        </div>
+                    </div>
+                    <label class="toggle">
+                        <input type="checkbox" ${isOn ? 'checked' : ''}
+                            data-device-id="${device.id}">
+                        <span class="toggle-slider"></span>
+                    </label>
+                `;
+
+                // Add toggle handler
+                const toggle = row.querySelector('.toggle input');
+                toggle.addEventListener('change', (e) => {
+                    this.toggleDevice(device.id, e.target.checked);
+                    // Update icon state
+                    row.querySelector('.room-device-icon').classList.toggle('on', e.target.checked);
+                });
+
+                devicesList.appendChild(row);
+            });
+
+            // Render sensors with their values
+            sensorDevices.forEach(sensor => {
+                const row = document.createElement('div');
+                row.className = 'room-device-row';
+
+                // Format sensor value
+                let valueStr = '';
+                let valueClass = '';
+                if (sensor.type?.includes('temperature')) {
+                    const tempC = sensor.state?.temperature;
+                    const humidity = sensor.state?.humidity;
+                    if (tempC !== undefined) {
+                        const tempF = (tempC * 9/5 + 32).toFixed(0);
+                        valueStr = humidity !== undefined
+                            ? `${tempF}°F / ${Math.round(humidity)}%`
+                            : `${tempF}°F`;
+                    }
+                } else if (sensor.type?.includes('motion') || sensor.type?.includes('presence')) {
+                    const active = sensor.state?.motion ||
+                                   sensor.state?.presence ||
+                                   sensor.state?.active;
+                    valueStr = active ? 'Motion' : 'Clear';
+                    valueClass = active ? 'active' : '';
+                } else if (sensor.type?.includes('contact')) {
+                    valueStr = sensor.state?.active ? 'Closed' : 'Open';
+                }
+
+                row.innerHTML = `
+                    <div class="room-device-info">
+                        <div class="room-device-icon">
+                            ${this.getSensorIcon(sensor.type)}
+                        </div>
+                        <div>
+                            <div class="room-device-name">${sensor.name}</div>
+                            <div class="room-device-type">${sensor.type}</div>
+                        </div>
+                    </div>
+                    <div class="room-sensor-value ${valueClass}">${valueStr}</div>
+                `;
+
+                devicesList.appendChild(row);
+            });
+        }
+
+        this.openModal('room-detail-modal');
     }
 
     renderDevices() {
@@ -489,8 +668,36 @@ class SmartHubApp {
             const card = document.createElement('div');
             card.className = 'sensor-card';
 
-            const value = sensor.state?.value;
-            const { displayValue, unit, colorClass } = this.formatSensorValue(sensor.type, value);
+            // Get value based on sensor type (backend stores temperature in Celsius)
+            let displayStr = '--';
+            let colorClass = '';
+
+            if (sensor.type?.includes('temperature')) {
+                const tempC = sensor.state?.temperature;
+                const humidity = sensor.state?.humidity;
+                if (tempC !== undefined) {
+                    const tempF = (tempC * 9/5 + 32).toFixed(1);
+                    if (humidity !== undefined) {
+                        displayStr = `${tempF}°F / ${Math.round(humidity)}%`;
+                    } else {
+                        displayStr = `${tempF}°F`;
+                    }
+                    colorClass = 'temperature';
+                }
+            } else if (sensor.type?.includes('humidity')) {
+                const humidity = sensor.state?.humidity;
+                if (humidity !== undefined) {
+                    displayStr = `${Math.round(humidity)}%`;
+                    colorClass = 'humidity';
+                }
+            } else if (sensor.type?.includes('motion')) {
+                const active = sensor.state?.active;
+                displayStr = active ? 'Motion' : 'Clear';
+                colorClass = 'motion';
+            } else if (sensor.type?.includes('contact')) {
+                const active = sensor.state?.active;
+                displayStr = active ? 'Closed' : 'Open';
+            }
 
             card.innerHTML = `
                 <div class="sensor-header">
@@ -500,7 +707,7 @@ class SmartHubApp {
                     </div>
                     <div>${this.getSensorIcon(sensor.type)}</div>
                 </div>
-                <div class="sensor-value ${colorClass}">${displayValue}${unit}</div>
+                <div class="sensor-value ${colorClass}">${displayStr}</div>
                 <div class="sensor-updated">Updated just now</div>
             `;
 

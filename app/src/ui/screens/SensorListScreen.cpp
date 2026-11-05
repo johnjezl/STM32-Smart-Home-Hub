@@ -198,20 +198,40 @@ void SensorListScreen::createSensorCards() {
         lv_obj_set_style_text_color(valueLabel, m_theme.textPrimary(), 0);
         lv_obj_align(valueLabel, LV_ALIGN_CENTER, 0, 10);
 
-        // Get current value
-        auto value = device->getProperty("value");
-        if (value.is_number()) {
-            char buf[32];
-            if (unit == "°F") {
-                snprintf(buf, sizeof(buf), "%.1f%s", value.get<float>(), unit.c_str());
-            } else if (unit == "%") {
-                snprintf(buf, sizeof(buf), "%.0f%s", value.get<float>(), unit.c_str());
-            } else {
-                snprintf(buf, sizeof(buf), "%.1f", value.get<float>());
+        // Get current value based on device type
+        char buf[64];
+        bool hasValue = false;
+
+        if (device->type() == DeviceType::TemperatureSensor) {
+            auto temp = device->getProperty("temperature");
+            auto humidity = device->getProperty("humidity");
+            if (temp.is_number()) {
+                // Convert Celsius to Fahrenheit for display
+                float tempF = temp.get<float>() * 9.0f / 5.0f + 32.0f;
+                if (humidity.is_number()) {
+                    snprintf(buf, sizeof(buf), "%.1f°F / %.0f%%", tempF, humidity.get<float>());
+                } else {
+                    snprintf(buf, sizeof(buf), "%.1f°F", tempF);
+                }
+                hasValue = true;
             }
+        } else if (device->type() == DeviceType::HumiditySensor) {
+            auto humidity = device->getProperty("humidity");
+            if (humidity.is_number()) {
+                snprintf(buf, sizeof(buf), "%.0f%%", humidity.get<float>());
+                hasValue = true;
+            }
+        } else if (device->type() == DeviceType::MotionSensor ||
+                   device->type() == DeviceType::ContactSensor) {
+            auto active = device->getProperty("active");
+            if (active.is_boolean()) {
+                snprintf(buf, sizeof(buf), "%s", active.get<bool>() ? "Active" : "Inactive");
+                hasValue = true;
+            }
+        }
+
+        if (hasValue) {
             lv_label_set_text(valueLabel, buf);
-        } else if (value.is_boolean()) {
-            lv_label_set_text(valueLabel, value.get<bool>() ? "Active" : "Inactive");
         } else {
             lv_label_set_text(valueLabel, "--");
         }
@@ -237,26 +257,38 @@ void SensorListScreen::refreshSensorValues() {
         auto device = m_deviceManager.getDevice(sc.id);
         if (!device || !sc.valueLabel) continue;
 
-        std::string unit;
-        switch (device->type()) {
-            case DeviceType::TemperatureSensor: unit = "°F"; break;
-            case DeviceType::HumiditySensor: unit = "%"; break;
-            default: break;
+        char buf[64];
+        bool hasValue = false;
+
+        if (device->type() == DeviceType::TemperatureSensor) {
+            auto temp = device->getProperty("temperature");
+            auto humidity = device->getProperty("humidity");
+            if (temp.is_number()) {
+                float tempF = temp.get<float>() * 9.0f / 5.0f + 32.0f;
+                if (humidity.is_number()) {
+                    snprintf(buf, sizeof(buf), "%.1f°F / %.0f%%", tempF, humidity.get<float>());
+                } else {
+                    snprintf(buf, sizeof(buf), "%.1f°F", tempF);
+                }
+                hasValue = true;
+            }
+        } else if (device->type() == DeviceType::HumiditySensor) {
+            auto humidity = device->getProperty("humidity");
+            if (humidity.is_number()) {
+                snprintf(buf, sizeof(buf), "%.0f%%", humidity.get<float>());
+                hasValue = true;
+            }
+        } else if (device->type() == DeviceType::MotionSensor ||
+                   device->type() == DeviceType::ContactSensor) {
+            auto active = device->getProperty("active");
+            if (active.is_boolean()) {
+                snprintf(buf, sizeof(buf), "%s", active.get<bool>() ? "Active" : "Inactive");
+                hasValue = true;
+            }
         }
 
-        auto value = device->getProperty("value");
-        if (value.is_number()) {
-            char buf[32];
-            if (unit == "°F") {
-                snprintf(buf, sizeof(buf), "%.1f%s", value.get<float>(), unit.c_str());
-            } else if (unit == "%") {
-                snprintf(buf, sizeof(buf), "%.0f%s", value.get<float>(), unit.c_str());
-            } else {
-                snprintf(buf, sizeof(buf), "%.1f", value.get<float>());
-            }
+        if (hasValue) {
             lv_label_set_text(sc.valueLabel, buf);
-        } else if (value.is_boolean()) {
-            lv_label_set_text(sc.valueLabel, value.get<bool>() ? "Active" : "Inactive");
         }
     }
 }

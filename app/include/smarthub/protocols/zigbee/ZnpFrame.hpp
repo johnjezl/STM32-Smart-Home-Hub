@@ -91,7 +91,10 @@ namespace zdo {
     constexpr uint8_t BIND_REQ          = 0x21;
     constexpr uint8_t UNBIND_REQ        = 0x22;
     constexpr uint8_t MGMT_LQI_REQ      = 0x31;
+    constexpr uint8_t MGMT_RTG_REQ      = 0x32;
     constexpr uint8_t MGMT_LEAVE_REQ    = 0x34;
+    // AREQ response for MGMT_LQI_REQ
+    constexpr uint8_t MGMT_LQI_RSP      = 0xB1;
     constexpr uint8_t MGMT_PERMIT_JOIN_REQ = 0x36;
     constexpr uint8_t STARTUP_FROM_APP  = 0x40;
 

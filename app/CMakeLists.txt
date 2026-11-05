@@ -148,6 +148,7 @@ set(DEVICES_SOURCES
     src/devices/types/ColorLightDevice.cpp
     src/devices/types/TemperatureSensor.cpp
     src/devices/types/MotionSensor.cpp
+    src/devices/types/ContactSensor.cpp
 )
 
 # Source files - Protocols

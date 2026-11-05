@@ -328,7 +328,7 @@ diff buildroot/configs/smarthub_defconfig .config
 1. Make changes to overlay/scripts
 2. `./tools/build.sh` (fast, ~2 min)
 3. `./tools/flash.sh`
-4. Insert SD, power cycle, test
+4. Insert SD, power on via `power_on` MCP tool, test
 5. Repeat
 
 ### Testing Without Reflash
@@ -409,18 +409,20 @@ file smarthub
 ### Deployment to Target
 
 ```bash
-# Copy binary to board (use -O for legacy SCP if sftp not available)
-scp -O build-arm/smarthub root@192.168.4.99:/opt/smarthub/bin/
+# Copy binary to board
+scp -O build-arm/smarthub root@smarthub.local:/opt/smarthub/bin/
 
 # Or to /tmp for testing
-scp -O build-arm/smarthub root@192.168.4.99:/tmp/
+scp -O build-arm/smarthub root@smarthub.local:/tmp/
 ```
+
+If the board is unresponsive, use the `power_cycle` MCP tool with `sbc_name: "stm32mp157f-dk2"`.
 
 ### Testing on Target
 
 ```bash
 # SSH to board
-ssh root@192.168.4.99
+ssh root@smarthub.local
 
 # Test help
 /tmp/smarthub --help
@@ -490,7 +492,7 @@ The build system only links yaml-cpp if the library file is actually found in th
 **Library not found at runtime:**
 ```bash
 # Check library dependencies on target
-ssh root@<board-ip> "ldd /tmp/smarthub"
+ssh root@smarthub.local "ldd /tmp/smarthub"
 ```
 
 ---
@@ -504,4 +506,4 @@ ssh root@<board-ip> "ldd /tmp/smarthub"
 ---
 
 *Created: 28 December 2025*
-*Updated: 29 December 2025 - Added cross-compilation section, LVGL/DRM documentation*
+*Updated: 3 April 2026 - Updated device references to use labctl and mDNS hostnames*

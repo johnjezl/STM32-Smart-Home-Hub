@@ -51,6 +51,7 @@ void RoomDetailScreen::onShow() {
     if (m_titleLabel) {
         lv_label_set_text(m_titleLabel, m_roomName.c_str());
     }
+    refreshSensorPanel();
     refreshDeviceList();
     LOG_DEBUG("RoomDetailScreen shown for room: %s", m_roomName.c_str());
 #endif
@@ -137,6 +138,12 @@ void RoomDetailScreen::createContent() {
     lv_obj_set_style_border_width(m_content, 0, 0);
     lv_obj_set_style_pad_all(m_content, ThemeManager::SPACING_MD, 0);
     lv_obj_set_scroll_dir(m_content, LV_DIR_VER);
+    lv_obj_set_flex_flow(m_content, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(m_content, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_row(m_content, ThemeManager::SPACING_MD, 0);
+
+    // Sensor summary panel at top
+    createSensorPanel();
 
     // Device list container
     m_deviceList = lv_obj_create(m_content);
@@ -154,6 +161,224 @@ void RoomDetailScreen::createContent() {
     lv_obj_set_style_text_color(m_emptyLabel, m_theme.textSecondary(), 0);
     lv_obj_align(m_emptyLabel, LV_ALIGN_CENTER, 0, 0);
     lv_obj_add_flag(m_emptyLabel, LV_OBJ_FLAG_HIDDEN);
+}
+
+void RoomDetailScreen::createSensorPanel() {
+    // Sensor summary panel - shows temperature, humidity, motion at a glance
+    m_sensorPanel = lv_obj_create(m_content);
+    lv_obj_set_size(m_sensorPanel, LV_PCT(100), 120);
+    lv_obj_set_style_bg_color(m_sensorPanel, m_theme.surface(), 0);
+    lv_obj_set_style_radius(m_sensorPanel, ThemeManager::CARD_RADIUS, 0);
+    lv_obj_set_style_pad_all(m_sensorPanel, ThemeManager::SPACING_MD, 0);
+    lv_obj_clear_flag(m_sensorPanel, LV_OBJ_FLAG_SCROLLABLE);
+
+    // Temperature section (left side)
+    lv_obj_t* tempContainer = lv_obj_create(m_sensorPanel);
+    lv_obj_set_size(tempContainer, 140, 90);
+    lv_obj_align(tempContainer, LV_ALIGN_LEFT_MID, 0, 0);
+    lv_obj_set_style_bg_opa(tempContainer, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(tempContainer, 0, 0);
+    lv_obj_set_style_pad_all(tempContainer, 0, 0);
+    lv_obj_clear_flag(tempContainer, LV_OBJ_FLAG_SCROLLABLE);
+
+    // Temperature icon
+    lv_obj_t* tempIcon = lv_label_create(tempContainer);
+    lv_label_set_text(tempIcon, LV_SYMBOL_WARNING);  // Placeholder - thermometer-like
+    lv_obj_set_style_text_color(tempIcon, m_theme.primary(), 0);
+    lv_obj_set_style_text_font(tempIcon, &lv_font_montserrat_20, 0);
+    lv_obj_align(tempIcon, LV_ALIGN_TOP_LEFT, 0, 0);
+
+    lv_obj_t* tempLabel = lv_label_create(tempContainer);
+    lv_label_set_text(tempLabel, "Temperature");
+    lv_obj_set_style_text_color(tempLabel, m_theme.textSecondary(), 0);
+    lv_obj_set_style_text_font(tempLabel, &lv_font_montserrat_12, 0);
+    lv_obj_align(tempLabel, LV_ALIGN_TOP_LEFT, 30, 4);
+
+    // Temperature value (large)
+    m_tempValueLabel = lv_label_create(tempContainer);
+    lv_label_set_text(m_tempValueLabel, "--°F");
+    lv_obj_set_style_text_color(m_tempValueLabel, m_theme.textPrimary(), 0);
+    lv_obj_set_style_text_font(m_tempValueLabel, &lv_font_montserrat_32, 0);
+    lv_obj_align(m_tempValueLabel, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+
+    // Humidity section (center)
+    lv_obj_t* humidityContainer = lv_obj_create(m_sensorPanel);
+    lv_obj_set_size(humidityContainer, 120, 90);
+    lv_obj_align(humidityContainer, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_set_style_bg_opa(humidityContainer, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(humidityContainer, 0, 0);
+    lv_obj_set_style_pad_all(humidityContainer, 0, 0);
+    lv_obj_clear_flag(humidityContainer, LV_OBJ_FLAG_SCROLLABLE);
+
+    // Humidity icon
+    lv_obj_t* humidityIcon = lv_label_create(humidityContainer);
+    lv_label_set_text(humidityIcon, LV_SYMBOL_CHARGE);  // Placeholder - droplet-like
+    lv_obj_set_style_text_color(humidityIcon, m_theme.secondary(), 0);
+    lv_obj_set_style_text_font(humidityIcon, &lv_font_montserrat_20, 0);
+    lv_obj_align(humidityIcon, LV_ALIGN_TOP_LEFT, 0, 0);
+
+    lv_obj_t* humidityLabel = lv_label_create(humidityContainer);
+    lv_label_set_text(humidityLabel, "Humidity");
+    lv_obj_set_style_text_color(humidityLabel, m_theme.textSecondary(), 0);
+    lv_obj_set_style_text_font(humidityLabel, &lv_font_montserrat_12, 0);
+    lv_obj_align(humidityLabel, LV_ALIGN_TOP_LEFT, 30, 4);
+
+    // Humidity value (large)
+    m_humidityValueLabel = lv_label_create(humidityContainer);
+    lv_label_set_text(m_humidityValueLabel, "--%");
+    lv_obj_set_style_text_color(m_humidityValueLabel, m_theme.textPrimary(), 0);
+    lv_obj_set_style_text_font(m_humidityValueLabel, &lv_font_montserrat_32, 0);
+    lv_obj_align(m_humidityValueLabel, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+
+    // Motion section (right side)
+    lv_obj_t* motionContainer = lv_obj_create(m_sensorPanel);
+    lv_obj_set_size(motionContainer, 100, 90);
+    lv_obj_align(motionContainer, LV_ALIGN_RIGHT_MID, 0, 0);
+    lv_obj_set_style_bg_opa(motionContainer, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(motionContainer, 0, 0);
+    lv_obj_set_style_pad_all(motionContainer, 0, 0);
+    lv_obj_clear_flag(motionContainer, LV_OBJ_FLAG_SCROLLABLE);
+
+    // Motion indicator (circle that lights up)
+    m_motionIndicator = lv_obj_create(motionContainer);
+    lv_obj_set_size(m_motionIndicator, 50, 50);
+    lv_obj_align(m_motionIndicator, LV_ALIGN_TOP_MID, 0, 0);
+    lv_obj_set_style_radius(m_motionIndicator, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(m_motionIndicator, m_theme.surface(), 0);
+    lv_obj_set_style_border_width(m_motionIndicator, 2, 0);
+    lv_obj_set_style_border_color(m_motionIndicator, m_theme.textSecondary(), 0);
+    lv_obj_clear_flag(m_motionIndicator, LV_OBJ_FLAG_SCROLLABLE);
+
+    // Motion icon inside indicator
+    lv_obj_t* motionIcon = lv_label_create(m_motionIndicator);
+    lv_label_set_text(motionIcon, LV_SYMBOL_EYE_OPEN);
+    lv_obj_set_style_text_color(motionIcon, m_theme.textSecondary(), 0);
+    lv_obj_center(motionIcon);
+
+    // Motion label
+    m_motionLabel = lv_label_create(motionContainer);
+    lv_label_set_text(m_motionLabel, "No Motion");
+    lv_obj_set_style_text_color(m_motionLabel, m_theme.textSecondary(), 0);
+    lv_obj_set_style_text_font(m_motionLabel, &lv_font_montserrat_12, 0);
+    lv_obj_align(m_motionLabel, LV_ALIGN_BOTTOM_MID, 0, 0);
+
+    // Initially hide the panel - will show if room has sensors
+    lv_obj_add_flag(m_sensorPanel, LV_OBJ_FLAG_HIDDEN);
+}
+
+void RoomDetailScreen::refreshSensorPanel() {
+    if (!m_sensorPanel) return;
+
+    // Get devices in this room
+    auto devices = m_deviceManager.getDevicesByRoom(m_roomId);
+
+    bool hasTemp = false;
+    bool hasHumidity = false;
+    bool hasMotionSensor = false;
+    bool motionDetected = false;
+    float temperature = 0.0f;
+    float humidity = 0.0f;
+
+    for (const auto& device : devices) {
+        if (!device) continue;
+
+        auto state = device->getState();
+        auto type = device->type();
+
+        // Get temperature/humidity from temperature sensor
+        if (type == DeviceType::TemperatureSensor) {
+            if (state.contains("temperature") && state["temperature"].is_number()) {
+                float tempC = state["temperature"].get<float>();
+                temperature = tempC * 9.0f / 5.0f + 32.0f;  // Convert to Fahrenheit
+                hasTemp = true;
+            }
+            if (state.contains("humidity") && state["humidity"].is_number()) {
+                humidity = state["humidity"].get<float>();
+                hasHumidity = true;
+            }
+        }
+
+        // Check motion/presence sensors
+        if (type == DeviceType::MotionSensor) {
+            hasMotionSensor = true;
+            if ((state.contains("motion") && state["motion"].get<bool>()) ||
+                (state.contains("presence") && state["presence"].get<bool>()) ||
+                (state.contains("active") && state["active"].get<bool>())) {
+                motionDetected = true;
+            }
+        }
+    }
+
+    // Show/hide sensor panel based on whether we have any sensors
+    if (!hasTemp && !hasHumidity && !hasMotionSensor) {
+        lv_obj_add_flag(m_sensorPanel, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
+
+    lv_obj_clear_flag(m_sensorPanel, LV_OBJ_FLAG_HIDDEN);
+
+    // Update temperature display
+    if (m_tempValueLabel) {
+        if (hasTemp) {
+            char buf[16];
+            snprintf(buf, sizeof(buf), "%.0f°F", temperature);
+            lv_label_set_text(m_tempValueLabel, buf);
+            lv_obj_set_style_text_color(m_tempValueLabel, m_theme.textPrimary(), 0);
+        } else {
+            lv_label_set_text(m_tempValueLabel, "--°F");
+            lv_obj_set_style_text_color(m_tempValueLabel, m_theme.textSecondary(), 0);
+        }
+    }
+
+    // Update humidity display
+    if (m_humidityValueLabel) {
+        if (hasHumidity) {
+            char buf[16];
+            snprintf(buf, sizeof(buf), "%.0f%%", humidity);
+            lv_label_set_text(m_humidityValueLabel, buf);
+            lv_obj_set_style_text_color(m_humidityValueLabel, m_theme.textPrimary(), 0);
+        } else {
+            lv_label_set_text(m_humidityValueLabel, "--%");
+            lv_obj_set_style_text_color(m_humidityValueLabel, m_theme.textSecondary(), 0);
+        }
+    }
+
+    // Update motion indicator
+    if (m_motionIndicator && m_motionLabel) {
+        if (hasMotionSensor) {
+            if (motionDetected) {
+                // Motion detected - highlight
+                lv_obj_set_style_bg_color(m_motionIndicator, m_theme.warning(), 0);
+                lv_obj_set_style_border_color(m_motionIndicator, m_theme.warning(), 0);
+                lv_label_set_text(m_motionLabel, "Motion");
+                lv_obj_set_style_text_color(m_motionLabel, m_theme.warning(), 0);
+
+                // Update icon color
+                lv_obj_t* icon = lv_obj_get_child(m_motionIndicator, 0);
+                if (icon) {
+                    lv_obj_set_style_text_color(icon, lv_color_white(), 0);
+                }
+            } else {
+                // No motion - dim
+                lv_obj_set_style_bg_color(m_motionIndicator, m_theme.surface(), 0);
+                lv_obj_set_style_border_color(m_motionIndicator, m_theme.textSecondary(), 0);
+                lv_label_set_text(m_motionLabel, "No Motion");
+                lv_obj_set_style_text_color(m_motionLabel, m_theme.textSecondary(), 0);
+
+                // Update icon color
+                lv_obj_t* icon = lv_obj_get_child(m_motionIndicator, 0);
+                if (icon) {
+                    lv_obj_set_style_text_color(icon, m_theme.textSecondary(), 0);
+                }
+            }
+        } else {
+            // No motion sensor in room - hide the motion section
+            lv_obj_t* motionContainer = lv_obj_get_parent(m_motionIndicator);
+            if (motionContainer) {
+                lv_obj_add_flag(motionContainer, LV_OBJ_FLAG_HIDDEN);
+            }
+        }
+    }
 }
 
 void RoomDetailScreen::refreshDeviceList() {

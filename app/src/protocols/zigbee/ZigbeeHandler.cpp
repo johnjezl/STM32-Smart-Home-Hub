@@ -10,6 +10,7 @@
 #include <smarthub/devices/types/ColorLightDevice.hpp>
 #include <smarthub/devices/types/TemperatureSensor.hpp>
 #include <smarthub/devices/types/MotionSensor.hpp>
+#include <smarthub/devices/types/ContactSensor.hpp>
 #include <iomanip>
 #include <sstream>
 #include <thread>
@@ -304,7 +305,7 @@ bool ZigbeeHandler::loadDeviceDatabase(const std::string& path) {
 // ============================================================================
 
 void ZigbeeHandler::onDeviceAnnounced(uint16_t nwkAddr, uint64_t ieeeAddr) {
-    LOG_INFO("Zigbee device announced: nwk=0x{:04X}, ieee=0x{:016X}", nwkAddr, ieeeAddr);
+    LOG_INFO("Zigbee device announced: nwk=0x%04X, ieee=0x%016llX", nwkAddr, (unsigned long long)ieeeAddr);
 
     // Publish event to notify UI that a device was detected
     if (m_discovering) {
@@ -328,18 +329,18 @@ void ZigbeeHandler::onDeviceAnnounced(uint16_t nwkAddr, uint64_t ieeeAddr) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
             deviceInfo = m_coordinator->getDeviceByNwkAddr(nwkAddr);
             if (deviceInfo && !deviceInfo->inClusters.empty()) {
-                LOG_INFO("Got cluster info after {} ms", (i + 1) * 100);
+                LOG_INFO("Got cluster info after %d ms", (i + 1) * 100);
                 break;
             }
         }
 
         if (!deviceInfo) {
-            LOG_WARN("Device info not available for 0x{:04X}", nwkAddr);
+            LOG_WARN("Device info not available for 0x%04X", nwkAddr);
             return;
         }
 
         if (deviceInfo->inClusters.empty()) {
-            LOG_ERROR("No cluster info received for 0x{:04X} after 30s timeout - cannot determine device type", nwkAddr);
+            LOG_ERROR("No cluster info received for 0x%04X after 30s timeout - cannot determine device type", nwkAddr);
             // Publish error event for UI
             if (m_discovering) {
                 DeviceStateEvent errorEvent;
@@ -354,7 +355,7 @@ void ZigbeeHandler::onDeviceAnnounced(uint16_t nwkAddr, uint64_t ieeeAddr) {
         // Create SmartHub device from Zigbee device info
         auto device = createDeviceFromInfo(*deviceInfo);
         if (!device) {
-            LOG_ERROR("Failed to create device for 0x{:016X}", ieeeAddr);
+            LOG_ERROR("Failed to create device for 0x%016llX", (unsigned long long)ieeeAddr);
             return;
         }
 
@@ -403,7 +404,7 @@ void ZigbeeHandler::onDeviceAnnounced(uint16_t nwkAddr, uint64_t ieeeAddr) {
 }
 
 void ZigbeeHandler::onDeviceLeft(uint64_t ieeeAddr) {
-    LOG_INFO("Zigbee device left: ieee=0x{:016X}", ieeeAddr);
+    LOG_INFO("Zigbee device left: ieee=0x%016llX", (unsigned long long)ieeeAddr);
 
     std::string deviceId;
     {
@@ -424,12 +425,16 @@ void ZigbeeHandler::onDeviceLeft(uint64_t ieeeAddr) {
 }
 
 void ZigbeeHandler::onAttributeReport(uint16_t nwkAddr, const ZclAttributeValue& attr) {
-    LOG_DEBUG("Attribute report: nwk=0x{:04X}, cluster=0x{:04X}, attr=0x{:04X}",
+    LOG_INFO("Attribute report: nwk=0x%04X, cluster=0x%04X, attr=0x%04X",
               nwkAddr, attr.clusterId, attr.attributeId);
 
     // Find device ID
     auto deviceInfo = m_coordinator->getDeviceByNwkAddr(nwkAddr);
     if (!deviceInfo) {
+        // Device not in coordinator's map - request its info to learn about it
+        // This happens after restart when we don't know existing devices
+        LOG_INFO("Unknown device 0x%04X, requesting info...", nwkAddr);
+        m_coordinator->requestDeviceInfo(nwkAddr);
         return;
     }
 
@@ -439,10 +444,21 @@ void ZigbeeHandler::onAttributeReport(uint16_t nwkAddr, const ZclAttributeValue&
         auto it = m_ieeeToDeviceId.find(deviceInfo->ieeeAddress);
         if (it != m_ieeeToDeviceId.end()) {
             deviceId = it->second;
+        } else {
+            // Device in coordinator but not in our map - derive ID from IEEE
+            char idBuf[32];
+            snprintf(idBuf, sizeof(idBuf), "zigbee_%016llx",
+                     (unsigned long long)deviceInfo->ieeeAddress);
+            deviceId = idBuf;
+            // Add to our maps for future lookups
+            m_ieeeToDeviceId[deviceInfo->ieeeAddress] = deviceId;
+            m_deviceIdToIeee[deviceId] = deviceInfo->ieeeAddress;
+            LOG_INFO("Registered device %s from attribute report", deviceId.c_str());
         }
     }
 
     if (deviceId.empty()) {
+        LOG_WARN("No device ID for IEEE 0x%016llX", (unsigned long long)deviceInfo->ieeeAddress);
         return;
     }
 
@@ -483,8 +499,10 @@ void ZigbeeHandler::onAttributeReport(uint16_t nwkAddr, const ZclAttributeValue&
         case zcl::cluster::TEMPERATURE_MEASUREMENT:
             if (attr.attributeId == zcl::attr::temperature::MEASURED_VALUE) {
                 // Temperature in 0.01°C units
+                double tempC = attr.asInt16() / 100.0;
+                LOG_INFO("Temperature report: device=%s, temp=%.2f°C", deviceId.c_str(), tempC);
                 if (m_stateCb) {
-                    m_stateCb(deviceId, "temperature", attr.asInt16() / 100.0);
+                    m_stateCb(deviceId, "temperature", tempC);
                 }
             }
             break;
@@ -492,8 +510,10 @@ void ZigbeeHandler::onAttributeReport(uint16_t nwkAddr, const ZclAttributeValue&
         case zcl::cluster::RELATIVE_HUMIDITY:
             if (attr.attributeId == zcl::attr::humidity::MEASURED_VALUE) {
                 // Humidity in 0.01% units
+                double humidity = attr.asUint16() / 100.0;
+                LOG_INFO("Humidity report: device=%s, humidity=%.2f%%", deviceId.c_str(), humidity);
                 if (m_stateCb) {
-                    m_stateCb(deviceId, "humidity", attr.asUint16() / 100.0);
+                    m_stateCb(deviceId, "humidity", humidity);
                 }
             }
             break;
@@ -510,7 +530,7 @@ void ZigbeeHandler::onAttributeReport(uint16_t nwkAddr, const ZclAttributeValue&
             break;
 
         default:
-            LOG_DEBUG("Unhandled cluster 0x{:04X} in attribute report", attr.clusterId);
+            LOG_DEBUG("Unhandled cluster 0x%04X in attribute report", attr.clusterId);
             break;
     }
 }
@@ -518,7 +538,7 @@ void ZigbeeHandler::onAttributeReport(uint16_t nwkAddr, const ZclAttributeValue&
 void ZigbeeHandler::onCommandReceived(uint16_t nwkAddr, uint8_t endpoint,
                                        uint16_t cluster, uint8_t command,
                                        const std::vector<uint8_t>& payload) {
-    LOG_DEBUG("Command received: nwk=0x{:04X}, ep={}, cluster=0x{:04X}, cmd={}",
+    LOG_DEBUG("Command received: nwk=0x%04X, ep=%d, cluster=0x%04X, cmd=%d",
               nwkAddr, endpoint, cluster, command);
 
     // Find device ID
@@ -629,6 +649,10 @@ DevicePtr ZigbeeHandler::createDeviceFromInfo(const ZigbeeDeviceInfo& info) {
             device = std::make_shared<MotionSensor>(deviceId, name, "zigbee");
             break;
 
+        case DeviceType::ContactSensor:
+            device = std::make_shared<ContactSensor>(deviceId, name, "zigbee");
+            break;
+
         default:
             // Create as generic switch
             LOG_WARN("Unknown device type, creating as switch: {}", name);
@@ -657,13 +681,13 @@ DeviceType ZigbeeHandler::inferDeviceType(const ZigbeeDeviceInfo& info) {
     bool hasIasZone = false;
     bool hasOccupancy = false;
 
-    LOG_DEBUG("Inferring device type for {:016X}, {} endpoints with cluster info",
-              info.ieeeAddress, info.inClusters.size());
+    LOG_DEBUG("Inferring device type for 0x%016llX, %zu endpoints with cluster info",
+              (unsigned long long)info.ieeeAddress, info.inClusters.size());
 
     for (const auto& [endpoint, clusters] : info.inClusters) {
-        LOG_DEBUG("  Endpoint {} has {} clusters", endpoint, clusters.size());
+        LOG_DEBUG("  Endpoint %d has %zu clusters", endpoint, clusters.size());
         for (uint16_t cluster : clusters) {
-            LOG_DEBUG("    Cluster: 0x{:04X}", cluster);
+            LOG_DEBUG("    Cluster: 0x%04X", cluster);
             switch (cluster) {
                 case zcl::cluster::ON_OFF:
                     hasOnOff = true;
@@ -702,6 +726,19 @@ DeviceType ZigbeeHandler::inferDeviceType(const ZigbeeDeviceInfo& info) {
         // Prioritize temperature sensor for sensors with temp/humidity clusters
         return DeviceType::TemperatureSensor;
     } else if (hasIasZone || hasOccupancy) {
+        // Check model string to distinguish motion sensors from contact sensors
+        std::string modelLower = info.model;
+        std::transform(modelLower.begin(), modelLower.end(), modelLower.begin(), ::tolower);
+
+        // Tilt sensors, door sensors, window sensors are contact sensors
+        if (modelLower.find("tilt") != std::string::npos ||
+            modelLower.find("door") != std::string::npos ||
+            modelLower.find("window") != std::string::npos ||
+            modelLower.find("contact") != std::string::npos ||
+            modelLower.find("garage") != std::string::npos ||
+            modelLower.find("open") != std::string::npos) {
+            return DeviceType::ContactSensor;
+        }
         return DeviceType::MotionSensor;
     } else if (hasOnOff) {
         return DeviceType::Switch;

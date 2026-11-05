@@ -51,6 +51,7 @@ if(GTEST_AVAILABLE)
         ${CMAKE_SOURCE_DIR}/src/devices/types/ColorLightDevice.cpp
         ${CMAKE_SOURCE_DIR}/src/devices/types/TemperatureSensor.cpp
         ${CMAKE_SOURCE_DIR}/src/devices/types/MotionSensor.cpp
+        ${CMAKE_SOURCE_DIR}/src/devices/types/ContactSensor.cpp
         ${CMAKE_SOURCE_DIR}/src/protocols/ProtocolFactory.cpp
         ${CMAKE_SOURCE_DIR}/src/protocols/mqtt/MqttClient.cpp
         ${CMAKE_SOURCE_DIR}/src/protocols/zigbee/ZnpFrame.cpp

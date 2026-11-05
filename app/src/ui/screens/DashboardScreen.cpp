@@ -178,19 +178,48 @@ void DashboardScreen::createRoomCards() {
         data.id = roomId;
         data.name = roomName;
         data.hasTemperature = false;
+        data.hasHumidity = false;
+        data.hasMotion = false;
         data.activeDevices = 0;
 
-        // Count active devices in this room
+        // Process devices in this room
         auto devices = m_deviceManager.getDevicesByRoom(roomId);
         for (const auto& device : devices) {
-            if (device) {
-                // Check if device is on via state JSON
-                auto state = device->getState();
-                if (state.contains("on") && state["on"].get<bool>()) {
-                    data.activeDevices++;
+            if (!device) continue;
+
+            auto state = device->getState();
+            auto type = device->type();
+
+            // Count active lights/switches
+            if (state.contains("on") && state["on"].get<bool>()) {
+                data.activeDevices++;
+            }
+
+            // Get temperature from temperature sensors (stored in Celsius, convert to Fahrenheit)
+            if (type == DeviceType::TemperatureSensor) {
+                if (state.contains("temperature") && state["temperature"].is_number()) {
+                    float tempC = state["temperature"].get<float>();
+                    data.temperature = tempC * 9.0f / 5.0f + 32.0f;
+                    data.hasTemperature = true;
+                }
+                if (state.contains("humidity") && state["humidity"].is_number()) {
+                    data.humidity = state["humidity"].get<float>();
+                    data.hasHumidity = true;
                 }
             }
-            // TODO: Get temperature from sensor devices
+
+            // Check motion/presence sensors
+            if (type == DeviceType::MotionSensor) {
+                if (state.contains("motion") && state["motion"].get<bool>()) {
+                    data.hasMotion = true;
+                }
+                if (state.contains("presence") && state["presence"].get<bool>()) {
+                    data.hasMotion = true;
+                }
+                if (state.contains("active") && state["active"].get<bool>()) {
+                    data.hasMotion = true;
+                }
+            }
         }
 
         card->setRoomData(data);

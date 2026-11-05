@@ -62,11 +62,15 @@ void RoomCard::setRoomData(const RoomData& data) {
     }
 
     if (m_tempLabel) {
-        char buf[16];
-        if (data.hasTemperature) {
+        char buf[32];
+        if (data.hasTemperature && data.hasHumidity) {
+            snprintf(buf, sizeof(buf), "%.0f°F / %.0f%%", data.temperature, data.humidity);
+        } else if (data.hasTemperature) {
             snprintf(buf, sizeof(buf), "%.0f°F", data.temperature);
+        } else if (data.hasHumidity) {
+            snprintf(buf, sizeof(buf), "%.0f%%", data.humidity);
         } else {
-            snprintf(buf, sizeof(buf), "--°F");
+            snprintf(buf, sizeof(buf), "");
         }
         lv_label_set_text(m_tempLabel, buf);
     }
@@ -81,6 +85,17 @@ void RoomCard::setRoomData(const RoomData& data) {
             lv_obj_set_style_text_color(m_devicesLabel, m_theme.warning(), 0);
         } else {
             lv_obj_set_style_text_color(m_devicesLabel, m_theme.textSecondary(), 0);
+        }
+    }
+
+    // Highlight border when motion/presence detected
+    if (m_card) {
+        if (data.hasMotion) {
+            lv_obj_set_style_border_width(m_card, 3, 0);
+            lv_obj_set_style_border_color(m_card, m_theme.warning(), 0);
+        } else {
+            lv_obj_set_style_border_width(m_card, 1, 0);
+            lv_obj_set_style_border_color(m_card, m_theme.surface(), 0);
         }
     }
 }

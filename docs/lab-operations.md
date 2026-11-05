@@ -1,19 +1,22 @@
 # Lab Operations Guide
 
-This document describes how to interact with the STM32MP157F-DK2 lab hardware. It is primarily intended for Claude Code to reference when performing lab operations.
+This document describes how to interact with the STM32MP157F-DK2 lab hardware. Hardware management is handled through **labctl**, a centralized lab management system. The primary interface is the **labctl MCP server**, configured globally in `~/.claude/settings.json`. Use MCP tools directly rather than shelling out to the CLI.
+
+The SBC is registered as **`stm32mp157f-dk2`** in labctl.
 
 ---
 
-## Quick Reference
+## Quick Reference (MCP Tools)
 
-| Operation | Command |
-|-----------|---------|
-| SSH to board | `ssh root@smarthub.local` or `ssh root@192.168.4.99` |
-| Power off | `tools/stm32-power.py off` |
-| Power on | `tools/stm32-power.py on` |
-| Power cycle | `tools/stm32-power.py cycle` |
-| Serial console | `sudo picocom -b 115200 /dev/ttyACM0` |
-| Flash SD card | `tools/flash.sh` |
+| Operation | MCP Tool | Parameters |
+|-----------|----------|------------|
+| Power on | `power_on` | `sbc_name: "stm32mp157f-dk2"` |
+| Power off | `power_off` | `sbc_name: "stm32mp157f-dk2"` |
+| Power cycle | `power_cycle` | `sbc_name: "stm32mp157f-dk2"` |
+| Health check | `run_health_check` | `sbc_name: "stm32mp157f-dk2"` |
+| SBC details | Read resource `lab://sbcs/stm32mp157f-dk2` | — |
+| Power state | Read resource `lab://power/stm32mp157f-dk2` | — |
+| Lab overview | Read resource `lab://status` | — |
 
 ---
 
@@ -27,48 +30,36 @@ The SmartHub is accessible via SSH over both Ethernet and WiFi:
 # Via mDNS (preferred)
 ssh root@smarthub.local
 
-# Via WiFi IP
+# Via Ethernet IP
 ssh root@192.168.4.99
 
-# Via Ethernet IP
-ssh root@192.168.4.102
+# Via WiFi IP
+ssh root@192.168.4.67
 ```
 
 Authentication is via SSH key (no password).
 
 ### IP Addresses
 
-| Interface | IP | Notes |
-|-----------|-----|-------|
-| eth0 (Ethernet) | 192.168.4.102 | DHCP, 1Gbps |
-| wlan0 (WiFi) | 192.168.4.99 | DHCP, 2.4GHz |
-| mDNS | smarthub.local | Works on both interfaces |
+| Interface | IP | MAC | Notes |
+|-----------|-----|-----|-------|
+| eth0 (Ethernet) | 192.168.4.99 | — | DHCP, 1Gbps |
+| wlan0 (WiFi) | 192.168.4.67 | 48:EB:62:D0:75:D9 | DHCP, 2.4GHz |
+| mDNS | smarthub.local | — | Works on both interfaces |
 
 ---
 
 ## Power Control
 
-### Kasa Smart Plug
+### Power Management
 
-The STM32MP157F-DK2 is powered via a Kasa smart plug at `192.168.4.96`.
+The STM32MP157F-DK2 is powered via a Kasa HS300 smart plug strip at `192.168.4.140` (outlet index 5), managed through labctl.
 
-**Using the power script:**
+Use the MCP tools directly:
 
-```bash
-cd ~/projects/smarthub/STM32-Smart-Home-Hub
-
-# Check status
-./venv/bin/python tools/stm32-power.py status
-
-# Turn off
-./venv/bin/python tools/stm32-power.py off
-
-# Turn on
-./venv/bin/python tools/stm32-power.py on
-
-# Power cycle (off, wait 3s, on)
-./venv/bin/python tools/stm32-power.py cycle
-```
+- **`power_on`** / **`power_off`** / **`power_cycle`** with `sbc_name: "stm32mp157f-dk2"`
+- **Read `lab://power/stm32mp157f-dk2`** to check current power state
+- **`run_health_check`** with `sbc_name: "stm32mp157f-dk2"` for a full ping + power check
 
 ### When to Use Power Control
 
@@ -82,73 +73,32 @@ ssh root@smarthub.local reboot
 - System hung/crashed
 - Need cold boot
 
-### Python Environment
-
-The power script requires the `python-kasa` package:
-
-```bash
-# Virtual environment already set up at:
-~/projects/smarthub/STM32-Smart-Home-Hub/venv/
-
-# If needed, recreate:
-python3 -m venv venv
-./venv/bin/pip install python-kasa
-```
-
 ---
 
 ## Serial Console Access
 
-### Connection
-
-The ST-Link provides a USB serial port for console access:
+Serial console is **not currently assigned** for this SBC in labctl. If serial access becomes necessary (e.g., for debugging boot issues, kernel panics, or U-Boot interaction), assign a serial port via labctl:
 
 ```bash
-# Check for device
-ls /dev/ttyACM0
+# Discover connected USB-serial adapters
+labctl serial discover
 
-# Connect with picocom
-sudo picocom -b 115200 /dev/ttyACM0
+# Assign a serial port to the SBC
+labctl port assign stm32mp157f-dk2 console <device> --alias stm32-console --baud 115200
+
+# Connect to serial console
+labctl console stm32mp157f-dk2
 ```
 
-**To exit picocom:** Press `Ctrl-A` then `Ctrl-X`
-
-### When to Use Serial
-
-- Watching boot messages
-- Debugging when network is unavailable
-- U-Boot interaction (interrupt boot)
-- Kernel panic debugging
-
-### Serial Port Permissions
-
-To avoid needing sudo:
-
-```bash
-# Add user to dialout group
-sudo usermod -aG dialout $USER
-
-# Log out and back in for change to take effect
-```
-
-### Capturing Boot Output
-
-```bash
-# Capture boot messages to file
-sudo timeout 60 cat /dev/ttyACM0 > boot_log.txt &
-
-# Power cycle to capture full boot
-./venv/bin/python tools/stm32-power.py cycle
-
-# Wait for boot, then check log
-cat boot_log.txt
-```
+The ST-Link debug port on the board provides a USB serial interface at 115200 baud (8N1, no flow control).
 
 ---
 
 ## Flashing SD Cards
 
-### Using flash.sh
+SDWire is **not currently assigned** for this SBC in labctl. SD card flashing is done manually.
+
+### Using flash.sh Script
 
 ```bash
 cd ~/projects/smarthub/STM32-Smart-Home-Hub
@@ -157,21 +107,21 @@ cd ~/projects/smarthub/STM32-Smart-Home-Hub
 ./tools/flash.sh
 
 # Or specify device
-./tools/flash.sh /dev/sde
+./tools/flash.sh /dev/sdX
 ```
 
 ### Manual Flash
 
 ```bash
-# Identify SD card (look for ~8GB device)
+# Identify SD card
 lsblk
 
 # Unmount partitions
-sudo umount /dev/sde*
+sudo umount /dev/sdX*
 
 # Flash image
 sudo dd if=~/projects/smarthub/buildroot-src/output/images/sdcard.img \
-    of=/dev/sde bs=4M conv=fsync status=progress
+    of=/dev/sdX bs=4M conv=fsync status=progress
 sync
 ```
 
@@ -183,7 +133,7 @@ sync
 4. Flash: `./tools/flash.sh`
 5. Remove SD card from reader
 6. Insert SD card into board (slot on underside)
-7. Power on
+7. Power on via MCP tool: `power_on(sbc_name="stm32mp157f-dk2")`
 
 ---
 
@@ -191,7 +141,7 @@ sync
 
 ### Normal Boot Sequence
 
-1. **Power on** — via smart plug or physical button
+1. **Power on** — via `power_on` MCP tool or physical button
 2. **TF-A** — ARM Trusted Firmware loads (~0.5s)
 3. **OP-TEE** — Secure OS initializes (~0.5s)
 4. **U-Boot** — Bootloader, loads kernel (~2s)
@@ -202,8 +152,8 @@ sync
 
 To stop at U-Boot prompt:
 
-1. Connect serial console
-2. Power cycle
+1. Connect serial console (requires serial port assignment in labctl)
+2. Power cycle via `power_cycle` MCP tool
 3. Press any key during "Hit any key to stop autoboot"
 
 ### U-Boot Commands
@@ -236,6 +186,14 @@ scp myfile root@smarthub.local:/opt/smarthub/
 scp -r mydir root@smarthub.local:/opt/smarthub/
 ```
 
+### Deploy SmartHub Binary
+
+```bash
+# Transfer and restart
+cat app/build-arm/smarthub | ssh root@smarthub.local "cat > /usr/bin/smarthub && chmod +x /usr/bin/smarthub"
+ssh root@smarthub.local "killall smarthub; nohup smarthub > /var/log/smarthub.log 2>&1 &"
+```
+
 ### Sync Overlay
 
 ```bash
@@ -261,21 +219,14 @@ ssh root@smarthub.local "echo stop > /sys/class/remoteproc/remoteproc0/state; \
 
 ### Board Not Responding to SSH
 
-1. Check power: `./venv/bin/python tools/stm32-power.py status`
-2. Try ping: `ping smarthub.local`
-3. Check serial console for errors
-4. Power cycle: `./venv/bin/python tools/stm32-power.py cycle`
-
-### No Serial Output
-
-1. Check USB cable connected to ST-Link port (not power)
-2. Check device exists: `ls /dev/ttyACM0`
-3. Check no other program using port: `sudo fuser /dev/ttyACM0`
-4. Kill blocking process: `sudo fuser -k /dev/ttyACM0`
+1. Read `lab://power/stm32mp157f-dk2` to check power state
+2. Use `run_health_check(sbc_name="stm32mp157f-dk2")` for a full diagnostic
+3. Try ping: `ping smarthub.local`
+4. Use `power_cycle(sbc_name="stm32mp157f-dk2")` to reboot
 
 ### Boot Hangs
 
-Check serial console for last messages:
+If serial console is assigned, check for last messages:
 - **Hangs at TF-A** — SD card not detected or corrupted
 - **Hangs at U-Boot** — Check boot environment
 - **Hangs at kernel** — Missing driver or hardware issue
@@ -353,5 +304,13 @@ Located on top of board:
 
 ---
 
+## labctl Reference
+
+The labctl MCP server is configured globally in `~/.claude/settings.json` and is the preferred interface for all lab operations. The CLI (`/opt/labctl/venv/bin/labctl`) is available as a fallback but should not be needed in normal workflows.
+
+For full documentation, see the [Embedded Lab Control repository](https://github.com/johnjezl/Embedded-Lab-Control).
+
+---
+
 *Created: 28 December 2025*
-*For: Claude Code reference during lab operations*
+*Updated: 3 April 2026 - Migrated to labctl for lab hardware management*
