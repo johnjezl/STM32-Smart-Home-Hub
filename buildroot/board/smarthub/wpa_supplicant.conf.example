@@ -1,0 +1,15 @@
+# Template for the board's Wi-Fi credentials.
+#
+# Copy to overlay/etc/wpa_supplicant/wpa_supplicant.conf (git-ignored) and fill
+# in your network before building an image. If that file is absent, the image
+# boots without Wi-Fi and S40network skips wpa_supplicant.
+ctrl_interface=/var/run/wpa_supplicant
+ctrl_interface_group=0
+update_config=1
+country=US
+
+network={
+    ssid="YOUR_SSID"
+    psk="YOUR_PASSPHRASE"
+    key_mgmt=WPA-PSK
+}

@@ -231,6 +231,11 @@ overlay/
 
 ---
 
+
+## Wi-Fi Credentials
+
+`wpa_supplicant.conf` is git-ignored and must not be committed. Copy `board/smarthub/wpa_supplicant.conf.example` to `board/smarthub/overlay/etc/wpa_supplicant/wpa_supplicant.conf` and fill in your network before building an image. Without it, the image boots without Wi-Fi.
+
 ## Image Generation
 
 ### SD Card Image

@@ -57,3 +57,6 @@ venv/
 # Claude Code
 .claude/*
 !.claude/settings.json
+
+# Local Wi-Fi credentials (see buildroot/board/smarthub/wpa_supplicant.conf.example)
+buildroot/board/smarthub/overlay/etc/wpa_supplicant/wpa_supplicant.conf
