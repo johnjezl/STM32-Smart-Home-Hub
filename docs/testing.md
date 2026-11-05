@@ -561,3 +561,32 @@ These tests use mock implementations and don't require hardware.
 - [ ] Fuzz testing for network protocols
 - [ ] Memory leak detection with AddressSanitizer
 - [ ] Mock MQTT broker for protocol testing
+
+---
+
+## Testing Without Hardware
+
+**Zigbee flows** (`app/tests/protocols/test_zigbee_flows.cpp`) run the real transport, coordinator and handler against `FakeZnpCoordinator` (`app/tests/mocks/`), which sits behind `ISerialPort`, answers requests, plays scripted devices and records frames sent to the radio.
+
+**UI** tests run against real LVGL with an in-memory 800x480 display (`app/tests/ui/headless_display.*`). Build with `-DSMARTHUB_FETCH_LVGL=ON`, which needs `libdrm-dev`, to fetch the same LVGL version the image uses:
+
+```bash
+cd app
+cmake -B build -G Ninja -DSMARTHUB_BUILD_TESTS=ON -DSMARTHUB_NATIVE_BUILD=ON -DSMARTHUB_FETCH_LVGL=ON
+cmake --build build
+cd build && ctest --output-on-failure
+```
+
+To see each screen, save them as PPM images. CI uploads these as the `ui-frames` artifact.
+
+```bash
+SMARTHUB_UI_FRAME_DIR=/tmp/frames tests/test_ui_render
+```
+
+`DISABLED_` tests describe required behaviour that doesn't work yet, and each names its issue. To run them:
+
+```bash
+tests/test_zigbee_flows --gtest_also_run_disabled_tests --gtest_filter='*DISABLED_*'
+```
+
+Some behaviour still needs a board: real radio timing, touch input, and the display itself.

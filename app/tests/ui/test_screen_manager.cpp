@@ -16,6 +16,9 @@
 #include <smarthub/devices/DeviceManager.hpp>
 #include <smarthub/database/Database.hpp>
 
+#include "headless_display.hpp"
+#include <lvgl.h>
+
 #include <memory>
 #include <filesystem>
 #include <vector>
@@ -91,6 +94,7 @@ protected:
 TEST_F(ScreenManagerTest, Construction) {
     ASSERT_NO_THROW({
         screenManager = std::make_unique<ScreenManager>(*uiManager);
+        screenManager->setTransitionDuration(0);
     });
     EXPECT_NE(screenManager, nullptr);
 }
@@ -98,6 +102,7 @@ TEST_F(ScreenManagerTest, Construction) {
 // Test: Register screen
 TEST_F(ScreenManagerTest, RegisterScreen) {
     screenManager = std::make_unique<ScreenManager>(*uiManager);
+    screenManager->setTransitionDuration(0);
 
     auto screen = std::make_unique<TestScreen>(*screenManager, "test");
     TestScreen* rawPtr = screen.get();
@@ -112,6 +117,7 @@ TEST_F(ScreenManagerTest, RegisterScreen) {
 // Test: Unregister screen
 TEST_F(ScreenManagerTest, UnregisterScreen) {
     screenManager = std::make_unique<ScreenManager>(*uiManager);
+    screenManager->setTransitionDuration(0);
 
     auto screen = std::make_unique<TestScreen>(*screenManager, "test");
     screenManager->registerScreen("test", std::move(screen));
@@ -125,12 +131,14 @@ TEST_F(ScreenManagerTest, UnregisterScreen) {
 // Test: Unregister non-existent screen returns false
 TEST_F(ScreenManagerTest, UnregisterNonExistent) {
     screenManager = std::make_unique<ScreenManager>(*uiManager);
+    screenManager->setTransitionDuration(0);
     EXPECT_FALSE(screenManager->unregisterScreen("nonexistent"));
 }
 
 // Test: Navigate to screen
 TEST_F(ScreenManagerTest, ShowScreen) {
     screenManager = std::make_unique<ScreenManager>(*uiManager);
+    screenManager->setTransitionDuration(0);
 
     auto screen = std::make_unique<TestScreen>(*screenManager, "home");
     TestScreen* rawPtr = screen.get();
@@ -144,6 +152,7 @@ TEST_F(ScreenManagerTest, ShowScreen) {
 // Test: Navigate to non-existent screen fails
 TEST_F(ScreenManagerTest, ShowNonExistent) {
     screenManager = std::make_unique<ScreenManager>(*uiManager);
+    screenManager->setTransitionDuration(0);
     EXPECT_FALSE(screenManager->showScreen("nonexistent"));
     EXPECT_EQ(screenManager->currentScreen(), nullptr);
 }
@@ -151,6 +160,7 @@ TEST_F(ScreenManagerTest, ShowNonExistent) {
 // Test: Navigation builds history stack
 TEST_F(ScreenManagerTest, NavigationHistory) {
     screenManager = std::make_unique<ScreenManager>(*uiManager);
+    screenManager->setTransitionDuration(0);
 
     auto home = std::make_unique<TestScreen>(*screenManager, "home");
     auto settings = std::make_unique<TestScreen>(*screenManager, "settings");
@@ -173,6 +183,7 @@ TEST_F(ScreenManagerTest, NavigationHistory) {
 // Test: Go back navigates to previous screen
 TEST_F(ScreenManagerTest, GoBack) {
     screenManager = std::make_unique<ScreenManager>(*uiManager);
+    screenManager->setTransitionDuration(0);
 
     auto home = std::make_unique<TestScreen>(*screenManager, "home");
     auto settings = std::make_unique<TestScreen>(*screenManager, "settings");
@@ -192,6 +203,7 @@ TEST_F(ScreenManagerTest, GoBack) {
 // Test: Go back with empty history
 TEST_F(ScreenManagerTest, GoBackEmptyHistory) {
     screenManager = std::make_unique<ScreenManager>(*uiManager);
+    screenManager->setTransitionDuration(0);
 
     auto home = std::make_unique<TestScreen>(*screenManager, "home");
     screenManager->registerScreen("home", std::move(home));
@@ -203,6 +215,7 @@ TEST_F(ScreenManagerTest, GoBackEmptyHistory) {
 // Test: Go home clears history
 TEST_F(ScreenManagerTest, GoHome) {
     screenManager = std::make_unique<ScreenManager>(*uiManager);
+    screenManager->setTransitionDuration(0);
 
     auto home = std::make_unique<TestScreen>(*screenManager, "home");
     auto settings = std::make_unique<TestScreen>(*screenManager, "settings");
@@ -229,6 +242,7 @@ TEST_F(ScreenManagerTest, GoHome) {
 // Test: Screen lifecycle - show/hide
 TEST_F(ScreenManagerTest, ScreenLifecycleShowHide) {
     screenManager = std::make_unique<ScreenManager>(*uiManager);
+    screenManager->setTransitionDuration(0);
 
     auto screen1 = std::make_unique<TestScreen>(*screenManager, "screen1");
     auto screen2 = std::make_unique<TestScreen>(*screenManager, "screen2");
@@ -252,6 +266,7 @@ TEST_F(ScreenManagerTest, ScreenLifecycleShowHide) {
 // Test: Update calls onUpdate on current screen
 TEST_F(ScreenManagerTest, Update) {
     screenManager = std::make_unique<ScreenManager>(*uiManager);
+    screenManager->setTransitionDuration(0);
 
     auto screen = std::make_unique<TestScreen>(*screenManager, "test");
     TestScreen* rawPtr = screen.get();
@@ -270,6 +285,7 @@ TEST_F(ScreenManagerTest, Update) {
 // Test: Clear history
 TEST_F(ScreenManagerTest, ClearHistory) {
     screenManager = std::make_unique<ScreenManager>(*uiManager);
+    screenManager->setTransitionDuration(0);
 
     auto home = std::make_unique<TestScreen>(*screenManager, "home");
     auto settings = std::make_unique<TestScreen>(*screenManager, "settings");
@@ -299,9 +315,60 @@ TEST_F(ScreenManagerTest, TransitionDuration) {
     EXPECT_EQ(screenManager->transitionDuration(), 500);
 }
 
+// Test: Navigation is ignored until the transition finishes
+TEST_F(ScreenManagerTest, NavigationIsBlockedDuringTransition) {
+    screenManager = std::make_unique<ScreenManager>(*uiManager);
+    screenManager->setTransitionDuration(300);
+
+    screenManager->registerScreen("home", std::make_unique<TestScreen>(*screenManager, "home"));
+    screenManager->registerScreen("settings", std::make_unique<TestScreen>(*screenManager, "settings"));
+
+    ASSERT_TRUE(screenManager->showScreen("home"));
+    EXPECT_TRUE(screenManager->isTransitioning());
+    EXPECT_FALSE(screenManager->showScreen("settings"));
+    EXPECT_EQ(screenManager->currentScreen()->name(), "home");
+
+    // Run the app's main loop until the transition is over
+    for (int i = 0; i < 100 && screenManager->isTransitioning(); ++i) {
+        lv_tick_inc(16);
+        screenManager->update(16);
+        lv_timer_handler();
+    }
+    EXPECT_FALSE(screenManager->isTransitioning());
+
+    test::finishTransitions();
+    EXPECT_TRUE(screenManager->showScreen("settings"));
+    EXPECT_EQ(screenManager->currentScreen()->name(), "settings");
+}
+
+// Issue #27: runs the same steps as UIManager's main loop, at 60 Hz. LVGL crashes
+// on a null pointer if a screen load starts while another is pending, so
+// ScreenManager must not report a transition as over before LVGL has finished.
+TEST_F(ScreenManagerTest, DISABLED_TransitionIsNotReportedOverBeforeLvglFinishes) {
+    screenManager = std::make_unique<ScreenManager>(*uiManager);
+    screenManager->setTransitionDuration(300);
+
+    screenManager->registerScreen("home", std::make_unique<TestScreen>(*screenManager, "home"));
+    ASSERT_TRUE(screenManager->showScreen("home"));
+
+    for (int frame = 0; frame < 100; ++frame) {
+        lv_tick_inc(16);
+        screenManager->update(16);
+        if (!screenManager->isTransitioning()) {
+            EXPECT_FALSE(test::transitionPending())
+                << "ScreenManager unblocked navigation at frame " << frame
+                << " while LVGL still had the screen load pending";
+            break;
+        }
+        lv_timer_handler();
+    }
+    test::finishTransitions();
+}
+
 // Test: Same screen navigation is no-op
 TEST_F(ScreenManagerTest, SameScreenNavigation) {
     screenManager = std::make_unique<ScreenManager>(*uiManager);
+    screenManager->setTransitionDuration(0);
 
     auto screen = std::make_unique<TestScreen>(*screenManager, "test");
     TestScreen* rawPtr = screen.get();

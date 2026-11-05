@@ -88,6 +88,7 @@ protected:
 
 TEST_F(AutomationScreenTest, AutomationListScreenRegistration) {
     screenManager = std::make_unique<ScreenManager>(*uiManager);
+    screenManager->setTransitionDuration(0);
 
     auto automationList = std::make_unique<AutomationListScreen>(
         *screenManager, *themeManager, *automationManager);
@@ -100,6 +101,7 @@ TEST_F(AutomationScreenTest, AutomationListScreenRegistration) {
 
 TEST_F(AutomationScreenTest, AutomationListScreenNavigation) {
     screenManager = std::make_unique<ScreenManager>(*uiManager);
+    screenManager->setTransitionDuration(0);
 
     auto settings = std::make_unique<SettingsScreen>(
         *screenManager, *themeManager, *deviceManager);
@@ -119,6 +121,7 @@ TEST_F(AutomationScreenTest, AutomationListScreenNavigation) {
 
 TEST_F(AutomationScreenTest, AutomationListScreenUpdate) {
     screenManager = std::make_unique<ScreenManager>(*uiManager);
+    screenManager->setTransitionDuration(0);
 
     auto automationList = std::make_unique<AutomationListScreen>(
         *screenManager, *themeManager, *automationManager);
@@ -136,6 +139,7 @@ TEST_F(AutomationScreenTest, AutomationListScreenUpdate) {
 
 TEST_F(AutomationScreenTest, AutomationListScreenBackNavigation) {
     screenManager = std::make_unique<ScreenManager>(*uiManager);
+    screenManager->setTransitionDuration(0);
 
     auto settings = std::make_unique<SettingsScreen>(
         *screenManager, *themeManager, *deviceManager);
@@ -163,6 +167,7 @@ TEST_F(AutomationScreenTest, AutomationListScreenBackNavigation) {
 
 TEST_F(AutomationScreenTest, AddAutomationScreenRegistration) {
     screenManager = std::make_unique<ScreenManager>(*uiManager);
+    screenManager->setTransitionDuration(0);
 
     auto addAutomation = std::make_unique<AddAutomationScreen>(
         *screenManager, *themeManager, *automationManager, *deviceManager);
@@ -175,6 +180,7 @@ TEST_F(AutomationScreenTest, AddAutomationScreenRegistration) {
 
 TEST_F(AutomationScreenTest, AddAutomationScreenNavigation) {
     screenManager = std::make_unique<ScreenManager>(*uiManager);
+    screenManager->setTransitionDuration(0);
 
     auto automationList = std::make_unique<AutomationListScreen>(
         *screenManager, *themeManager, *automationManager);
@@ -194,6 +200,7 @@ TEST_F(AutomationScreenTest, AddAutomationScreenNavigation) {
 
 TEST_F(AutomationScreenTest, AddAutomationScreenUpdate) {
     screenManager = std::make_unique<ScreenManager>(*uiManager);
+    screenManager->setTransitionDuration(0);
 
     auto addAutomation = std::make_unique<AddAutomationScreen>(
         *screenManager, *themeManager, *automationManager, *deviceManager);
@@ -211,6 +218,7 @@ TEST_F(AutomationScreenTest, AddAutomationScreenUpdate) {
 
 TEST_F(AutomationScreenTest, AddAutomationScreenMultiStepWizard) {
     screenManager = std::make_unique<ScreenManager>(*uiManager);
+    screenManager->setTransitionDuration(0);
 
     auto addAutomation = std::make_unique<AddAutomationScreen>(
         *screenManager, *themeManager, *automationManager, *deviceManager);
@@ -224,6 +232,7 @@ TEST_F(AutomationScreenTest, AddAutomationScreenMultiStepWizard) {
 
 TEST_F(AutomationScreenTest, AddAutomationScreenBackNavigation) {
     screenManager = std::make_unique<ScreenManager>(*uiManager);
+    screenManager->setTransitionDuration(0);
 
     auto automationList = std::make_unique<AutomationListScreen>(
         *screenManager, *themeManager, *automationManager);
@@ -248,9 +257,10 @@ TEST_F(AutomationScreenTest, AddAutomationScreenBackNavigation) {
 
 TEST_F(AutomationScreenTest, EditAutomationScreenRegistration) {
     screenManager = std::make_unique<ScreenManager>(*uiManager);
+    screenManager->setTransitionDuration(0);
 
     auto editAutomation = std::make_unique<EditAutomationScreen>(
-        *screenManager, *themeManager, *automationManager, *deviceManager);
+        *screenManager, *themeManager, *automationManager);
 
     EXPECT_EQ(editAutomation->name(), "edit_automation");
 
@@ -260,11 +270,12 @@ TEST_F(AutomationScreenTest, EditAutomationScreenRegistration) {
 
 TEST_F(AutomationScreenTest, EditAutomationScreenNavigation) {
     screenManager = std::make_unique<ScreenManager>(*uiManager);
+    screenManager->setTransitionDuration(0);
 
     auto automationList = std::make_unique<AutomationListScreen>(
         *screenManager, *themeManager, *automationManager);
     auto editAutomation = std::make_unique<EditAutomationScreen>(
-        *screenManager, *themeManager, *automationManager, *deviceManager);
+        *screenManager, *themeManager, *automationManager);
     auto* editAutomationPtr = editAutomation.get();
 
     screenManager->registerScreen("automations", std::move(automationList));
@@ -279,9 +290,10 @@ TEST_F(AutomationScreenTest, EditAutomationScreenNavigation) {
 
 TEST_F(AutomationScreenTest, EditAutomationScreenUpdate) {
     screenManager = std::make_unique<ScreenManager>(*uiManager);
+    screenManager->setTransitionDuration(0);
 
     auto editAutomation = std::make_unique<EditAutomationScreen>(
-        *screenManager, *themeManager, *automationManager, *deviceManager);
+        *screenManager, *themeManager, *automationManager);
 
     screenManager->registerScreen("edit_automation", std::move(editAutomation));
     screenManager->showScreen("edit_automation");
@@ -296,9 +308,10 @@ TEST_F(AutomationScreenTest, EditAutomationScreenUpdate) {
 
 TEST_F(AutomationScreenTest, EditAutomationScreenSetAutomationId) {
     screenManager = std::make_unique<ScreenManager>(*uiManager);
+    screenManager->setTransitionDuration(0);
 
     auto editAutomation = std::make_unique<EditAutomationScreen>(
-        *screenManager, *themeManager, *automationManager, *deviceManager);
+        *screenManager, *themeManager, *automationManager);
 
     editAutomation->setAutomationId("test_auto_001");
 
@@ -308,11 +321,12 @@ TEST_F(AutomationScreenTest, EditAutomationScreenSetAutomationId) {
 
 TEST_F(AutomationScreenTest, EditAutomationScreenBackNavigation) {
     screenManager = std::make_unique<ScreenManager>(*uiManager);
+    screenManager->setTransitionDuration(0);
 
     auto automationList = std::make_unique<AutomationListScreen>(
         *screenManager, *themeManager, *automationManager);
     auto editAutomation = std::make_unique<EditAutomationScreen>(
-        *screenManager, *themeManager, *automationManager, *deviceManager);
+        *screenManager, *themeManager, *automationManager);
     auto* automationListPtr = automationList.get();
 
     screenManager->registerScreen("automations", std::move(automationList));
@@ -332,6 +346,7 @@ TEST_F(AutomationScreenTest, EditAutomationScreenBackNavigation) {
 
 TEST_F(AutomationScreenTest, FullAutomationNavigationFlow) {
     screenManager = std::make_unique<ScreenManager>(*uiManager);
+    screenManager->setTransitionDuration(0);
 
     auto dashboard = std::make_unique<DashboardScreen>(
         *screenManager, *themeManager, *deviceManager);
@@ -342,7 +357,7 @@ TEST_F(AutomationScreenTest, FullAutomationNavigationFlow) {
     auto addAutomation = std::make_unique<AddAutomationScreen>(
         *screenManager, *themeManager, *automationManager, *deviceManager);
     auto editAutomation = std::make_unique<EditAutomationScreen>(
-        *screenManager, *themeManager, *automationManager, *deviceManager);
+        *screenManager, *themeManager, *automationManager);
 
     auto* dashPtr = dashboard.get();
     auto* settingsPtr = settings.get();
@@ -395,6 +410,7 @@ TEST_F(AutomationScreenTest, FullAutomationNavigationFlow) {
 
 TEST_F(AutomationScreenTest, AutomationScreensMultipleShowHide) {
     screenManager = std::make_unique<ScreenManager>(*uiManager);
+    screenManager->setTransitionDuration(0);
 
     auto automationList = std::make_unique<AutomationListScreen>(
         *screenManager, *themeManager, *automationManager);

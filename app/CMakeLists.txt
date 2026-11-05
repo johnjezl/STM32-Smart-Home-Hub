@@ -69,7 +69,23 @@ if(NOT nlohmann_json_FOUND)
 endif()
 
 # LVGL (optional for now - display UI)
-pkg_check_modules(LVGL lvgl)
+option(SMARTHUB_FETCH_LVGL "Build LVGL from source instead of using an installed one (for native UI tests)" OFF)
+if(SMARTHUB_FETCH_LVGL)
+    # Same version and configuration as the Buildroot image
+    include(FetchContent)
+    set(LV_CONF_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../buildroot/package/lvgl/config/lv_conf.h" CACHE STRING "" FORCE)
+    FetchContent_Declare(
+        lvgl
+        URL https://github.com/lvgl/lvgl/archive/refs/tags/v8.3.11.tar.gz
+        URL_HASH SHA256=83b7325a4b78cbb19a39f3ac75346c8086926d7faeab5ff2d825c20da0bbdb46
+    )
+    FetchContent_MakeAvailable(lvgl)
+    set_target_properties(lvgl_examples lvgl_demos PROPERTIES EXCLUDE_FROM_ALL TRUE)
+    set(LVGL_FOUND TRUE)
+    set(LVGL_LIBRARIES lvgl)
+else()
+    pkg_check_modules(LVGL lvgl)
+endif()
 if(NOT LVGL_FOUND)
     message(STATUS "LVGL not found - UI will be disabled")
     set(SMARTHUB_ENABLE_LVGL OFF)

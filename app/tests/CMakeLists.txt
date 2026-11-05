@@ -198,6 +198,18 @@ if(GTEST_AVAILABLE)
     target_link_libraries(test_network PRIVATE smarthub_lib GTest::gtest GTest::gtest_main)
     add_test(NAME Network COMMAND test_network)
 
+    # All UI code as a library, built from the app's own source list
+    if(SMARTHUB_ENABLE_LVGL)
+        set(UI_LIB_SOURCES ${UI_SOURCES})
+        list(TRANSFORM UI_LIB_SOURCES PREPEND "${CMAKE_SOURCE_DIR}/")
+        add_library(smarthub_ui STATIC ${UI_LIB_SOURCES})
+        target_link_libraries(smarthub_ui PUBLIC smarthub_lib ${LVGL_LIBRARIES})
+        if(LIBDRM_FOUND)
+            target_link_libraries(smarthub_ui PUBLIC ${LIBDRM_LIBRARIES})
+        endif()
+        target_compile_definitions(smarthub_ui PUBLIC SMARTHUB_ENABLE_LVGL=1)
+    endif()
+
     # UI tests (conditional on LVGL availability)
     if(SMARTHUB_ENABLE_LVGL)
         add_executable(test_ui
@@ -206,32 +218,15 @@ if(GTEST_AVAILABLE)
             ui/test_theme_manager.cpp
             ui/test_widgets.cpp
             ui/test_screens.cpp
-            ${CMAKE_SOURCE_DIR}/src/ui/UIManager.cpp
-            ${CMAKE_SOURCE_DIR}/src/ui/Screen.cpp
-            ${CMAKE_SOURCE_DIR}/src/ui/ScreenManager.cpp
-            ${CMAKE_SOURCE_DIR}/src/ui/ThemeManager.cpp
-            ${CMAKE_SOURCE_DIR}/src/ui/widgets/Header.cpp
-            ${CMAKE_SOURCE_DIR}/src/ui/widgets/NavBar.cpp
-            ${CMAKE_SOURCE_DIR}/src/ui/widgets/RoomCard.cpp
-            ${CMAKE_SOURCE_DIR}/src/ui/widgets/TimeSeriesChart.cpp
-            ${CMAKE_SOURCE_DIR}/src/ui/screens/DashboardScreen.cpp
-            ${CMAKE_SOURCE_DIR}/src/ui/screens/DeviceListScreen.cpp
-            ${CMAKE_SOURCE_DIR}/src/ui/screens/LightControlScreen.cpp
-            ${CMAKE_SOURCE_DIR}/src/ui/screens/SensorListScreen.cpp
-            ${CMAKE_SOURCE_DIR}/src/ui/screens/SensorHistoryScreen.cpp
-            ${CMAKE_SOURCE_DIR}/src/ui/screens/WifiSetupScreen.cpp
-            ${CMAKE_SOURCE_DIR}/src/ui/screens/SettingsScreen.cpp
-            ${CMAKE_SOURCE_DIR}/src/ui/screens/DisplaySettingsScreen.cpp
-            ${CMAKE_SOURCE_DIR}/src/ui/screens/AboutScreen.cpp
-            ${CMAKE_SOURCE_DIR}/src/ui/DisplayManager.cpp
+            ui/headless_display.cpp
         )
-        target_link_libraries(test_ui PRIVATE smarthub_lib GTest::gtest GTest::gtest_main)
-        target_link_libraries(test_ui PRIVATE ${LVGL_LIBRARIES})
-        if(LIBDRM_FOUND)
-            target_link_libraries(test_ui PRIVATE ${LIBDRM_LIBRARIES})
-        endif()
-        target_compile_definitions(test_ui PRIVATE SMARTHUB_ENABLE_LVGL=1)
+        target_link_libraries(test_ui PRIVATE smarthub_ui GTest::gtest GTest::gtest_main)
         add_test(NAME UI COMMAND test_ui)
+
+        # In its own process, so no other test can affect what gets drawn
+        add_executable(test_ui_render ui/test_screens_render.cpp ui/headless_display.cpp)
+        target_link_libraries(test_ui_render PRIVATE smarthub_ui GTest::gtest GTest::gtest_main)
+        add_test(NAME UIRender COMMAND test_ui_render)
     else()
         # Stub test when LVGL not available - ThemeManager and data structures can still be tested
         add_executable(test_ui
@@ -261,27 +256,8 @@ if(GTEST_AVAILABLE)
 
     # Automation UI tests (conditional on LVGL availability)
     if(SMARTHUB_ENABLE_LVGL)
-        add_executable(test_automation_screens
-            automation/test_automation_screens.cpp
-            ${CMAKE_SOURCE_DIR}/src/ui/UIManager.cpp
-            ${CMAKE_SOURCE_DIR}/src/ui/Screen.cpp
-            ${CMAKE_SOURCE_DIR}/src/ui/ScreenManager.cpp
-            ${CMAKE_SOURCE_DIR}/src/ui/ThemeManager.cpp
-            ${CMAKE_SOURCE_DIR}/src/ui/screens/AutomationListScreen.cpp
-            ${CMAKE_SOURCE_DIR}/src/ui/screens/AddAutomationScreen.cpp
-            ${CMAKE_SOURCE_DIR}/src/ui/screens/EditAutomationScreen.cpp
-            ${CMAKE_SOURCE_DIR}/src/ui/screens/DashboardScreen.cpp
-            ${CMAKE_SOURCE_DIR}/src/ui/screens/SettingsScreen.cpp
-            ${CMAKE_SOURCE_DIR}/src/ui/widgets/Header.cpp
-            ${CMAKE_SOURCE_DIR}/src/ui/widgets/NavBar.cpp
-            ${CMAKE_SOURCE_DIR}/src/ui/widgets/RoomCard.cpp
-        )
-        target_link_libraries(test_automation_screens PRIVATE smarthub_lib GTest::gtest GTest::gtest_main)
-        target_link_libraries(test_automation_screens PRIVATE ${LVGL_LIBRARIES})
-        if(LIBDRM_FOUND)
-            target_link_libraries(test_automation_screens PRIVATE ${LIBDRM_LIBRARIES})
-        endif()
-        target_compile_definitions(test_automation_screens PRIVATE SMARTHUB_ENABLE_LVGL=1)
+        add_executable(test_automation_screens automation/test_automation_screens.cpp ui/headless_display.cpp)
+        target_link_libraries(test_automation_screens PRIVATE smarthub_ui GTest::gtest GTest::gtest_main)
         add_test(NAME AutomationScreens COMMAND test_automation_screens)
     endif()
 
@@ -319,25 +295,16 @@ if(GTEST_AVAILABLE)
     add_executable(smarthub_tests ${ALL_TEST_SOURCES})
     target_link_libraries(smarthub_tests PRIVATE smarthub_lib GTest::gtest)
 
-    # ThemeManager, DisplayManager, and AnimationManager work without LVGL
-    target_sources(smarthub_tests PRIVATE
-        ${CMAKE_SOURCE_DIR}/src/ui/ThemeManager.cpp
-        ${CMAKE_SOURCE_DIR}/src/ui/DisplayManager.cpp
-        ${CMAKE_SOURCE_DIR}/src/ui/AnimationManager.cpp
-    )
-
-    # Add UI dependencies if LVGL is available
     if(SMARTHUB_ENABLE_LVGL)
+        target_link_libraries(smarthub_tests PRIVATE smarthub_ui)
+        target_sources(smarthub_tests PRIVATE ui/headless_display.cpp)
+    else()
+        # ThemeManager, DisplayManager, and AnimationManager work without LVGL
         target_sources(smarthub_tests PRIVATE
-            ${CMAKE_SOURCE_DIR}/src/ui/UIManager.cpp
-            ${CMAKE_SOURCE_DIR}/src/ui/Screen.cpp
-            ${CMAKE_SOURCE_DIR}/src/ui/ScreenManager.cpp
+            ${CMAKE_SOURCE_DIR}/src/ui/ThemeManager.cpp
+            ${CMAKE_SOURCE_DIR}/src/ui/DisplayManager.cpp
+            ${CMAKE_SOURCE_DIR}/src/ui/AnimationManager.cpp
         )
-        target_link_libraries(smarthub_tests PRIVATE ${LVGL_LIBRARIES})
-        if(LIBDRM_FOUND)
-            target_link_libraries(smarthub_tests PRIVATE ${LIBDRM_LIBRARIES})
-        endif()
-        target_compile_definitions(smarthub_tests PRIVATE SMARTHUB_ENABLE_LVGL=1)
     endif()
 
     add_test(NAME AllTests COMMAND smarthub_tests)
