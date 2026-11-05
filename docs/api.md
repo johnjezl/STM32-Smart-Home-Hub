@@ -12,10 +12,12 @@ Default port is 8443 (configurable via `web.port` in config.yaml).
 
 ## Authentication
 
+Authentication is required on every network, including the local one. Requests without valid credentials get `401`.
+
 The API supports two authentication methods:
 
 ### Session-based Authentication
-Use the login endpoint to create a session, then include the session cookie in subsequent requests.
+Use the login endpoint to create a session, then include the session cookie in subsequent requests. A session ends after 60 idle minutes, on logout, or when the hub restarts.
 
 ### API Token Authentication
 Include a Bearer token in the Authorization header:
@@ -23,10 +25,17 @@ Include a Bearer token in the Authorization header:
 Authorization: Bearer <api-token>
 ```
 
+There's no endpoint for creating tokens yet ([#36](https://github.com/johnjezl/STM32-Smart-Home-Hub/issues/36)).
+
+### Roles
+A `user` can read everything except pending Zigbee devices, and can control devices with `PUT /api/devices/{id}`. All other requests that change something, and the Zigbee pairing routes, need an `admin` and otherwise get `403`.
+
 ### Public Routes
 The following routes are accessible without authentication:
 - `POST /api/auth/login`
 - `GET /api/system/status`
+- `GET /api/setup/status`
+- `POST /api/setup`, until the first account exists
 
 ---
 
@@ -40,7 +49,7 @@ Authenticate and create a session.
 ```json
 {
   "username": "admin",
-  "password": "password123"
+  "password": "Your-Password-1"
 }
 ```
 
@@ -55,12 +64,18 @@ Authenticate and create a session.
 
 Sets a `session` cookie for subsequent requests.
 
-**Response (401 Unauthorized):**
+The request must have the `Content-Type: application/json` header, or it gets `415`.
+
+**Response (400 Bad Request):** the username or password is missing.
+
+**Response (401 Unauthorized):** the same answer for a wrong password, an unknown username and a disabled account.
 ```json
 {
-  "error": "Invalid credentials"
+  "error": "Invalid username or password"
 }
 ```
+
+**Response (429 Too Many Requests):** too many failed logins from this IP address. The `Retry-After` header gives the wait in seconds.
 
 ---
 
@@ -86,9 +101,47 @@ Get current user information.
 {
   "userId": 1,
   "username": "admin",
-  "role": "admin"
+  "role": "admin",
+  "isApiToken": false
 }
 ```
+
+---
+
+### GET /api/setup/status
+
+Report whether the hub still needs its first account. No authentication required.
+
+**Response (200 OK):**
+```json
+{
+  "setupRequired": true
+}
+```
+
+---
+
+### POST /api/setup
+
+Create the administrator on a new hub and log in. No authentication required, and refused once any account exists.
+
+**Request Body:**
+```json
+{
+  "username": "admin",
+  "password": "Your-Password-1"
+}
+```
+
+Usernames are 3 to 32 characters, start with a letter, and contain only letters, digits, `_` and `-`. Passwords are 8 to 128 characters, with an uppercase letter, a lowercase letter and a digit.
+
+The request must have the `Content-Type: application/json` header, or it gets `415`.
+
+**Response (201 Created):** same body as login, and sets the `session` cookie.
+
+**Response (400 Bad Request):** the `error` field says what's wrong with the username or password.
+
+**Response (409 Conflict):** an account already exists.
 
 ---
 
@@ -680,7 +733,7 @@ All error responses follow this format:
 
 ## Rate Limiting
 
-The API implements rate limiting to prevent abuse. By default, 100 requests per minute per IP are allowed. Exceeding this limit returns a 429 status.
+By default, each IP address can make 1200 requests a minute, and 10 failed logins in 5 minutes. Exceeding either limit returns a 429 status. See [Security](security.md#rate-limiting) for the configuration.
 
 ---
 
@@ -689,26 +742,32 @@ The API implements rate limiting to prevent abuse. By default, 100 requests per 
 ### curl
 
 ```bash
+# Log in and save the session cookie
+curl -c cookies.txt -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"Your-Password-1"}' \
+  http://smarthub.local:8443/api/auth/login
+
 # Get all devices
-curl http://smarthub.local:8443/api/devices
+curl -b cookies.txt http://smarthub.local:8443/api/devices
 
 # Get system status
 curl http://smarthub.local:8443/api/system/status
 
 # Create a room
-curl -X POST \
+curl -b cookies.txt -X POST \
   -H "Content-Type: application/json" \
   -d '{"name":"Living Room"}' \
   http://smarthub.local:8443/api/rooms
 
 # Turn on a light
-curl -X PUT \
+curl -b cookies.txt -X PUT \
   -H "Content-Type: application/json" \
   -d '{"on":true,"brightness":100}' \
   http://smarthub.local:8443/api/devices/light1
 
 # Create an automation
-curl -X POST \
+curl -b cookies.txt -X POST \
   -H "Content-Type: application/json" \
   -d '{
     "name": "Night Mode",

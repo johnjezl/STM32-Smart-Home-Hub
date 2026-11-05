@@ -20,6 +20,12 @@ class WebServer;
 class MqttClient;
 class RpmsgClient;
 
+namespace security {
+class UserManager;
+class SessionManager;
+class ApiTokenManager;
+}
+
 #ifdef SMARTHUB_ENABLE_LVGL
 class UIManager;
 #endif
@@ -85,6 +91,7 @@ private:
     bool initializeDeviceManager();
     bool initializeMqtt();
     bool initializeRpmsg();
+    bool initializeSecurity();
     bool initializeWebServer();
     bool initializeUI();
 
@@ -102,6 +109,9 @@ private:
     std::unique_ptr<DeviceManager> m_deviceManager;
     std::unique_ptr<MqttClient> m_mqttClient;
     std::unique_ptr<RpmsgClient> m_rpmsgClient;
+    std::unique_ptr<security::UserManager> m_userManager;
+    std::unique_ptr<security::SessionManager> m_sessionManager;
+    std::unique_ptr<security::ApiTokenManager> m_apiTokenManager;
     std::unique_ptr<WebServer> m_webServer;
 
 #ifdef SMARTHUB_ENABLE_LVGL

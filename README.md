@@ -10,7 +10,7 @@ A custom smart home hub built on the STM32MP157F-DK2 development board featuring
 - **Dual-core architecture** - A7 Linux + M4 real-time firmware
 - **Touch-screen UI** - 4" 800x480 LVGL-based landscape interface
 - **Secure web interface** - HTTPS with TLS, session auth, rate limiting
-- **Security hardening** - Argon2id passwords, AES-256-GCM credential storage
+- **Security hardening** - PBKDF2 passwords, AES-256-GCM credential storage
 - **MQTT broker** - Built-in Mosquitto for device communication
 - **Zigbee support** - Via CC2652P USB coordinator with Z-Stack
 - **WiFi device control** - Tasmota, Shelly, Tuya local protocols

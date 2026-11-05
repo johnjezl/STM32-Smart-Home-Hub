@@ -74,6 +74,7 @@ if(GTEST_AVAILABLE)
         ${CMAKE_SOURCE_DIR}/src/security/CredentialStore.cpp
         ${CMAKE_SOURCE_DIR}/src/security/SetupManager.cpp
         ${CMAKE_SOURCE_DIR}/src/web/WebServer.cpp
+        ${CMAKE_SOURCE_DIR}/src/core/Application.cpp
     )
 
     # Mongoose if available
@@ -154,6 +155,11 @@ if(GTEST_AVAILABLE)
     add_executable(test_webserver web/test_webserver.cpp)
     target_link_libraries(test_webserver PRIVATE smarthub_lib GTest::gtest GTest::gtest_main)
     add_test(NAME WebServer COMMAND test_webserver)
+
+    # Runs the real Application, so the wiring under test is what ships
+    add_executable(test_web_auth web/test_web_auth.cpp)
+    target_link_libraries(test_web_auth PRIVATE smarthub_lib GTest::gtest GTest::gtest_main)
+    add_test(NAME WebAuth COMMAND test_web_auth)
 
     add_executable(test_web_api web/test_web_api.cpp)
     target_link_libraries(test_web_api PRIVATE smarthub_lib GTest::gtest GTest::gtest_main)

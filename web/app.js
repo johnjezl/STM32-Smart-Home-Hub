@@ -51,6 +51,12 @@ class SmartHubApp {
             this.login();
         });
 
+        // First-run setup form
+        document.getElementById('setup-form').addEventListener('submit', (e) => {
+            e.preventDefault();
+            this.createAdmin();
+        });
+
         // Logout button
         document.getElementById('logout-btn').addEventListener('click', () => {
             this.logout();
@@ -147,23 +153,49 @@ class SmartHubApp {
 
     async checkAuth() {
         try {
-            const response = await fetch('/api/auth/me', {
-                credentials: 'include'
-            });
+            const setup = await fetch('/api/setup/status', { credentials: 'include' });
+            if (setup.ok && (await setup.json()).setupRequired) {
+                this.showSetup();
+                return;
+            }
 
+            const response = await fetch('/api/auth/me', { credentials: 'include' });
             if (response.ok) {
                 this.currentUser = await response.json();
                 this.showDashboard();
             } else {
-                // For demo: skip login and go directly to dashboard
-                this.currentUser = { username: 'Demo User' };
-                this.showDashboard();
+                this.showLogin();
             }
         } catch (error) {
-            // For demo: skip login and go directly to dashboard
-            this.currentUser = { username: 'Demo User' };
-            this.showDashboard();
+            this.showLogin('Connection error');
         }
+    }
+
+    // All authenticated requests go through here, so that a session which has
+    // ended takes the user back to the login screen wherever it was noticed.
+    async api(url, options = {}) {
+        const response = await fetch(url, { credentials: 'include', ...options });
+        if (response.status === 401) {
+            this.handleSessionEnded();
+        }
+        return response;
+    }
+
+    handleSessionEnded() {
+        if (!this.currentUser) {
+            return;
+        }
+        this.endSession();
+        this.showLogin('Your session has ended. Please log in again.');
+    }
+
+    endSession() {
+        this.currentUser = null;
+        this.stopRefresh();
+        this.closeAllModals();
+        this.devices = [];
+        this.sensors = [];
+        document.body.classList.remove('is-admin');
     }
 
     async login() {
@@ -181,12 +213,16 @@ class SmartHubApp {
                 credentials: 'include'
             });
 
+            const data = await response.json();
             if (response.ok) {
-                this.currentUser = { username };
+                this.currentUser = { username: data.username, role: data.role };
                 errorEl.textContent = '';
                 this.showDashboard();
+            } else if (response.status === 429) {
+                const seconds = parseInt(response.headers.get('Retry-After'), 10);
+                const minutes = Math.max(1, Math.ceil(seconds / 60)) || 1;
+                errorEl.textContent = `Too many failed attempts. Try again in ${minutes} minute${minutes === 1 ? '' : 's'}.`;
             } else {
-                const data = await response.json();
                 errorEl.textContent = data.error || 'Login failed';
             }
         } catch (error) {
@@ -194,7 +230,47 @@ class SmartHubApp {
         }
     }
 
+    async createAdmin() {
+        const username = document.getElementById('setup-username').value;
+        const password = document.getElementById('setup-password').value;
+        const confirmation = document.getElementById('setup-confirm').value;
+        const errorEl = document.getElementById('setup-error');
+
+        if (password !== confirmation) {
+            errorEl.textContent = 'Passwords do not match';
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/setup', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ username, password }),
+                credentials: 'include'
+            });
+
+            const data = await response.json();
+            if (response.ok) {
+                this.currentUser = { username: data.username, role: data.role };
+                errorEl.textContent = '';
+                this.showDashboard();
+            } else if (response.status === 409) {
+                // Someone else finished setup first
+                this.showLogin(data.error);
+            } else {
+                errorEl.textContent = data.error || 'Setup failed';
+            }
+        } catch (error) {
+            errorEl.textContent = 'Connection error';
+        }
+    }
+
     async logout() {
+        // Closing a modal can stop pairing, which still needs the session
+        this.closeAllModals();
+
         try {
             await fetch('/api/auth/logout', {
                 method: 'POST',
@@ -204,29 +280,43 @@ class SmartHubApp {
             console.error('Logout error:', error);
         }
 
-        this.currentUser = null;
-        this.stopRefresh();
+        this.endSession();
         this.showLogin();
     }
 
-    showLogin() {
-        document.getElementById('login-screen').classList.remove('hidden');
-        document.getElementById('dashboard-screen').classList.add('hidden');
+    showScreen(id) {
+        for (const screen of ['setup-screen', 'login-screen', 'dashboard-screen']) {
+            document.getElementById(screen).classList.toggle('hidden', screen !== id);
+        }
+    }
+
+    showSetup() {
+        this.showScreen('setup-screen');
+    }
+
+    showLogin(message = '') {
+        document.getElementById('password').value = '';
+        document.getElementById('login-error').textContent = message;
+        this.showScreen('login-screen');
     }
 
     showDashboard() {
-        document.getElementById('login-screen').classList.add('hidden');
-        document.getElementById('dashboard-screen').classList.remove('hidden');
+        this.showScreen('dashboard-screen');
 
-        if (this.currentUser) {
-            document.getElementById('user-name').textContent = this.currentUser.username || 'User';
-        }
+        document.getElementById('user-name').textContent = this.currentUser.username || 'User';
+        document.body.classList.toggle('is-admin', this.currentUser.role === 'admin');
+
+        // These hold passwords, which shouldn't outlive the login
+        document.getElementById('password').value = '';
+        document.getElementById('setup-password').value = '';
+        document.getElementById('setup-confirm').value = '';
 
         this.loadData();
         this.startRefresh();
     }
 
     startRefresh() {
+        this.stopRefresh();
         this.refreshInterval = setInterval(() => {
             this.loadData();
         }, 5000);
@@ -252,15 +342,11 @@ class SmartHubApp {
 
     async loadDevices() {
         try {
-            const response = await fetch('/api/devices', {
-                credentials: 'include'
-            });
+            const response = await this.api('/api/devices');
 
             if (response.ok) {
                 const devices = await response.json();
                 await this.processDevices(devices);
-            } else if (response.status === 401) {
-                this.logout();
             }
         } catch (error) {
             console.error('Failed to load devices:', error);
@@ -269,9 +355,7 @@ class SmartHubApp {
 
     async loadRooms() {
         try {
-            const response = await fetch('/api/rooms', {
-                credentials: 'include'
-            });
+            const response = await this.api('/api/rooms');
 
             if (response.ok) {
                 this.rooms = await response.json();
@@ -283,9 +367,7 @@ class SmartHubApp {
 
     async loadAutomations() {
         try {
-            const response = await fetch('/api/automations', {
-                credentials: 'include'
-            });
+            const response = await this.api('/api/automations');
 
             if (response.ok) {
                 this.automations = await response.json();
@@ -301,9 +383,7 @@ class SmartHubApp {
 
         for (const device of devices) {
             try {
-                const response = await fetch(`/api/devices/${device.id}`, {
-                    credentials: 'include'
-                });
+                const response = await this.api(`/api/devices/${device.id}`);
 
                 if (response.ok) {
                     const fullDevice = await response.json();
@@ -371,7 +451,7 @@ class SmartHubApp {
             const card = document.createElement('div');
             card.className = 'room-card';
             card.innerHTML = `
-                <button class="room-card-menu" data-room-id="${room.id}">⋮</button>
+                <button class="room-card-menu admin-only" data-room-id="${room.id}">⋮</button>
                 <div class="room-header">
                     <div class="room-name">${room.name}</div>
                     <div class="room-temp">${temp ? `${temp}°` : ''}</div>
@@ -439,7 +519,7 @@ class SmartHubApp {
                             <span class="brightness-value">${brightness ?? 100}%</span>
                         </div>
                     ` : ''}
-                    <button class="device-edit-btn" data-device-id="${device.id}" title="Edit">✏️</button>
+                    <button class="device-edit-btn admin-only" data-device-id="${device.id}" title="Edit">✏️</button>
                     <label class="toggle">
                         <input type="checkbox" ${isOn ? 'checked' : ''}
                             data-device-id="${device.id}">
@@ -548,9 +628,9 @@ class SmartHubApp {
                     <div class="automation-trigger">${this.formatTriggerSummary(automation.trigger)}</div>
                 </div>
                 <div class="automation-controls">
-                    <button class="automation-edit-btn" data-automation-id="${automation.id}" title="Edit">✏️</button>
+                    <button class="automation-edit-btn admin-only" data-automation-id="${automation.id}" title="Edit">✏️</button>
                     <label class="toggle">
-                        <input type="checkbox" ${automation.enabled ? 'checked' : ''}
+                        <input type="checkbox" ${automation.enabled ? 'checked' : ''} ${this.currentUser.role === 'admin' ? '' : 'disabled'}
                             data-automation-id="${automation.id}">
                         <span class="toggle-slider"></span>
                     </label>
@@ -637,11 +717,10 @@ class SmartHubApp {
         }
 
         try {
-            const response = await fetch('/api/rooms', {
+            const response = await this.api('/api/rooms', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name }),
-                credentials: 'include'
+                body: JSON.stringify({ name })
             });
 
             if (response.ok) {
@@ -668,11 +747,10 @@ class SmartHubApp {
         }
 
         try {
-            const response = await fetch(`/api/rooms/${id}`, {
+            const response = await this.api(`/api/rooms/${id}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name }),
-                credentials: 'include'
+                body: JSON.stringify({ name })
             });
 
             if (response.ok) {
@@ -702,9 +780,8 @@ class SmartHubApp {
 
     async deleteRoom(id) {
         try {
-            const response = await fetch(`/api/rooms/${id}`, {
-                method: 'DELETE',
-                credentials: 'include'
+            const response = await this.api(`/api/rooms/${id}`, {
+                method: 'DELETE'
             });
 
             if (response.ok) {
@@ -898,11 +975,10 @@ class SmartHubApp {
         };
 
         try {
-            const response = await fetch('/api/devices', {
+            const response = await this.api('/api/devices', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload),
-                credentials: 'include'
+                body: JSON.stringify(payload)
             });
 
             if (response.ok) {
@@ -930,11 +1006,10 @@ class SmartHubApp {
         }
 
         try {
-            const response = await fetch(`/api/devices/${id}/settings`, {
+            const response = await this.api(`/api/devices/${id}/settings`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name, room }),
-                credentials: 'include'
+                body: JSON.stringify({ name, room })
             });
 
             if (response.ok) {
@@ -964,9 +1039,8 @@ class SmartHubApp {
 
     async deleteDevice(id) {
         try {
-            const response = await fetch(`/api/devices/${id}`, {
-                method: 'DELETE',
-                credentials: 'include'
+            const response = await this.api(`/api/devices/${id}`, {
+                method: 'DELETE'
             });
 
             if (response.ok) {
@@ -986,11 +1060,10 @@ class SmartHubApp {
 
     async startZigbeePairing() {
         try {
-            const response = await fetch('/api/zigbee/permit-join', {
+            const response = await this.api('/api/zigbee/permit-join', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ duration: 60 }),
-                credentials: 'include'
+                body: JSON.stringify({ duration: 60 })
             });
 
             if (response.ok) {
@@ -1028,9 +1101,8 @@ class SmartHubApp {
         document.getElementById('pairing-status').classList.add('hidden');
 
         try {
-            await fetch('/api/zigbee/permit-join', {
-                method: 'DELETE',
-                credentials: 'include'
+            await this.api('/api/zigbee/permit-join', {
+                method: 'DELETE'
             });
         } catch (error) {
             console.error('Failed to stop pairing:', error);
@@ -1039,9 +1111,7 @@ class SmartHubApp {
 
     async pollPendingDevices() {
         try {
-            const response = await fetch('/api/zigbee/pending-devices', {
-                credentials: 'include'
-            });
+            const response = await this.api('/api/zigbee/pending-devices');
 
             if (response.ok) {
                 const devices = await response.json();
@@ -1274,11 +1344,10 @@ class SmartHubApp {
         };
 
         try {
-            const response = await fetch('/api/automations', {
+            const response = await this.api('/api/automations', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload),
-                credentials: 'include'
+                body: JSON.stringify(payload)
             });
 
             if (response.ok) {
@@ -1297,11 +1366,10 @@ class SmartHubApp {
 
     async toggleAutomation(id, enabled) {
         try {
-            const response = await fetch(`/api/automations/${id}/enable`, {
+            const response = await this.api(`/api/automations/${id}/enable`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ enabled }),
-                credentials: 'include'
+                body: JSON.stringify({ enabled })
             });
 
             if (response.ok) {
@@ -1333,11 +1401,10 @@ class SmartHubApp {
 
     async toggleDevice(deviceId, on) {
         try {
-            const response = await fetch(`/api/devices/${deviceId}`, {
+            const response = await this.api(`/api/devices/${deviceId}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ on }),
-                credentials: 'include'
+                body: JSON.stringify({ on })
             });
 
             if (response.ok) {
@@ -1367,11 +1434,10 @@ class SmartHubApp {
 
     async setBrightness(deviceId, brightness) {
         try {
-            const response = await fetch(`/api/devices/${deviceId}`, {
+            const response = await this.api(`/api/devices/${deviceId}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ brightness }),
-                credentials: 'include'
+                body: JSON.stringify({ brightness })
             });
 
             if (response.ok) {

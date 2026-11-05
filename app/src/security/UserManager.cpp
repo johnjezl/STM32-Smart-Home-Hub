@@ -52,13 +52,13 @@ static std::vector<unsigned char> base64Decode(const std::string& encoded) {
         decodeTable[static_cast<unsigned char>(BASE64_CHARS[i])] = i;
     }
 
-    int val = 0;
+    uint32_t val = 0;
     int bits = 0;
     for (char c : encoded) {
         if (c == '=') break;
         if (decodeTable[static_cast<unsigned char>(c)] == -1) continue;
 
-        val = (val << 6) | decodeTable[static_cast<unsigned char>(c)];
+        val = (val << 6) | static_cast<uint32_t>(decodeTable[static_cast<unsigned char>(c)]);
         bits += 6;
 
         if (bits >= 8) {
@@ -308,6 +308,8 @@ bool UserManager::authenticate(const std::string& username,
     }
 
     if (!user->enabled) {
+        // Same work as a wrong password, so timing doesn't reveal the account
+        hashPassword(password);
         LOG_WARN("Authentication attempt for disabled user: %s", username.c_str());
         return false;
     }
@@ -404,6 +406,15 @@ bool UserManager::hasAdminUser() const {
     auto stmt = const_cast<Database&>(m_db).prepare(selectSql);
     if (!stmt || !stmt->isValid() || !stmt->step()) {
         return false;
+    }
+
+    return stmt->getInt(0) > 0;
+}
+
+bool UserManager::hasAnyUser() const {
+    auto stmt = const_cast<Database&>(m_db).prepare("SELECT COUNT(*) FROM users");
+    if (!stmt || !stmt->isValid() || !stmt->step()) {
+        return true;
     }
 
     return stmt->getInt(0) > 0;

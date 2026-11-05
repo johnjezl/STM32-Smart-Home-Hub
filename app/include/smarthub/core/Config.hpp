@@ -71,6 +71,12 @@ public:
     std::string zigbeePort() const { return m_zigbeePort; }
     int zigbeeBaudRate() const { return m_zigbeeBaudRate; }
 
+    // Security settings
+    int sessionTimeoutMinutes() const { return m_sessionTimeoutMinutes; }
+    int rateLimitPerMinute() const { return m_rateLimitPerMinute; }
+    int loginMaxFailures() const { return m_loginMaxFailures; }
+    int loginFailureWindowSeconds() const { return m_loginFailureWindowSeconds; }
+
     // Logging settings
     std::string logLevel() const { return m_logLevel; }
     std::string logFile() const { return m_logFile; }
@@ -122,6 +128,13 @@ private:
     int m_zigbeeBaudRate = 115200;
 
     // Logging
+    int m_sessionTimeoutMinutes = 60;
+    // The dashboard makes about 12 * (devices + 3) requests a minute while it
+    // is open, so this has to leave room for that.
+    int m_rateLimitPerMinute = 1200;
+    int m_loginMaxFailures = 10;
+    int m_loginFailureWindowSeconds = 300;
+
     std::string m_logLevel = "info";
     std::string m_logFile = "/var/log/smarthub.log";
 

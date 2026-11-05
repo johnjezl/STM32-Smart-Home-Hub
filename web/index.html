@@ -7,8 +7,35 @@
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+    <!-- First-run Setup Screen -->
+    <div id="setup-screen" class="screen hidden">
+        <div class="login-container">
+            <div class="login-header">
+                <div class="logo">SmartHub</div>
+                <p>Create the administrator account</p>
+            </div>
+            <form id="setup-form">
+                <div class="form-group">
+                    <label for="setup-username">Username</label>
+                    <input type="text" id="setup-username" required autocomplete="username">
+                </div>
+                <div class="form-group">
+                    <label for="setup-password">Password</label>
+                    <input type="password" id="setup-password" required autocomplete="new-password">
+                    <small>At least 8 characters, with upper and lower case letters and a digit.</small>
+                </div>
+                <div class="form-group">
+                    <label for="setup-confirm">Confirm password</label>
+                    <input type="password" id="setup-confirm" required autocomplete="new-password">
+                </div>
+                <div id="setup-error" class="error-message"></div>
+                <button type="submit" class="btn btn-primary">Create account</button>
+            </form>
+        </div>
+    </div>
+
     <!-- Login Screen -->
-    <div id="login-screen" class="screen">
+    <div id="login-screen" class="screen hidden">
         <div class="login-container">
             <div class="login-header">
                 <div class="logo">SmartHub</div>
@@ -85,7 +112,7 @@
 
             <div class="section-header">
                 <h2>Rooms</h2>
-                <button id="add-room-btn" class="btn btn-primary btn-sm">+ Add Room</button>
+                <button id="add-room-btn" class="btn btn-primary btn-sm admin-only">+ Add Room</button>
             </div>
             <div id="rooms-grid" class="rooms-grid">
                 <!-- Room cards inserted here -->
@@ -100,7 +127,7 @@
                     <select id="room-filter">
                         <option value="">All Rooms</option>
                     </select>
-                    <button id="add-device-btn" class="btn btn-primary btn-sm">+ Add Device</button>
+                    <button id="add-device-btn" class="btn btn-primary btn-sm admin-only">+ Add Device</button>
                 </div>
             </div>
             <div id="devices-list" class="devices-list">
@@ -120,7 +147,7 @@
         <main id="tab-automations" class="tab-content">
             <div class="section-header">
                 <h2>Automations</h2>
-                <button id="add-automation-btn" class="btn btn-primary btn-sm">+ Add Automation</button>
+                <button id="add-automation-btn" class="btn btn-primary btn-sm admin-only">+ Add Automation</button>
             </div>
             <div id="automations-list" class="automations-list">
                 <!-- Automation cards inserted here -->

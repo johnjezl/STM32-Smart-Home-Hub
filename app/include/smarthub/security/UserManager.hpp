@@ -141,6 +141,13 @@ public:
     bool hasAdminUser() const;
 
     /**
+     * Check whether any account exists, enabled or not.
+     * Reports true if the database can't answer, so a database fault can't
+     * reopen first-run setup.
+     */
+    bool hasAnyUser() const;
+
+    /**
      * Count total users
      * @return Number of users
      */

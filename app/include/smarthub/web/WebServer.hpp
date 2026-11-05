@@ -33,6 +33,8 @@ class ZigbeeHandler;
 namespace security {
 class SessionManager;
 class ApiTokenManager;
+class UserManager;
+struct User;
 }
 
 /**
@@ -93,10 +95,12 @@ public:
     void setHttpRedirect(bool enable, int httpPort = 80);
 
     /**
-     * Set security managers for authentication
+     * Set security managers for authentication.
+     * Without them, login fails and every protected route answers 401.
      */
     void setSecurityManagers(security::SessionManager* sessionMgr,
-                             security::ApiTokenManager* tokenMgr);
+                             security::ApiTokenManager* tokenMgr,
+                             security::UserManager* userMgr);
 
     /**
      * Set automation manager for automation API
@@ -115,6 +119,13 @@ public:
     void setRateLimit(int requestsPerMinute);
 
     /**
+     * Configure the limit on failed logins from one client IP
+     * @param maxFailures Failures allowed per window (0 = disabled)
+     * @param windowSeconds Window length; logins are refused until it ends
+     */
+    void setLoginThrottle(int maxFailures, int windowSeconds);
+
+    /**
      * List of routes that don't require authentication
      */
     void setPublicRoutes(const std::vector<std::string>& routes);
@@ -129,7 +140,11 @@ private:
     // Authentication & security
     AuthInfo checkAuth(struct mg_http_message* hm);
     bool checkRateLimit(const std::string& ip);
+    int loginRetryAfterSeconds(const std::string& ip);
+    void recordLoginFailure(const std::string& ip);
     bool isPublicRoute(const std::string& uri) const;
+    static bool requiresAdmin(const std::string& method, const std::string& uri);
+    void startSession(struct mg_connection* c, const security::User& user, int status);
     std::string getClientIp(struct mg_connection* c) const;
     void addSecurityHeaders(std::string& headers);
 
@@ -144,8 +159,10 @@ private:
 
     // Auth API handlers
     void apiLogin(struct mg_connection* c, struct mg_http_message* hm);
-    void apiLogout(struct mg_connection* c, const AuthInfo& auth);
+    void apiLogout(struct mg_connection* c, struct mg_http_message* hm);
     void apiGetCurrentUser(struct mg_connection* c, const AuthInfo& auth);
+    void apiGetSetupStatus(struct mg_connection* c);
+    void apiSetup(struct mg_connection* c, struct mg_http_message* hm);
 
     // Room API handlers
     void apiGetRooms(struct mg_connection* c);
@@ -193,7 +210,10 @@ private:
     // Security
     security::SessionManager* m_sessionMgr = nullptr;
     security::ApiTokenManager* m_tokenMgr = nullptr;
+    security::UserManager* m_userMgr = nullptr;
     int m_rateLimitPerMinute = 0;
+    int m_loginMaxFailures = 0;
+    int m_loginFailureWindowSeconds = 0;
     std::vector<std::string> m_publicRoutes;
 
     // Additional managers
@@ -202,6 +222,7 @@ private:
 
     // Rate limiting state
     std::unordered_map<std::string, RateLimitEntry> m_rateLimits;
+    std::unordered_map<std::string, RateLimitEntry> m_loginFailures;
     std::mutex m_rateLimitMutex;
 
     struct mg_mgr* m_mgr = nullptr;

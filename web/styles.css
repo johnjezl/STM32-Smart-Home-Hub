@@ -30,6 +30,15 @@ body {
 }
 
 /* Utility Classes */
+.form-group small {
+    color: var(--text-secondary);
+}
+
+/* Controls for changes only an administrator can make */
+body:not(.is-admin) .admin-only {
+    display: none !important;
+}
+
 .hidden {
     display: none !important;
 }

@@ -15,11 +15,14 @@
 #include <smarthub/protocols/zigbee/ZigbeeHandler.hpp>
 #include <smarthub/security/SessionManager.hpp>
 #include <smarthub/security/ApiTokenManager.hpp>
+#include <smarthub/security/UserManager.hpp>
 #include <smarthub/core/Logger.hpp>
 #include <nlohmann/json.hpp>
 
 #include <chrono>
 #include <algorithm>
+#include <cctype>
+#include <optional>
 #include <fstream>
 #include <sstream>
 
@@ -40,6 +43,90 @@ namespace smarthub {
 #if HAVE_MONGOOSE
 
 static WebServer* s_instance = nullptr;
+
+namespace {
+
+constexpr uint64_t kRateLimitWindowMs = 60000;
+constexpr size_t kMaxTrackedClients = 1024;
+
+uint64_t steadyNowMs() {
+    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count());
+}
+
+// Keeps a per-client table from growing without limit.
+void pruneExpired(std::unordered_map<std::string, RateLimitEntry>& entries,
+                  uint64_t nowMs, uint64_t windowMs) {
+    if (entries.size() < kMaxTrackedClients) {
+        return;
+    }
+    for (auto it = entries.begin(); it != entries.end();) {
+        if (nowMs - it->second.windowStart >= windowMs) {
+            it = entries.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+std::string sessionTokenFromCookies(struct mg_http_message* hm) {
+    static const std::string kName = "session=";
+
+    struct mg_str* header = mg_http_get_header(hm, "Cookie");
+    if (!header) {
+        return "";
+    }
+
+    const std::string cookies(header->buf, header->len);
+    size_t pos = 0;
+    while (pos < cookies.size()) {
+        size_t end = cookies.find(';', pos);
+        if (end == std::string::npos) {
+            end = cookies.size();
+        }
+        const size_t start = cookies.find_first_not_of(' ', pos);
+        if (start != std::string::npos && start < end &&
+            cookies.compare(start, kName.size(), kName) == 0) {
+            return cookies.substr(start + kName.size(), end - start - kName.size());
+        }
+        pos = end + 1;
+    }
+    return "";
+}
+
+// Requiring JSON means a page on another site can't send these requests
+// without a CORS preflight, which this server never approves.
+bool isJsonRequest(struct mg_http_message* hm) {
+    static const std::string kJson = "application/json";
+
+    struct mg_str* header = mg_http_get_header(hm, "Content-Type");
+    if (!header) {
+        return false;
+    }
+    std::string value(header->buf, header->len);
+    std::transform(value.begin(), value.end(), value.begin(),
+                   [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+    return value.rfind(kJson, 0) == 0;
+}
+
+bool parseCredentials(struct mg_http_message* hm, std::string& username, std::string& password) {
+    const auto body = nlohmann::json::parse(hm->body.buf, hm->body.buf + hm->body.len,
+                                            nullptr, false);
+    if (!body.is_object()) {
+        return false;
+    }
+    const auto user = body.find("username");
+    const auto pass = body.find("password");
+    if (user == body.end() || pass == body.end() ||
+        !user->is_string() || !pass->is_string()) {
+        return false;
+    }
+    username = user->get<std::string>();
+    password = pass->get<std::string>();
+    return !username.empty() && !password.empty();
+}
+
+}  // namespace
 
 WebServer::WebServer(EventBus& eventBus, DeviceManager& deviceManager,
                      int port, const std::string& webRoot)
@@ -172,13 +259,20 @@ void WebServer::setHttpRedirect(bool enable, int httpPort) {
 }
 
 void WebServer::setSecurityManagers(security::SessionManager* sessionMgr,
-                                     security::ApiTokenManager* tokenMgr) {
+                                     security::ApiTokenManager* tokenMgr,
+                                     security::UserManager* userMgr) {
     m_sessionMgr = sessionMgr;
     m_tokenMgr = tokenMgr;
+    m_userMgr = userMgr;
 }
 
 void WebServer::setRateLimit(int requestsPerMinute) {
     m_rateLimitPerMinute = requestsPerMinute;
+}
+
+void WebServer::setLoginThrottle(int maxFailures, int windowSeconds) {
+    m_loginMaxFailures = maxFailures;
+    m_loginFailureWindowSeconds = windowSeconds;
 }
 
 void WebServer::setAutomationManager(AutomationManager* automationMgr) {
@@ -198,17 +292,20 @@ AuthInfo WebServer::checkAuth(struct mg_http_message* hm) {
 
     // Check Authorization header for Bearer token (API token)
     struct mg_str* authHeader = mg_http_get_header(hm, "Authorization");
-    if (authHeader && authHeader->len > 7) {
+    if (authHeader && authHeader->len > 7 && m_tokenMgr && m_userMgr) {
         std::string headerVal(authHeader->buf, authHeader->len);
         if (headerVal.rfind("Bearer ", 0) == 0) {
-            std::string token = headerVal.substr(7);
-            if (m_tokenMgr) {
-                auto apiToken = m_tokenMgr->validateToken(token);
-                if (apiToken) {
+            auto apiToken = m_tokenMgr->validateToken(headerVal.substr(7));
+            if (apiToken) {
+                // A token carries only its owner, who may since have been
+                // disabled, removed or given a different role.
+                auto user = m_userMgr->getUserById(apiToken->userId);
+                if (user && user->enabled) {
                     auth.authenticated = true;
-                    auth.userId = apiToken->userId;
+                    auth.userId = user->id;
+                    auth.username = user->username;
+                    auth.role = user->role;
                     auth.isApiToken = true;
-                    // Note: API tokens don't carry username/role - would need user lookup
                     return auth;
                 }
             }
@@ -216,23 +313,13 @@ AuthInfo WebServer::checkAuth(struct mg_http_message* hm) {
     }
 
     // Check for session cookie
-    struct mg_str* cookieHeader = mg_http_get_header(hm, "Cookie");
-    if (cookieHeader && m_sessionMgr) {
-        std::string cookies(cookieHeader->buf, cookieHeader->len);
-
-        // Find session cookie
-        std::string sessionToken;
-        size_t pos = cookies.find("session=");
-        if (pos != std::string::npos) {
-            pos += 8;  // length of "session="
-            size_t end = cookies.find(';', pos);
-            if (end == std::string::npos) end = cookies.length();
-            sessionToken = cookies.substr(pos, end - pos);
-        }
-
+    if (m_sessionMgr) {
+        const std::string sessionToken = sessionTokenFromCookies(hm);
         if (!sessionToken.empty()) {
             auto session = m_sessionMgr->validateSession(sessionToken);
             if (session) {
+                // The timeout counts idle time, not time since login
+                m_sessionMgr->touchSession(sessionToken);
                 auth.authenticated = true;
                 auth.userId = session->userId;
                 auth.username = session->username;
@@ -250,16 +337,15 @@ bool WebServer::checkRateLimit(const std::string& ip) {
         return true;  // Rate limiting disabled
     }
 
-    auto now = std::chrono::steady_clock::now();
-    auto nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(
-        now.time_since_epoch()).count();
+    const uint64_t nowMs = steadyNowMs();
 
     std::lock_guard<std::mutex> lock(m_rateLimitMutex);
 
+    pruneExpired(m_rateLimits, nowMs, kRateLimitWindowMs);
     auto& entry = m_rateLimits[ip];
 
     // Reset window if expired (1 minute)
-    if (nowMs - entry.windowStart >= 60000) {
+    if (nowMs - entry.windowStart >= kRateLimitWindowMs) {
         entry.windowStart = nowMs;
         entry.requestCount = 0;
     }
@@ -273,6 +359,51 @@ bool WebServer::checkRateLimit(const std::string& ip) {
     }
 
     return true;
+}
+
+int WebServer::loginRetryAfterSeconds(const std::string& ip) {
+    if (m_loginMaxFailures <= 0) {
+        return 0;
+    }
+
+    const uint64_t nowMs = steadyNowMs();
+    const uint64_t windowMs = static_cast<uint64_t>(m_loginFailureWindowSeconds) * 1000;
+
+    std::lock_guard<std::mutex> lock(m_rateLimitMutex);
+
+    auto it = m_loginFailures.find(ip);
+    if (it == m_loginFailures.end()) {
+        return 0;
+    }
+
+    const uint64_t elapsedMs = nowMs - it->second.windowStart;
+    if (elapsedMs >= windowMs) {
+        m_loginFailures.erase(it);
+        return 0;
+    }
+    if (it->second.requestCount < m_loginMaxFailures) {
+        return 0;
+    }
+    return static_cast<int>((windowMs - elapsedMs + 999) / 1000);
+}
+
+void WebServer::recordLoginFailure(const std::string& ip) {
+    if (m_loginMaxFailures <= 0) {
+        return;
+    }
+
+    const uint64_t nowMs = steadyNowMs();
+    const uint64_t windowMs = static_cast<uint64_t>(m_loginFailureWindowSeconds) * 1000;
+
+    std::lock_guard<std::mutex> lock(m_rateLimitMutex);
+
+    pruneExpired(m_loginFailures, nowMs, windowMs);
+    auto& entry = m_loginFailures[ip];
+    if (entry.requestCount == 0 || nowMs - entry.windowStart >= windowMs) {
+        entry.windowStart = nowMs;
+        entry.requestCount = 0;
+    }
+    entry.requestCount++;
 }
 
 bool WebServer::isPublicRoute(const std::string& uri) const {
@@ -289,11 +420,35 @@ bool WebServer::isPublicRoute(const std::string& uri) const {
     }
 
     // Default public routes
-    if (uri == "/api/auth/login" || uri == "/api/system/status") {
+    // The setup routes check for themselves that no account exists yet.
+    if (uri == "/api/auth/login" || uri == "/api/system/status" ||
+        uri == "/api/setup" || uri == "/api/setup/status") {
         return true;
     }
 
     return false;
+}
+
+bool WebServer::requiresAdmin(const std::string& method, const std::string& uri) {
+    static const std::string kDevicePrefix = "/api/devices/";
+
+    if (uri == "/api/zigbee/pending-devices") {
+        return true;
+    }
+    if (method == "GET" || method == "HEAD") {
+        return false;
+    }
+    if (uri == "/api/auth/logout") {
+        return false;
+    }
+    // Controlling a device, PUT /api/devices/{id}, is open to every user.
+    // Everything else that changes something, including any route added
+    // later, needs an admin unless it is listed here.
+    if (method == "PUT" && uri.rfind(kDevicePrefix, 0) == 0 &&
+        uri.find('/', kDevicePrefix.size()) == std::string::npos) {
+        return false;
+    }
+    return true;
 }
 
 std::string WebServer::getClientIp(struct mg_connection* c) const {
@@ -378,6 +533,11 @@ void WebServer::handleHttpRequest(struct mg_connection* c, struct mg_http_messag
                 sendError(c, 401, "Unauthorized");
                 return;
             }
+            if (requiresAdmin(std::string(hm->method.buf, hm->method.len), uri) &&
+                auth.role != "admin") {
+                sendError(c, 403, "Administrator access required");
+                return;
+            }
         }
 
         // Route handling
@@ -390,10 +550,13 @@ void WebServer::handleHttpRequest(struct mg_connection* c, struct mg_http_messag
         } else if (uri == "/api/auth/login" && mg_strcmp(hm->method, mg_str("POST")) == 0) {
             apiLogin(c, hm);
         } else if (uri == "/api/auth/logout" && mg_strcmp(hm->method, mg_str("POST")) == 0) {
-            auth = checkAuth(hm);  // Get auth info even for logout
-            apiLogout(c, auth);
+            apiLogout(c, hm);
         } else if (uri == "/api/auth/me" && mg_strcmp(hm->method, mg_str("GET")) == 0) {
             apiGetCurrentUser(c, auth);
+        } else if (uri == "/api/setup/status" && mg_strcmp(hm->method, mg_str("GET")) == 0) {
+            apiGetSetupStatus(c);
+        } else if (uri == "/api/setup" && mg_strcmp(hm->method, mg_str("POST")) == 0) {
+            apiSetup(c, hm);
         }
         // Room API
         else if (uri == "/api/rooms" && mg_strcmp(hm->method, mg_str("GET")) == 0) {
@@ -589,74 +752,80 @@ void WebServer::apiGetSystemStatus(struct mg_connection* c) {
     sendJson(c, 200, json);
 }
 
-void WebServer::apiLogin(struct mg_connection* c, struct mg_http_message* hm) {
-    // Parse JSON body - simplified parsing
-    std::string body(hm->body.buf, hm->body.len);
-
-    // Extract username and password (basic JSON parsing)
-    std::string username, password;
-
-    size_t usernamePos = body.find("\"username\"");
-    if (usernamePos != std::string::npos) {
-        size_t colonPos = body.find(':', usernamePos);
-        size_t quoteStart = body.find('"', colonPos);
-        size_t quoteEnd = body.find('"', quoteStart + 1);
-        if (quoteStart != std::string::npos && quoteEnd != std::string::npos) {
-            username = body.substr(quoteStart + 1, quoteEnd - quoteStart - 1);
-        }
-    }
-
-    size_t passwordPos = body.find("\"password\"");
-    if (passwordPos != std::string::npos) {
-        size_t colonPos = body.find(':', passwordPos);
-        size_t quoteStart = body.find('"', colonPos);
-        size_t quoteEnd = body.find('"', quoteStart + 1);
-        if (quoteStart != std::string::npos && quoteEnd != std::string::npos) {
-            password = body.substr(quoteStart + 1, quoteEnd - quoteStart - 1);
-        }
-    }
-
-    if (username.empty() || password.empty()) {
-        sendError(c, 400, "Username and password required");
-        return;
-    }
-
-    // Note: Would need UserManager here for actual authentication
-    // For now, just create a session if SessionManager is available
-    if (!m_sessionMgr) {
-        sendError(c, 500, "Authentication not configured");
-        return;
-    }
-
-    // TODO: Validate password with UserManager
-    // For now, this is a stub - in production, integrate with UserManager
-    LOG_WARN("Login attempt for user: %s (password validation not implemented)", username.c_str());
-
-    // Create session (userId=1 is placeholder)
-    std::string token = m_sessionMgr->createSession(1, username, "user");
-
+void WebServer::startSession(struct mg_connection* c, const security::User& user, int status) {
+    const std::string token = m_sessionMgr->createSession(user.id, user.username, user.role,
+                                                          getClientIp(c));
     if (token.empty()) {
         sendError(c, 500, "Failed to create session");
         return;
     }
 
-    // Set session cookie
+    // Decided per connection: a browser drops a Secure cookie sent over plain
+    // HTTP, which would leave the user unable to log in.
     std::string cookieHeader = "Set-Cookie: session=" + token +
-                                "; HttpOnly; SameSite=Strict; Path=/";
-    if (!m_certPath.empty()) {
+                               "; HttpOnly; SameSite=Strict; Path=/";
+    if (c->is_tls) {
         cookieHeader += "; Secure";
     }
     cookieHeader += "\r\n";
 
-    std::string json = "{\"success\":true,\"username\":\"" + username + "\"}";
-    sendJsonWithHeaders(c, 200, json, cookieHeader);
+    nlohmann::json json;
+    json["success"] = true;
+    json["username"] = user.username;
+    json["role"] = user.role;
+    sendJsonWithHeaders(c, status, json.dump(), cookieHeader);
 }
 
-void WebServer::apiLogout(struct mg_connection* c, const AuthInfo& auth) {
-    if (m_sessionMgr && auth.authenticated && !auth.isApiToken) {
-        // Get session token from cookie to destroy
-        // The token was already validated in checkAuth
-        m_sessionMgr->destroyUserSessions(auth.username);
+void WebServer::apiLogin(struct mg_connection* c, struct mg_http_message* hm) {
+    if (!m_sessionMgr || !m_userMgr) {
+        sendError(c, 500, "Authentication not configured");
+        return;
+    }
+
+    // Checked before the password: hashing is slow and blocks this thread
+    const std::string clientIp = getClientIp(c);
+    const int retryAfter = loginRetryAfterSeconds(clientIp);
+    if (retryAfter > 0) {
+        sendJsonWithHeaders(c, 429, "{\"error\":\"Too many failed login attempts\"}",
+                            "Retry-After: " + std::to_string(retryAfter) + "\r\n");
+        return;
+    }
+
+    if (!isJsonRequest(hm)) {
+        sendError(c, 415, "Content-Type must be application/json");
+        return;
+    }
+
+    std::string username, password;
+    if (!parseCredentials(hm, username, password)) {
+        sendError(c, 400, "Username and password required");
+        return;
+    }
+
+    // A malformed username can't belong to an account, so skip the lookup.
+    // That also keeps control characters out of the failure log.
+    std::optional<security::User> user;
+    if (security::UserManager::validateUsername(username).empty() &&
+        m_userMgr->authenticate(username, password)) {
+        user = m_userMgr->getUser(username);
+    }
+
+    if (!user) {
+        recordLoginFailure(clientIp);
+        sendError(c, 401, "Invalid username or password");
+        return;
+    }
+
+    startSession(c, *user, 200);
+}
+
+void WebServer::apiLogout(struct mg_connection* c, struct mg_http_message* hm) {
+    // Only this browser's session; the user's other devices stay logged in
+    if (m_sessionMgr) {
+        const std::string token = sessionTokenFromCookies(hm);
+        if (!token.empty()) {
+            m_sessionMgr->destroySession(token);
+        }
     }
 
     // Clear session cookie
@@ -672,19 +841,71 @@ void WebServer::apiGetCurrentUser(struct mg_connection* c, const AuthInfo& auth)
         return;
     }
 
-    std::string json = "{";
-    json += "\"userId\":" + std::to_string(auth.userId) + ",";
-    json += "\"username\":\"" + auth.username + "\",";
-    json += "\"role\":\"" + auth.role + "\",";
-    json += "\"isApiToken\":" + std::string(auth.isApiToken ? "true" : "false");
-    json += "}";
-
-    sendJson(c, 200, json);
+    nlohmann::json json;
+    json["userId"] = auth.userId;
+    json["username"] = auth.username;
+    json["role"] = auth.role;
+    json["isApiToken"] = auth.isApiToken;
+    sendJson(c, 200, json.dump());
 }
 
-// =============================================================================
-// Room API Handlers
-// =============================================================================
+void WebServer::apiGetSetupStatus(struct mg_connection* c) {
+    if (!m_userMgr) {
+        sendError(c, 500, "Authentication not configured");
+        return;
+    }
+
+    nlohmann::json json;
+    json["setupRequired"] = !m_userMgr->hasAnyUser();
+    sendJson(c, 200, json.dump());
+}
+
+void WebServer::apiSetup(struct mg_connection* c, struct mg_http_message* hm) {
+    if (!m_sessionMgr || !m_userMgr) {
+        sendError(c, 500, "Authentication not configured");
+        return;
+    }
+
+    // Open only until the first account exists. Disabling or removing accounts
+    // later must not reopen it unless none are left at all.
+    if (m_userMgr->hasAnyUser()) {
+        sendError(c, 409, "Setup has already been completed");
+        return;
+    }
+
+    if (!isJsonRequest(hm)) {
+        sendError(c, 415, "Content-Type must be application/json");
+        return;
+    }
+
+    std::string username, password;
+    if (!parseCredentials(hm, username, password)) {
+        sendError(c, 400, "Username and password required");
+        return;
+    }
+
+    for (const std::string& problem : {security::UserManager::validateUsername(username),
+                                       security::UserManager::validatePassword(password)}) {
+        if (!problem.empty()) {
+            sendError(c, 400, problem);
+            return;
+        }
+    }
+
+    if (!m_userMgr->createUser(username, password, "admin")) {
+        sendError(c, 500, "Failed to create account");
+        return;
+    }
+
+    auto user = m_userMgr->getUser(username);
+    if (!user) {
+        sendError(c, 500, "Failed to create account");
+        return;
+    }
+
+    LOG_INFO("First-run setup created administrator: %s", username.c_str());
+    startSession(c, *user, 201);
+}
 
 void WebServer::apiGetRooms(struct mg_connection* c) {
     auto rooms = m_deviceManager.getAllRooms();
@@ -1193,7 +1414,8 @@ bool WebServer::start() {
 void WebServer::stop() {}
 void WebServer::setTlsCert(const std::string&, const std::string&) {}
 void WebServer::setHttpRedirect(bool, int) {}
-void WebServer::setSecurityManagers(security::SessionManager*, security::ApiTokenManager*) {}
+void WebServer::setSecurityManagers(security::SessionManager*, security::ApiTokenManager*, security::UserManager*) {}
+void WebServer::setLoginThrottle(int, int) {}
 void WebServer::setAutomationManager(AutomationManager*) {}
 void WebServer::setZigbeeHandler(zigbee::ZigbeeHandler*) {}
 void WebServer::setRateLimit(int) {}
@@ -1213,7 +1435,13 @@ void WebServer::apiSetDeviceState(struct mg_connection*, const std::string&, str
 void WebServer::apiGetSensorHistory(struct mg_connection*, const std::string&, struct mg_http_message*) {}
 void WebServer::apiGetSystemStatus(struct mg_connection*) {}
 void WebServer::apiLogin(struct mg_connection*, struct mg_http_message*) {}
-void WebServer::apiLogout(struct mg_connection*, const AuthInfo&) {}
+void WebServer::apiLogout(struct mg_connection*, struct mg_http_message*) {}
+void WebServer::apiGetSetupStatus(struct mg_connection*) {}
+void WebServer::apiSetup(struct mg_connection*, struct mg_http_message*) {}
+void WebServer::startSession(struct mg_connection*, const security::User&, int) {}
+int WebServer::loginRetryAfterSeconds(const std::string&) { return 0; }
+void WebServer::recordLoginFailure(const std::string&) {}
+bool WebServer::requiresAdmin(const std::string&, const std::string&) { return true; }
 void WebServer::apiGetCurrentUser(struct mg_connection*, const AuthInfo&) {}
 void WebServer::apiGetRooms(struct mg_connection*) {}
 void WebServer::apiCreateRoom(struct mg_connection*, struct mg_http_message*) {}

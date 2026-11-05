@@ -181,6 +181,22 @@ bool Config::load(const std::string& path) {
         }
 
         // Logging
+        if (config["security"]) {
+            const auto security = config["security"];
+            if (security["session_timeout_minutes"]) {
+                m_sessionTimeoutMinutes = security["session_timeout_minutes"].as<int>();
+            }
+            if (security["rate_limit_per_minute"]) {
+                m_rateLimitPerMinute = security["rate_limit_per_minute"].as<int>();
+            }
+            if (security["login_max_failures"]) {
+                m_loginMaxFailures = security["login_max_failures"].as<int>();
+            }
+            if (security["login_failure_window_seconds"]) {
+                m_loginFailureWindowSeconds = security["login_failure_window_seconds"].as<int>();
+            }
+        }
+
         if (config["logging"]) {
             if (config["logging"]["level"]) {
                 m_logLevel = config["logging"]["level"].as<std::string>();
@@ -248,6 +264,18 @@ bool Config::load(const std::string& path) {
     if (settings.count("zigbee.baud")) {
         m_zigbeeBaudRate = std::stoi(settings["zigbee.baud"]);
     }
+    if (settings.count("security.session_timeout_minutes")) {
+        m_sessionTimeoutMinutes = std::stoi(settings["security.session_timeout_minutes"]);
+    }
+    if (settings.count("security.rate_limit_per_minute")) {
+        m_rateLimitPerMinute = std::stoi(settings["security.rate_limit_per_minute"]);
+    }
+    if (settings.count("security.login_max_failures")) {
+        m_loginMaxFailures = std::stoi(settings["security.login_max_failures"]);
+    }
+    if (settings.count("security.login_failure_window_seconds")) {
+        m_loginFailureWindowSeconds = std::stoi(settings["security.login_failure_window_seconds"]);
+    }
     if (settings.count("logging.level")) {
         m_logLevel = settings["logging.level"];
     }
@@ -299,6 +327,10 @@ bool Config::save(const std::string& path) const {
 }
 
 void Config::setDefaults() {
+    m_sessionTimeoutMinutes = 60;
+    m_rateLimitPerMinute = 1200;
+    m_loginMaxFailures = 10;
+    m_loginFailureWindowSeconds = 300;
     m_databasePath = "/var/lib/smarthub/smarthub.db";
     m_mqttBroker = "127.0.0.1";
     m_mqttPort = 1883;

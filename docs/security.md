@@ -9,7 +9,7 @@ SmartHub implements multiple layers of security appropriate for a local network 
 - **Transport Security**: TLS 1.2+ for HTTPS connections
 - **Authentication**: Session-based web authentication and API tokens
 - **Authorization**: Role-based access control (admin/user)
-- **Password Security**: Argon2id password hashing
+- **Password Security**: PBKDF2-SHA256 password hashing
 - **Credential Protection**: AES-256-GCM encrypted credential storage
 - **Request Protection**: Rate limiting and security headers
 
@@ -62,15 +62,23 @@ if (userMgr.authenticate("admin", "SecureP@ssw0rd!")) {
 ```
 
 **Password Security:**
-- Argon2id hashing (memory-hard, GPU-resistant)
-- Unique random salt per password (16 bytes)
-- Configurable iterations (default: 3)
-- Memory cost: 64 MB
-- Parallelism: 4 threads
+- PBKDF2-SHA256 with 100,000 iterations
+- Unique random salt per password
+- Constant-time comparison
+
+**Password rules:** 8 to 128 characters, with an uppercase letter, a lowercase letter and a digit.
 
 **User Roles:**
-- `admin`: Full system access
-- `user`: Device control, limited configuration
+
+| Action | `admin` | `user` |
+|--------|---------|--------|
+| View devices, rooms and automations | Yes | Yes |
+| Control a device (`PUT /api/devices/{id}`) | Yes | Yes |
+| Add, edit or remove devices and rooms | Yes | No |
+| Zigbee pairing | Yes | No |
+| Add, edit, enable or remove automations | Yes | No |
+
+The server enforces these rules: any request that changes something needs `admin` unless it is listed as open to `user`, so new routes start out admin-only. The dashboard also hides the controls a user can't use.
 
 ### Session Management (`SessionManager`)
 
@@ -79,7 +87,7 @@ Manages web authentication sessions.
 ```cpp
 #include <smarthub/security/SessionManager.hpp>
 
-SessionManager sessionMgr(database, 60);  // 60-minute sessions
+SessionManager sessionMgr(60);  // Expires after 60 idle minutes
 
 // Create session after login
 std::string token = sessionMgr.createSession(userId, "admin", "admin");
@@ -96,9 +104,10 @@ sessionMgr.destroySession(token);
 
 **Features:**
 - Cryptographically secure token generation (32 bytes, hex-encoded)
-- Configurable session timeout
-- Automatic expired session cleanup
-- User session enumeration and bulk invalidation
+- Sessions are held in memory, so restarting the hub logs everyone out
+- Each authenticated request restarts the idle timeout, and an open dashboard polls, so it stays logged in
+- At most 5 sessions per user; a new login ends the oldest
+- Logout ends only that browser's session
 
 ### API Token Authentication (`ApiTokenManager`)
 
@@ -157,25 +166,17 @@ if (password) {
 - Unique IV per encryption
 - Authentication tag verification
 
-### First-Run Setup (`SetupManager`)
+### First-Run Setup
 
-Manages initial system configuration.
+Web authentication is always required, including on the local network. A new hub has no accounts and no default password, so the dashboard opens on a screen that creates the administrator (`POST /api/setup`).
 
-```cpp
-#include <smarthub/security/SetupManager.hpp>
+Setup closes for good as soon as any account exists, even a disabled one. Until then, **anyone who can reach the hub on the network can claim it**, so create the administrator as soon as the hub is on the network. The hub logs a warning at startup while no account exists.
 
-SetupManager setup(database, userMgr, credStore, certMgr);
-setup.initialize();
+`SetupManager` is a separate class for a fuller setup that also generates certificates and initializes the credential store. The application doesn't use it yet.
 
-if (!setup.isSetupComplete()) {
-    SetupConfig config;
-    config.adminUsername = "admin";
-    config.adminPassword = "SecurePassword123!";
-    config.hostname = "smarthub.local";
+### Managing Accounts
 
-    setup.performSetup(config);
-}
-```
+There's no web interface yet for adding accounts, changing passwords or issuing API tokens, and a lost administrator password can only be recovered by removing the accounts from the database on the board. See [#36](https://github.com/johnjezl/STM32-Smart-Home-Hub/issues/36).
 
 ## Web Server Security
 
@@ -199,20 +200,28 @@ Protected routes require authentication via:
 1. **Session Cookie**: `session=<token>` (for web UI)
 2. **Bearer Token**: `Authorization: Bearer <token>` (for API clients)
 
+Requests without valid credentials get `401`. Requests from a user without the required role get `403`.
+
 **Public Routes** (no auth required):
 - `/api/auth/login`
 - `/api/system/status`
+- `/api/setup` and `/api/setup/status` (setup refuses to run once an account exists)
 - Static files (non-API routes)
+
+An API token acts as its owner, whose role and enabled state are checked on every request.
+
+The cookie is marked `Secure` only on a TLS connection, because a browser would discard it on plain HTTP.
 
 ### Rate Limiting
 
-Per-IP rate limiting protects against brute force attacks:
+Two limits apply per client IP:
 
-```cpp
-webServer.setRateLimit(60);  // 60 requests per minute per IP
-```
+| Limit | Default | Config key | When exceeded |
+|-------|---------|------------|---------------|
+| All requests | 1200 per minute | `rate_limit_per_minute` | `429` |
+| Failed logins | 10 per 5 minutes | `login_max_failures`, `login_failure_window_seconds` | `429` with `Retry-After` |
 
-When exceeded, returns `429 Too Many Requests`.
+The request limit has to leave room for the dashboard, which makes about 12 x (devices + 3) requests a minute while it is open. The login limit is what stops password guessing: once it is reached, logins from that IP are refused without checking the password, even a correct one, until the window ends. A successful login doesn't reset the count. Setting either limit to 0 disables it.
 
 ### HTTP to HTTPS Redirect
 
@@ -230,7 +239,7 @@ Location: https://smarthub.local/...
 ```bash
 curl -X POST https://smarthub.local/api/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"username":"admin","password":"password"}'
+  -d '{"username":"admin","password":"Your-Password-1"}'
 ```
 
 Response sets session cookie:
@@ -248,7 +257,7 @@ curl https://smarthub.local/api/devices \
 ### Logout
 
 ```bash
-curl -X POST https://smarthub.local/api/auth/logout \
+curl -X POST -d '' https://smarthub.local/api/auth/logout \
   -H "Cookie: session=<token>"
 ```
 
@@ -263,21 +272,6 @@ CREATE TABLE users (
     role TEXT DEFAULT 'user',
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
-);
-```
-
-### Sessions Table
-```sql
-CREATE TABLE sessions (
-    id INTEGER PRIMARY KEY,
-    user_id INTEGER NOT NULL,
-    token_hash TEXT UNIQUE NOT NULL,
-    username TEXT NOT NULL,
-    role TEXT NOT NULL,
-    created_at INTEGER NOT NULL,
-    expires_at INTEGER NOT NULL,
-    ip_address TEXT,
-    FOREIGN KEY (user_id) REFERENCES users(id)
 );
 ```
 
@@ -308,13 +302,14 @@ web:
 
 security:
   session_timeout_minutes: 60
-  rate_limit_per_minute: 60
-  max_api_tokens_per_user: 10
+  rate_limit_per_minute: 1200
+  login_max_failures: 10
+  login_failure_window_seconds: 300
 ```
 
 ## Security Best Practices
 
-1. **Change default passwords** immediately after first-run setup
+1. **Create the administrator** as soon as the hub is on the network
 2. **Use strong passwords** (12+ characters, mixed case, numbers, symbols)
 3. **Rotate API tokens** periodically
 4. **Monitor logs** for failed authentication attempts
@@ -323,15 +318,19 @@ security:
 
 ## Threat Model
 
-SmartHub is designed for **local network deployment**. It protects against:
+SmartHub is designed for **local network deployment**, but doesn't treat that network as trusted: every API request needs authentication. It protects against:
 
 - Eavesdropping (TLS encryption)
 - Password theft (secure hashing)
 - Session hijacking (HttpOnly, Secure cookies)
-- Brute force attacks (rate limiting)
+- Password guessing (failed login limit)
 - XSS/Clickjacking (security headers)
 
-**Not in scope** (local trusted network assumed):
+**Known gaps**, tracked in [#13](https://github.com/johnjezl/STM32-Smart-Home-Hub/issues/13):
+- Plain HTTP is still served on port 4321, so logins sent there can be read on the network
+- If the certificate can't be read, the hub falls back to plain HTTP instead of refusing to start
+
+**Not in scope**:
 - Network-level attacks (use firewall)
 - Physical device access
 - Supply chain attacks
@@ -340,11 +339,13 @@ SmartHub is designed for **local network deployment**. It protects against:
 
 Security tests are located in:
 - `app/tests/security/test_security.cpp` - Unit tests (90 tests)
-- `app/tests/web/test_webserver.cpp` - Integration tests (25 tests)
+- `app/tests/web/test_webserver.cpp` - Web server integration tests
+- `app/tests/web/test_web_auth.cpp` - Login, roles and rate limits, end to end against the real `Application`
 
 Run tests:
 ```bash
 cd app/build
 ./tests/test_security
 ./tests/test_webserver
+./tests/test_web_auth
 ```

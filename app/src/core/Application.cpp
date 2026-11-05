@@ -11,6 +11,9 @@
 #include <smarthub/web/WebServer.hpp>
 #include <smarthub/protocols/mqtt/MqttClient.hpp>
 #include <smarthub/rpmsg/RpmsgClient.hpp>
+#include <smarthub/security/ApiTokenManager.hpp>
+#include <smarthub/security/SessionManager.hpp>
+#include <smarthub/security/UserManager.hpp>
 #include <nlohmann/json.hpp>
 
 #ifdef SMARTHUB_ENABLE_LVGL
@@ -85,6 +88,11 @@ bool Application::initialize() {
     if (!initializeRpmsg()) {
         // RPMsg failure is not fatal - M4 might not be running
         LOG_WARN("RPMsg initialization failed, M4 may not be running");
+    }
+
+    if (!initializeSecurity()) {
+        LOG_ERROR("Failed to initialize security");
+        return false;
     }
 
     if (!initializeWebServer()) {
@@ -242,6 +250,31 @@ bool Application::initializeRpmsg() {
     return true;
 }
 
+bool Application::initializeSecurity() {
+    m_userManager = std::make_unique<security::UserManager>(*m_database);
+    if (!m_userManager->initialize()) {
+        return false;
+    }
+
+    m_apiTokenManager = std::make_unique<security::ApiTokenManager>(*m_database);
+    if (!m_apiTokenManager->initialize()) {
+        return false;
+    }
+
+    int sessionTimeout = m_config->sessionTimeoutMinutes();
+    if (sessionTimeout <= 0) {
+        // Sessions would expire as they were created, locking everyone out
+        LOG_WARN("Invalid session timeout %d, using 60 minutes", sessionTimeout);
+        sessionTimeout = 60;
+    }
+    m_sessionManager = std::make_unique<security::SessionManager>(sessionTimeout);
+
+    if (!m_userManager->hasAnyUser()) {
+        LOG_WARN("No accounts exist yet: open the web dashboard to create the administrator");
+    }
+    return true;
+}
+
 bool Application::initializeWebServer() {
     m_webServer = std::make_unique<WebServer>(
         *m_eventBus,
@@ -257,6 +290,12 @@ bool Application::initializeWebServer() {
         m_webServer->setTlsCert(certPath, keyPath);
         m_webServer->setHttpRedirect(true, 80);  // Redirect HTTP to HTTPS
     }
+
+    m_webServer->setSecurityManagers(m_sessionManager.get(), m_apiTokenManager.get(),
+                                     m_userManager.get());
+    m_webServer->setRateLimit(m_config->rateLimitPerMinute());
+    m_webServer->setLoginThrottle(m_config->loginMaxFailures(),
+                                  m_config->loginFailureWindowSeconds());
 
     if (!m_webServer->start()) {
         return false;
@@ -296,6 +335,10 @@ void Application::shutdownSubsystems() {
         m_webServer->stop();
         m_webServer.reset();
     }
+
+    m_apiTokenManager.reset();
+    m_sessionManager.reset();
+    m_userManager.reset();
 
     if (m_rpmsgClient) {
         m_rpmsgClient->shutdown();

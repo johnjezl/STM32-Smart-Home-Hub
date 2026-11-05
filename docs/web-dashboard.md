@@ -26,6 +26,8 @@ https://192.168.4.102/
 
 > **Note**: The dashboard uses a self-signed TLS certificate. You may need to accept a browser security warning on first access.
 
+On a new hub the dashboard first asks you to create the administrator account. After that it asks for a login. See [Security](security.md#first-run-setup).
+
 ## Dashboard Tabs
 
 ### Dashboard Tab
@@ -89,8 +91,10 @@ The dashboard communicates via REST API:
 
 ### Updating Device State
 
+These examples use a session cookie from `POST /api/auth/login`. See [Security](security.md#api-authentication) and [API](api.md#authentication).
+
 ```bash
-curl -k -X PUT https://192.168.4.102/api/devices/light-living \
+curl -k -b cookies.txt -X PUT https://192.168.4.102/api/devices/light-living \
   -H "Content-Type: application/json" \
   -d '{"on": false, "brightness": 50}'
 ```
@@ -243,7 +247,10 @@ tail -f /tmp/smarthub.log
 
 3. Test API directly:
 ```bash
-curl -k https://192.168.4.102/api/devices
+curl -k -c cookies.txt -X POST -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"Your-Password-1"}' \
+  https://192.168.4.102/api/auth/login
+curl -k -b cookies.txt https://192.168.4.102/api/devices
 ```
 
 ### Connection Refused

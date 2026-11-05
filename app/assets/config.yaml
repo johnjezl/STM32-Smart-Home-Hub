@@ -22,6 +22,13 @@ web:
     cert: /etc/smarthub/cert.pem
     key: /etc/smarthub/key.pem
 
+# Web authentication
+security:
+  session_timeout_minutes: 60    # idle time before a login expires
+  rate_limit_per_minute: 1200    # per client IP, 0 to disable
+  login_max_failures: 10         # failed logins per client IP, 0 to disable
+  login_failure_window_seconds: 300
+
 # Display settings
 display:
   device: /dev/fb0
