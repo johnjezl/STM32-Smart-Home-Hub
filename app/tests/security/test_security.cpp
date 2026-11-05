@@ -7,6 +7,7 @@
 #include <gtest/gtest.h>
 #include <smarthub/security/CertManager.hpp>
 #include <smarthub/security/UserManager.hpp>
+#include <smarthub/security/Base64.hpp>
 #include <smarthub/security/SessionManager.hpp>
 #include <smarthub/security/ApiTokenManager.hpp>
 #include <smarthub/security/CredentialStore.hpp>
@@ -1090,3 +1091,36 @@ TEST_F(SetupManagerTest, GetLocalIpAddress) {
 }
 
 } // namespace smarthub::security
+
+// ============================================================================
+// Base64 Tests
+// ============================================================================
+
+using smarthub::security::base64Decode;
+using smarthub::security::base64Encode;
+
+TEST(Base64Test, EncodesAndDecodesKnownVectors) {
+    const std::vector<std::pair<std::string, std::string>> vectors = {
+        {"", ""}, {"f", "Zg=="}, {"fo", "Zm8="}, {"foo", "Zm9v"},
+        {"foob", "Zm9vYg=="}, {"fooba", "Zm9vYmE="}, {"foobar", "Zm9vYmFy"},
+    };
+    for (const auto& [plain, encoded] : vectors) {
+        const auto* bytes = reinterpret_cast<const uint8_t*>(plain.data());
+        EXPECT_EQ(base64Encode(bytes, plain.size()), encoded);
+        const auto decoded = base64Decode(encoded);
+        EXPECT_EQ(std::string(decoded.begin(), decoded.end()), plain);
+    }
+}
+
+TEST(Base64Test, RoundTripsAllByteValuesAcrossLongInput) {
+    std::vector<uint8_t> bytes;
+    for (int i = 0; i < 1024; ++i) {
+        bytes.push_back(static_cast<uint8_t>(i & 0xFF));
+    }
+    EXPECT_EQ(base64Decode(base64Encode(bytes.data(), bytes.size())), bytes);
+}
+
+TEST(Base64Test, SkipsForeignCharactersAndStopsAtPadding) {
+    const auto decoded = base64Decode("Zm\n9v=ignored");
+    EXPECT_EQ(std::string(decoded.begin(), decoded.end()), "foo");
+}

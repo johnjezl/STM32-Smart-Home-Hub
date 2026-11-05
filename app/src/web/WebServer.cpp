@@ -67,6 +67,50 @@ void pruneExpired(std::unordered_map<std::string, RateLimitEntry>& entries,
             ++it;
         }
     }
+    // Far more clients than a home network has. Forgetting them is better than
+    // growing without limit and rescanning on every request.
+    if (entries.size() >= kMaxTrackedClients) {
+        entries.clear();
+    }
+}
+
+// A page on another site can make its domain resolve to the hub (DNS
+// rebinding), and then counts as same-origin. Public DNS names are the only
+// ones it can do that with, so first-run setup refuses them. Other routes don't
+// need this: that page's origin never receives the session cookie.
+bool isLocalHostHeader(struct mg_http_message* hm) {
+    struct mg_str* header = mg_http_get_header(hm, "Host");
+    if (!header) {
+        return false;
+    }
+    std::string host(header->buf, header->len);
+    if (!host.empty() && host.front() == '[') {
+        return true;  // IPv6 literal
+    }
+    host = host.substr(0, host.find(':'));
+    if (host.empty()) {
+        return false;
+    }
+    std::transform(host.begin(), host.end(), host.begin(),
+                   [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+
+    const bool isIpv4 = host.find_first_not_of("0123456789.") == std::string::npos;
+    const bool isSingleLabel = host.find('.') == std::string::npos;
+    static const std::string kMdnsSuffix = ".local";
+    const bool isMdns = host.size() > kMdnsSuffix.size() &&
+                        host.compare(host.size() - kMdnsSuffix.size(), kMdnsSuffix.size(),
+                                     kMdnsSuffix) == 0;
+    return isIpv4 || isSingleLabel || isMdns;
+}
+
+AuthInfo authInfoFor(const security::User& user, bool isApiToken) {
+    AuthInfo auth;
+    auth.authenticated = true;
+    auth.userId = user.id;
+    auth.username = user.username;
+    auth.role = user.role;
+    auth.isApiToken = isApiToken;
+    return auth;
 }
 
 std::string sessionTokenFromCookies(struct mg_http_message* hm) {
@@ -288,25 +332,23 @@ void WebServer::setPublicRoutes(const std::vector<std::string>& routes) {
 }
 
 AuthInfo WebServer::checkAuth(struct mg_http_message* hm) {
-    AuthInfo auth;
+    if (!m_userMgr) {
+        return {};
+    }
+
+    // Both kinds of credential only name a user. The account is looked up each
+    // time, so disabling, removing or changing it takes effect at once.
 
     // Check Authorization header for Bearer token (API token)
     struct mg_str* authHeader = mg_http_get_header(hm, "Authorization");
-    if (authHeader && authHeader->len > 7 && m_tokenMgr && m_userMgr) {
+    if (authHeader && authHeader->len > 7 && m_tokenMgr) {
         std::string headerVal(authHeader->buf, authHeader->len);
         if (headerVal.rfind("Bearer ", 0) == 0) {
             auto apiToken = m_tokenMgr->validateToken(headerVal.substr(7));
             if (apiToken) {
-                // A token carries only its owner, who may since have been
-                // disabled, removed or given a different role.
                 auto user = m_userMgr->getUserById(apiToken->userId);
                 if (user && user->enabled) {
-                    auth.authenticated = true;
-                    auth.userId = user->id;
-                    auth.username = user->username;
-                    auth.role = user->role;
-                    auth.isApiToken = true;
-                    return auth;
+                    return authInfoFor(*user, true);
                 }
             }
         }
@@ -318,18 +360,18 @@ AuthInfo WebServer::checkAuth(struct mg_http_message* hm) {
         if (!sessionToken.empty()) {
             auto session = m_sessionMgr->validateSession(sessionToken);
             if (session) {
-                // The timeout counts idle time, not time since login
-                m_sessionMgr->touchSession(sessionToken);
-                auth.authenticated = true;
-                auth.userId = session->userId;
-                auth.username = session->username;
-                auth.role = session->role;
-                return auth;
+                auto user = m_userMgr->getUserById(session->userId);
+                if (user && user->enabled) {
+                    // The timeout counts idle time, not time since login
+                    m_sessionMgr->touchSession(sessionToken);
+                    return authInfoFor(*user, false);
+                }
+                m_sessionMgr->destroySession(sessionToken);
             }
         }
     }
 
-    return auth;
+    return {};
 }
 
 bool WebServer::checkRateLimit(const std::string& ip) {
@@ -870,6 +912,11 @@ void WebServer::apiSetup(struct mg_connection* c, struct mg_http_message* hm) {
     // later must not reopen it unless none are left at all.
     if (m_userMgr->hasAnyUser()) {
         sendError(c, 409, "Setup has already been completed");
+        return;
+    }
+
+    if (!isLocalHostHeader(hm)) {
+        sendError(c, 403, "Open the hub by its IP address or .local name to set it up");
         return;
     }
 

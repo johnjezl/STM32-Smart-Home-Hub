@@ -17,7 +17,7 @@ Authentication is required on every network, including the local one. Requests w
 The API supports two authentication methods:
 
 ### Session-based Authentication
-Use the login endpoint to create a session, then include the session cookie in subsequent requests. A session ends after 60 idle minutes, on logout, or when the hub restarts.
+Use the login endpoint to create a session, then include the session cookie in subsequent requests. A session ends after 60 minutes without requests, on logout, or when the hub restarts. An open dashboard keeps making requests, so it stays logged in.
 
 ### API Token Authentication
 Include a Bearer token in the Authorization header:
@@ -140,6 +140,8 @@ The request must have the `Content-Type: application/json` header, or it gets `4
 **Response (201 Created):** same body as login, and sets the `session` cookie.
 
 **Response (400 Bad Request):** the `error` field says what's wrong with the username or password.
+
+**Response (403 Forbidden):** the request was addressed to a public DNS name. Use the hub's IP address or `.local` name.
 
 **Response (409 Conflict):** an account already exists.
 
@@ -733,7 +735,7 @@ All error responses follow this format:
 
 ## Rate Limiting
 
-By default, each IP address can make 1200 requests a minute, and 10 failed logins in 5 minutes. Exceeding either limit returns a 429 status. See [Security](security.md#rate-limiting) for the configuration.
+By default, each IP address can make 600 requests a minute, and 10 failed logins in 5 minutes. Exceeding either limit returns a 429 status. See [Security](security.md#rate-limiting) for the configuration.
 
 ---
 

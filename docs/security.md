@@ -105,7 +105,8 @@ sessionMgr.destroySession(token);
 **Features:**
 - Cryptographically secure token generation (32 bytes, hex-encoded)
 - Sessions are held in memory, so restarting the hub logs everyone out
-- Each authenticated request restarts the idle timeout, and an open dashboard polls, so it stays logged in
+- Each authenticated request restarts the idle timeout. An open dashboard polls, so it counts as activity and stays logged in, which suits a wall-mounted tablet
+- Disabling or removing an account, or changing its role, takes effect on that user's next request
 - At most 5 sessions per user; a new login ends the oldest
 - Logout ends only that browser's session
 
@@ -172,6 +173,8 @@ Web authentication is always required, including on the local network. A new hub
 
 Setup closes for good as soon as any account exists, even a disabled one. Until then, **anyone who can reach the hub on the network can claim it**, so create the administrator as soon as the hub is on the network. The hub logs a warning at startup while no account exists.
 
+Setup only accepts a request addressed to an IP address, a `.local` name or a name with no dots. This stops a web page on another site from reaching the hub by pointing its own domain at it (DNS rebinding) while you browse.
+
 `SetupManager` is a separate class for a fuller setup that also generates certificates and initializes the credential store. The application doesn't use it yet.
 
 ### Managing Accounts
@@ -208,7 +211,7 @@ Requests without valid credentials get `401`. Requests from a user without the r
 - `/api/setup` and `/api/setup/status` (setup refuses to run once an account exists)
 - Static files (non-API routes)
 
-An API token acts as its owner, whose role and enabled state are checked on every request.
+A session or API token acts as its owner, whose role and enabled state are checked on every request.
 
 The cookie is marked `Secure` only on a TLS connection, because a browser would discard it on plain HTTP.
 
@@ -218,10 +221,10 @@ Two limits apply per client IP:
 
 | Limit | Default | Config key | When exceeded |
 |-------|---------|------------|---------------|
-| All requests | 1200 per minute | `rate_limit_per_minute` | `429` |
+| All requests | 600 per minute | `rate_limit_per_minute` | `429` |
 | Failed logins | 10 per 5 minutes | `login_max_failures`, `login_failure_window_seconds` | `429` with `Retry-After` |
 
-The request limit has to leave room for the dashboard, which makes about 12 x (devices + 3) requests a minute while it is open. The login limit is what stops password guessing: once it is reached, logins from that IP are refused without checking the password, even a correct one, until the window ends. A successful login doesn't reset the count. Setting either limit to 0 disables it.
+An open dashboard makes 36 requests a minute, whatever the number of devices. The login limit is what stops password guessing: once it is reached, logins from that IP are refused without checking the password, even a correct one, until the window ends. A successful login doesn't reset the count. Setting either limit to 0 disables it.
 
 ### HTTP to HTTPS Redirect
 
@@ -302,7 +305,7 @@ web:
 
 security:
   session_timeout_minutes: 60
-  rate_limit_per_minute: 1200
+  rate_limit_per_minute: 600
   login_max_failures: 10
   login_failure_window_seconds: 300
 ```

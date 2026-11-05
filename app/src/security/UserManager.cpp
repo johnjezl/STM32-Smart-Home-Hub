@@ -3,6 +3,7 @@
  */
 
 #include <smarthub/security/UserManager.hpp>
+#include <smarthub/security/Base64.hpp>
 #include <smarthub/database/Database.hpp>
 #include <smarthub/core/Logger.hpp>
 
@@ -21,54 +22,6 @@
 #endif
 
 namespace smarthub::security {
-
-// Base64 encoding table
-static const char BASE64_CHARS[] =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-static std::string base64Encode(const unsigned char* data, size_t len) {
-    std::string result;
-    result.reserve(((len + 2) / 3) * 4);
-
-    for (size_t i = 0; i < len; i += 3) {
-        uint32_t n = static_cast<uint32_t>(data[i]) << 16;
-        if (i + 1 < len) n |= static_cast<uint32_t>(data[i + 1]) << 8;
-        if (i + 2 < len) n |= static_cast<uint32_t>(data[i + 2]);
-
-        result.push_back(BASE64_CHARS[(n >> 18) & 0x3F]);
-        result.push_back(BASE64_CHARS[(n >> 12) & 0x3F]);
-        result.push_back(i + 1 < len ? BASE64_CHARS[(n >> 6) & 0x3F] : '=');
-        result.push_back(i + 2 < len ? BASE64_CHARS[n & 0x3F] : '=');
-    }
-
-    return result;
-}
-
-static std::vector<unsigned char> base64Decode(const std::string& encoded) {
-    std::vector<unsigned char> result;
-
-    std::vector<int> decodeTable(256, -1);
-    for (int i = 0; i < 64; i++) {
-        decodeTable[static_cast<unsigned char>(BASE64_CHARS[i])] = i;
-    }
-
-    uint32_t val = 0;
-    int bits = 0;
-    for (char c : encoded) {
-        if (c == '=') break;
-        if (decodeTable[static_cast<unsigned char>(c)] == -1) continue;
-
-        val = (val << 6) | static_cast<uint32_t>(decodeTable[static_cast<unsigned char>(c)]);
-        bits += 6;
-
-        if (bits >= 8) {
-            bits -= 8;
-            result.push_back(static_cast<unsigned char>((val >> bits) & 0xFF));
-        }
-    }
-
-    return result;
-}
 
 UserManager::UserManager(Database& db)
     : m_db(db)
@@ -487,7 +440,7 @@ std::string UserManager::hashPassword(const std::string& password,
     }
 
     // Decode salt from base64
-    std::vector<unsigned char> saltBytes = base64Decode(useSalt);
+    std::vector<uint8_t> saltBytes = base64Decode(useSalt);
     if (saltBytes.empty()) {
         // If decoding fails, use salt as-is (shouldn't happen with generated salts)
         saltBytes.assign(useSalt.begin(), useSalt.end());

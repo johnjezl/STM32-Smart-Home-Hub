@@ -181,6 +181,10 @@ class SmartHubApp {
         return response;
     }
 
+    isAdmin() {
+        return this.currentUser?.role === 'admin';
+    }
+
     handleSessionEnded() {
         if (!this.currentUser) {
             return;
@@ -218,7 +222,7 @@ class SmartHubApp {
                 this.currentUser = { username: data.username, role: data.role };
                 errorEl.textContent = '';
                 this.showDashboard();
-            } else if (response.status === 429) {
+            } else if (response.headers.get('Retry-After')) {
                 const seconds = parseInt(response.headers.get('Retry-After'), 10);
                 const minutes = Math.max(1, Math.ceil(seconds / 60)) || 1;
                 errorEl.textContent = `Too many failed attempts. Try again in ${minutes} minute${minutes === 1 ? '' : 's'}.`;
@@ -268,8 +272,10 @@ class SmartHubApp {
     }
 
     async logout() {
-        // Closing a modal can stop pairing, which still needs the session
-        this.closeAllModals();
+        // Stopping pairing needs the session, so it has to finish first
+        if (this.pairingActive) {
+            await this.stopZigbeePairing();
+        }
 
         try {
             await fetch('/api/auth/logout', {
@@ -304,7 +310,7 @@ class SmartHubApp {
         this.showScreen('dashboard-screen');
 
         document.getElementById('user-name').textContent = this.currentUser.username || 'User';
-        document.body.classList.toggle('is-admin', this.currentUser.role === 'admin');
+        document.body.classList.toggle('is-admin', this.isAdmin());
 
         // These hold passwords, which shouldn't outlive the login
         document.getElementById('password').value = '';
@@ -337,7 +343,10 @@ class SmartHubApp {
             this.loadRooms(),
             this.loadAutomations()
         ]);
-        this.render();
+        // The session may have ended while those were loading
+        if (this.currentUser) {
+            this.render();
+        }
     }
 
     async loadDevices() {
@@ -346,7 +355,7 @@ class SmartHubApp {
 
             if (response.ok) {
                 const devices = await response.json();
-                await this.processDevices(devices);
+                this.processDevices(devices);
             }
         } catch (error) {
             console.error('Failed to load devices:', error);
@@ -377,27 +386,9 @@ class SmartHubApp {
         }
     }
 
-    async processDevices(devices) {
-        this.devices = [];
-        this.sensors = [];
-
-        for (const device of devices) {
-            try {
-                const response = await this.api(`/api/devices/${device.id}`);
-
-                if (response.ok) {
-                    const fullDevice = await response.json();
-
-                    if (this.isSensor(fullDevice.type)) {
-                        this.sensors.push(fullDevice);
-                    } else {
-                        this.devices.push(fullDevice);
-                    }
-                }
-            } catch (error) {
-                console.error(`Failed to fetch device ${device.id}:`, error);
-            }
-        }
+    processDevices(devices) {
+        this.devices = devices.filter(device => !this.isSensor(device.type));
+        this.sensors = devices.filter(device => this.isSensor(device.type));
     }
 
     isSensor(type) {
@@ -630,7 +621,7 @@ class SmartHubApp {
                 <div class="automation-controls">
                     <button class="automation-edit-btn admin-only" data-automation-id="${automation.id}" title="Edit">✏️</button>
                     <label class="toggle">
-                        <input type="checkbox" ${automation.enabled ? 'checked' : ''} ${this.currentUser.role === 'admin' ? '' : 'disabled'}
+                        <input type="checkbox" ${automation.enabled ? 'checked' : ''} ${this.isAdmin() ? '' : 'disabled'}
                             data-automation-id="${automation.id}">
                         <span class="toggle-slider"></span>
                     </label>
@@ -848,7 +839,9 @@ class SmartHubApp {
         document.getElementById('http-url').value = '';
 
         this.showDeviceWizardStep(1);
-        this.stopZigbeePairing();
+        if (this.pairingActive) {
+            this.stopZigbeePairing();
+        }
     }
 
     showDeviceWizardStep(step) {

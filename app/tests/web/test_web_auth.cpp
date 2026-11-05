@@ -71,6 +71,7 @@ struct RequestOptions {
     std::string body;
     std::string cookie;
     std::string bearer;
+    std::string host;
     std::string contentType = "application/json";
 };
 
@@ -144,6 +145,9 @@ protected:
         command += " -H " + shellQuote("Content-Type: " + options.contentType);
         if (!options.cookie.empty()) {
             command += " -H " + shellQuote("Cookie: " + options.cookie);
+        }
+        if (!options.host.empty()) {
+            command += " -H " + shellQuote("Host: " + options.host);
         }
         if (!options.bearer.empty()) {
             command += " -H " + shellQuote("Authorization: Bearer " + options.bearer);
@@ -317,6 +321,32 @@ TEST_F(WebAuthTest, SetupRejectsWeakPasswordsAndBadUsernames) {
     EXPECT_EQ(request("GET", "/api/setup/status").json()["setupRequired"], true);
 }
 
+TEST_F(WebAuthTest, SetupRefusesPublicDnsNames) {
+    startApp();
+
+    // What a page gets after pointing its own domain at the hub
+    for (const char* host : {"evil.example", "evil.example:4321", "192.168.1.5.nip.io",
+                             "smarthub.local.evil.example"}) {
+        RequestOptions rebound(credentials(kAdminName, kAdminPassword));
+        rebound.host = host;
+        EXPECT_EQ(request("POST", "/api/setup", rebound).status, 403) << host;
+    }
+    EXPECT_EQ(request("GET", "/api/setup/status").json()["setupRequired"], true);
+}
+
+TEST_F(WebAuthTest, SetupAcceptsLocalNames) {
+    for (const char* host : {"192.168.1.5", "192.168.1.5:8443", "smarthub.local",
+                             "SmartHub.LOCAL:443", "smarthub", "localhost:8080", "[fe80::1]:443"}) {
+        startApp();
+        RequestOptions local(credentials(kAdminName, kAdminPassword));
+        local.host = host;
+        EXPECT_EQ(request("POST", "/api/setup", local).status, 201) << host;
+        stopApp();
+        fs::remove(m_dir / "hub.db");
+        s_port++;
+    }
+}
+
 TEST_F(WebAuthTest, SetupAndLoginRefuseRequestsThatAreNotJson) {
     startApp();
 
@@ -440,6 +470,49 @@ TEST_F(WebAuthTest, LogoutEndsOnlyThatSession) {
 
     EXPECT_EQ(request("GET", "/api/devices", phone).status, 401);
     EXPECT_EQ(request("GET", "/api/devices", laptop).status, 200);
+}
+
+TEST_F(WebAuthTest, DisablingAUserEndsTheirSession) {
+    startApp();
+    setUpAdmin();
+    addUser("guest", "Guest-Pass-1", "user");
+    RequestOptions guest;
+    guest.cookie = loginCookie("guest", "Guest-Pass-1");
+    EXPECT_EQ(request("GET", "/api/devices", guest).status, 200);
+
+    security::UserManager users(m_app->database());
+    ASSERT_TRUE(users.setUserEnabled("guest", false));
+    EXPECT_EQ(request("GET", "/api/devices", guest).status, 401);
+
+    // It stays ended if the account is enabled again
+    ASSERT_TRUE(users.setUserEnabled("guest", true));
+    EXPECT_EQ(request("GET", "/api/devices", guest).status, 401);
+}
+
+TEST_F(WebAuthTest, RemovingAUserEndsTheirSession) {
+    startApp();
+    setUpAdmin();
+    addUser("guest", "Guest-Pass-1", "user");
+    RequestOptions guest;
+    guest.cookie = loginCookie("guest", "Guest-Pass-1");
+
+    security::UserManager users(m_app->database());
+    ASSERT_TRUE(users.deleteUser("guest"));
+    EXPECT_EQ(request("GET", "/api/devices", guest).status, 401);
+}
+
+TEST_F(WebAuthTest, ChangingARoleAppliesToOpenSessions) {
+    startApp();
+    setUpAdmin();
+    addUser("guest", "Guest-Pass-1", "admin");
+    RequestOptions guest(R"({"name":"Den"})");
+    guest.cookie = loginCookie("guest", "Guest-Pass-1");
+    EXPECT_EQ(request("POST", "/api/rooms", guest).status, 201);
+
+    security::UserManager users(m_app->database());
+    ASSERT_TRUE(users.changeRole("guest", "user"));
+    EXPECT_EQ(request("POST", "/api/rooms", guest).status, 403);
+    EXPECT_EQ(request("GET", "/api/auth/me", guest).json()["role"], "user");
 }
 
 TEST_F(WebAuthTest, InvalidSessionTimeoutDoesNotLockEveryoneOut) {
@@ -591,10 +664,10 @@ TEST_F(WebAuthTest, ConfiguredRateLimitIsEnforced) {
 
 TEST(WebAuthDefaults, RateLimitIsOnAndLeavesRoomForTheDashboard) {
     Config config;
-    // While open, the dashboard refreshes every 5 seconds: the device list,
-    // each device, the rooms and the automations.
-    const int devices = 50;
-    EXPECT_GE(config.rateLimitPerMinute(), 12 * (devices + 3));
+    // While open, the dashboard refreshes every 5 seconds: the devices, the
+    // rooms and the automations. Allow for several tabs behind one address.
+    const int tabs = 5;
+    EXPECT_GE(config.rateLimitPerMinute(), tabs * 12 * 3);
     EXPECT_GT(config.loginMaxFailures(), 0);
 }
 
@@ -626,6 +699,15 @@ TEST_F(WebAuthTest, LoginThrottleEndsWithItsWindow) {
 
     std::this_thread::sleep_for(std::chrono::milliseconds(1100));
     EXPECT_EQ(login(kAdminName, kAdminPassword).status, 200);
+}
+
+TEST_F(WebAuthTest, InvalidLoginWindowStillThrottles) {
+    startApp("security:\n  login_max_failures: 2\n  login_failure_window_seconds: 0\n");
+    setUpAdmin();
+
+    EXPECT_EQ(login(kAdminName, "Wrong-Password-1").status, 401);
+    EXPECT_EQ(login(kAdminName, "Wrong-Password-1").status, 401);
+    EXPECT_EQ(login(kAdminName, "Wrong-Password-1").status, 429);
 }
 
 TEST_F(WebAuthTest, MalformedRequestsDoNotCountAsLoginFailures) {
@@ -661,7 +743,9 @@ TEST(WebAuthSessions, ActivityExtendsTheSession) {
         ASSERT_TRUE(server.start());
         std::this_thread::sleep_for(std::chrono::milliseconds(150));
 
-        const std::string token = sessions.createSession(1, "owner", "admin");
+        ASSERT_TRUE(users.createUser("owner", kAdminPassword, "admin"));
+        const std::string token =
+            sessions.createSession(users.getUser("owner")->id, "owner", "admin");
         const uint64_t expiry = sessions.validateSession(token)->expiresAt;
 
         std::this_thread::sleep_for(std::chrono::milliseconds(1100));

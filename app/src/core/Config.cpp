@@ -328,7 +328,7 @@ bool Config::save(const std::string& path) const {
 
 void Config::setDefaults() {
     m_sessionTimeoutMinutes = 60;
-    m_rateLimitPerMinute = 1200;
+    m_rateLimitPerMinute = 600;
     m_loginMaxFailures = 10;
     m_loginFailureWindowSeconds = 300;
     m_databasePath = "/var/lib/smarthub/smarthub.db";

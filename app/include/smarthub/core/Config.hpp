@@ -129,9 +129,8 @@ private:
 
     // Logging
     int m_sessionTimeoutMinutes = 60;
-    // The dashboard makes about 12 * (devices + 3) requests a minute while it
-    // is open, so this has to leave room for that.
-    int m_rateLimitPerMinute = 1200;
+    // Each open dashboard makes 36 requests a minute, plus the user's actions
+    int m_rateLimitPerMinute = 600;
     int m_loginMaxFailures = 10;
     int m_loginFailureWindowSeconds = 300;
 

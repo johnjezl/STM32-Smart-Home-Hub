@@ -294,8 +294,13 @@ bool Application::initializeWebServer() {
     m_webServer->setSecurityManagers(m_sessionManager.get(), m_apiTokenManager.get(),
                                      m_userManager.get());
     m_webServer->setRateLimit(m_config->rateLimitPerMinute());
-    m_webServer->setLoginThrottle(m_config->loginMaxFailures(),
-                                  m_config->loginFailureWindowSeconds());
+    int loginWindow = m_config->loginFailureWindowSeconds();
+    if (loginWindow <= 0) {
+        // No window would mean the failure count never builds up
+        LOG_WARN("Invalid login failure window %d, using 300 seconds", loginWindow);
+        loginWindow = 300;
+    }
+    m_webServer->setLoginThrottle(m_config->loginMaxFailures(), loginWindow);
 
     if (!m_webServer->start()) {
         return false;
