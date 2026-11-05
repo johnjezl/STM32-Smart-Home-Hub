@@ -20,6 +20,7 @@ jobs:
   build-native:
     name: Build & Test (Native)
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
 
     steps:
       - name: Checkout repository
@@ -98,6 +99,7 @@ jobs:
   build-arm:
     name: Build (ARM32 Cross-compile)
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
 
     steps:
       - name: Checkout repository
@@ -162,20 +164,30 @@ jobs:
   build-m4:
     name: M4 Firmware
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # These toolchain packages are large, and the mirror can take many minutes to serve them
+      - name: Restore downloaded packages
+        uses: actions/cache@v4
+        with:
+          path: ~/apt-archives
+          key: m4-apt-archives-v1
+
       - name: Install dependencies
         run: |
+          mkdir -p ~/apt-archives/partial
           sudo apt-get update
-          sudo apt-get install -y \
+          sudo apt-get install -y -o Dir::Cache::Archives="$HOME/apt-archives" \
             cmake \
             ninja-build \
             gcc-arm-none-eabi \
             libnewlib-arm-none-eabi \
             libstdc++-arm-none-eabi-newlib
+          sudo chown -R "$USER" ~/apt-archives
 
       - name: Build firmware
         working-directory: m4-firmware
@@ -201,6 +213,7 @@ jobs:
   coverage:
     name: Code Coverage
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     needs: build-native
 
     steps:
@@ -272,6 +285,7 @@ jobs:
   static-analysis:
     name: Static Analysis
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
 
     steps:
       - name: Checkout repository
