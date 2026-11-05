@@ -361,6 +361,74 @@ TEST_F(ScreenManagerTest, UnregisteringTheOutgoingScreenDuringATransition) {
     test::render();
 }
 
+// Test: Same, once the animation is running and LVGL has moved on to the new screen
+TEST_F(ScreenManagerTest, UnregisteringTheOutgoingScreenOnceTheAnimationIsRunning) {
+    createScreenManager();
+    screenManager->registerScreen("home", std::make_unique<TestScreen>(*screenManager, "home"));
+    screenManager->registerScreen("settings", std::make_unique<TestScreen>(*screenManager, "settings"));
+    ASSERT_TRUE(screenManager->showScreen("home"));
+    lv_obj_t* settingsContainer = screenManager->getScreen("settings")->container();
+
+    screenManager->setTransitionDuration(300);
+    ASSERT_TRUE(screenManager->showScreen("settings"));
+    for (int frame = 0; frame < 5; ++frame) {
+        lv_tick_inc(16);
+        lv_timer_handler();
+    }
+    lv_disp_t* display = lv_disp_get_default();
+    ASSERT_NE(display->prev_scr, nullptr);
+    ASSERT_EQ(lv_scr_act(), settingsContainer);
+
+    ASSERT_TRUE(screenManager->unregisterScreen("home"));
+
+    EXPECT_FALSE(test::transitionPending());
+    EXPECT_EQ(display->prev_scr, nullptr);
+    EXPECT_EQ(lv_scr_act(), settingsContainer);
+    test::render();
+    EXPECT_EQ(lv_obj_get_x(settingsContainer), 0);
+}
+
+// Test: Removing a screen that isn't involved leaves a transition running
+TEST_F(ScreenManagerTest, UnregisteringAnUnrelatedScreenLeavesTheTransitionAlone) {
+    createScreenManager();
+    screenManager->registerScreen("home", std::make_unique<TestScreen>(*screenManager, "home"));
+    screenManager->registerScreen("settings", std::make_unique<TestScreen>(*screenManager, "settings"));
+    screenManager->registerScreen("about", std::make_unique<TestScreen>(*screenManager, "about"));
+    ASSERT_TRUE(screenManager->showScreen("home"));
+    lv_obj_t* settingsContainer = screenManager->getScreen("settings")->container();
+
+    screenManager->setTransitionDuration(300);
+    ASSERT_TRUE(screenManager->showScreen("settings"));
+    ASSERT_TRUE(screenManager->unregisterScreen("about"));
+
+    EXPECT_TRUE(test::transitionPending());
+    test::finishTransitions();
+    EXPECT_EQ(lv_scr_act(), settingsContainer);
+}
+
+// Test: Removing the screen on display doesn't accumulate replacement screens
+TEST_F(ScreenManagerTest, UnregisteringTheActiveScreenLeavesNothingBehind) {
+    createScreenManager();
+    lv_disp_t* display = lv_disp_get_default();
+    const uint32_t screensBefore = display->screen_cnt;
+
+    for (int i = 0; i < 5; ++i) {
+        screenManager->registerScreen("temp", std::make_unique<TestScreen>(*screenManager, "temp"));
+        ASSERT_TRUE(screenManager->showScreen("temp"));
+        ASSERT_TRUE(screenManager->unregisterScreen("temp"));
+    }
+
+    EXPECT_EQ(display->screen_cnt, screensBefore);
+    EXPECT_NE(lv_scr_act(), nullptr);
+}
+
+// Test: A screen load left pending doesn't crash the reset between tests
+TEST_F(ScreenManagerTest, LeavesAScreenLoadPendingForTheReset) {
+    lv_scr_load_anim(lv_obj_create(nullptr), LV_SCR_LOAD_ANIM_MOVE_LEFT, 300, 0, false);
+
+    EXPECT_TRUE(test::transitionPending());
+}
+
 // Test: Navigation is ignored until the transition finishes
 TEST_F(ScreenManagerTest, NavigationIsBlockedDuringTransition) {
     screenManager = std::make_unique<ScreenManager>(*uiManager);

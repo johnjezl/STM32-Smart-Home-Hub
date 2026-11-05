@@ -20,8 +20,10 @@ void detachFromDisplay(lv_obj_t* screen) {
         return;
     }
 
-    if (lv_obj_t* loading = display->scr_to_load) {
-        for (lv_obj_t* involved : {display->act_scr, loading}) {
+    // Only a load this screen is part of needs to finish early.
+    lv_obj_t* loading = display->scr_to_load;
+    if (loading && (screen == loading || screen == display->act_scr || screen == display->prev_scr)) {
+        for (lv_obj_t* involved : {display->act_scr, display->prev_scr, loading}) {
             if (involved) {
                 lv_anim_del(involved, nullptr);
                 lv_obj_set_pos(involved, 0, 0);
@@ -34,9 +36,20 @@ void detachFromDisplay(lv_obj_t* screen) {
         display->draw_prev_over_act = false;
     }
 
-    if (display->act_scr == screen) {
-        lv_scr_load(lv_obj_create(nullptr));
+    if (display->act_scr != screen) {
+        return;
     }
+
+    // Show another screen, preferring an existing one so nothing is left to free.
+    // The first in the list is LVGL's original, empty screen.
+    for (uint32_t i = 0; i < display->screen_cnt; ++i) {
+        lv_obj_t* other = display->screens[i];
+        if (other != screen && other != display->top_layer && other != display->sys_layer) {
+            lv_scr_load(other);
+            return;
+        }
+    }
+    lv_scr_load(lv_obj_create(nullptr));
 }
 
 } // namespace

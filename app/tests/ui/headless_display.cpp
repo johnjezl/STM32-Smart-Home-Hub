@@ -34,7 +34,14 @@ void flush(lv_disp_drv_t* driver, const lv_area_t* area, lv_color_t* pixels) {
 // would put the top layer there, turning that layer opaque over everything.
 class ResetLvglBetweenTests : public ::testing::EmptyTestEventListener {
 public:
-    void OnTestEnd(const ::testing::TestInfo&) override {
+    void OnTestEnd(const ::testing::TestInfo& info) override {
+        // lv_scr_load crashes while another load is pending (issue #27).
+        if (transitionPending()) {
+            std::fprintf(stderr, "%s.%s left a screen load pending\n",
+                         info.test_suite_name(), info.name());
+            finishTransitions();
+        }
+
         lv_anim_del_all();
         lv_scr_load(s_baseScreen);
 
