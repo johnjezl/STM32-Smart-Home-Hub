@@ -13,7 +13,6 @@
 #include <cinttypes>
 #include <cctype>
 #include <algorithm>
-#include <algorithm>
 #include <cmath>
 #include <iomanip>
 #include <sstream>
@@ -150,6 +149,7 @@ bool ZigbeeHandler::initialize() {
     int baudRate = m_config.value("baudRate", 115200);
     m_pairingTimeoutMs = timeoutSetting(m_config, "pairingTimeoutMs", 30000);
     m_pairingEndpointTimeoutMs = timeoutSetting(m_config, "pairingEndpointTimeoutMs", 5000);
+    m_addressLookupIntervalMs = timeoutSetting(m_config, "addressLookupIntervalMs", 30000);
 
     {
         std::lock_guard<std::mutex> lock(m_pairingMutex);
@@ -167,6 +167,11 @@ bool ZigbeeHandler::initialize() {
     m_coordinator->setDeviceAnnouncedCallback(
         [this](uint16_t nwkAddr, uint64_t ieeeAddr) {
             onDeviceAnnounced(nwkAddr, ieeeAddr);
+        });
+
+    m_coordinator->setNetworkAddressCallback(
+        [this](uint16_t nwkAddr, uint64_t ieeeAddr, bool changed) {
+            onNetworkAddressFound(nwkAddr, ieeeAddr, changed);
         });
 
     m_coordinator->setDeviceLeftCallback(
@@ -248,6 +253,8 @@ void ZigbeeHandler::shutdown() {
         m_deviceIdToIeee.clear();
         m_deviceEndpoints.clear();
         m_savedDevices.clear();
+        m_addressChecks.clear();
+        m_lastAddressLookup.clear();
     }
 
     m_initialized = false;
@@ -256,7 +263,61 @@ void ZigbeeHandler::shutdown() {
 
 void ZigbeeHandler::poll() {
     // The coordinator handles async messages via its reader thread
-    // This method can be used for periodic tasks like availability checking
+
+    // A saved address may be out of date, and a command to it could reach another device. These
+    // lookups are broadcasts, so they're spread out.
+    constexpr auto ADDRESS_CHECK_SPACING = std::chrono::seconds(1);
+    const auto now = std::chrono::steady_clock::now();
+    uint64_t ieeeAddr = 0;
+    {
+        std::lock_guard<std::mutex> lock(m_deviceMutex);
+        if (m_addressChecks.empty() || now - m_lastAddressCheck < ADDRESS_CHECK_SPACING) {
+            return;
+        }
+        ieeeAddr = m_addressChecks.front();
+        m_addressChecks.pop_front();
+        m_lastAddressCheck = now;
+    }
+
+    std::shared_lock<std::shared_mutex> coordinatorLock(m_coordinatorMutex);
+    if (m_coordinator) {
+        lookUpNetworkAddress(ieeeAddr);
+    }
+}
+
+void ZigbeeHandler::lookUpNetworkAddress(uint64_t ieeeAddr) {
+    const auto now = std::chrono::steady_clock::now();
+    {
+        std::lock_guard<std::mutex> lock(m_deviceMutex);
+        auto last = m_lastAddressLookup.find(ieeeAddr);
+        if (last != m_lastAddressLookup.end() &&
+            now - last->second < std::chrono::milliseconds(m_addressLookupIntervalMs)) {
+            return;  // These are broadcasts, and a command can be retried many times
+        }
+        m_lastAddressLookup[ieeeAddr] = now;
+    }
+    m_coordinator->requestNetworkAddress(ieeeAddr);
+}
+
+void ZigbeeHandler::onNetworkAddressFound(uint16_t nwkAddr, uint64_t ieeeAddr, bool changed) {
+    const auto savedId = savedDeviceId(ieeeAddr);
+    if (!savedId) {
+        return;
+    }
+
+    bool endpointKnown = false;
+    {
+        std::lock_guard<std::mutex> lock(m_deviceMutex);
+        endpointKnown = m_deviceEndpoints.count(ieeeAddr) > 0;
+    }
+
+    if (changed) {
+        notifyState(*savedId, "networkAddress", static_cast<int>(nwkAddr));
+    }
+    // Typed in by hand or saved by an older build, so it hasn't been asked about its endpoints
+    if (changed || !endpointKnown) {
+        startPairing(nwkAddr, ieeeAddr);
+    }
 }
 
 ProtocolState ZigbeeHandler::state() const {
@@ -321,7 +382,7 @@ bool ZigbeeHandler::sendCommand(const std::string& deviceAddress,
     auto deviceInfo = m_coordinator->getDevice(ieeeAddr);
     if (!deviceInfo) {
         // Its network address isn't known yet. Ask again, so a later try can work.
-        m_coordinator->requestNetworkAddress(ieeeAddr);
+        lookUpNetworkAddress(ieeeAddr);
         fail("Device " + deviceAddress + " not found in coordinator");
         return false;
     }
@@ -460,6 +521,12 @@ void ZigbeeHandler::restoreDevice(const IDevice& device) {
 
     {
         std::lock_guard<std::mutex> lock(m_deviceMutex);
+        auto owner = m_savedDevices.find(*ieeeAddr);
+        if (owner != m_savedDevices.end() && owner->second != device.id()) {
+            LOG_WARN("Zigbee device %s has the same address as %s, so it won't work",
+                     device.id().c_str(), owner->second.c_str());
+            return;
+        }
         m_ieeeToDeviceId[*ieeeAddr] = device.id();
         m_deviceIdToIeee[device.id()] = *ieeeAddr;
         m_savedDevices[*ieeeAddr] = device.id();
@@ -480,10 +547,12 @@ void ZigbeeHandler::restoreDevice(const IDevice& device) {
     if (state.contains("networkAddress") && state["networkAddress"].is_number_integer()) {
         nwkAddr = state["networkAddress"].get<int>();
     }
-    if (nwkAddr > 0 && nwkAddr <= 0xFFF7) {
-        m_coordinator->restoreDevice(*ieeeAddr, static_cast<uint16_t>(nwkAddr));
+    if (nwkAddr > 0 && nwkAddr <= 0xFFF7 &&
+        m_coordinator->restoreDevice(*ieeeAddr, static_cast<uint16_t>(nwkAddr))) {
+        std::lock_guard<std::mutex> lock(m_deviceMutex);
+        m_addressChecks.push_back(*ieeeAddr);
     } else if (!m_coordinator->getDevice(*ieeeAddr)) {
-        m_coordinator->requestNetworkAddress(*ieeeAddr);
+        lookUpNetworkAddress(*ieeeAddr);
     }
 }
 
@@ -498,6 +567,8 @@ void ZigbeeHandler::forgetDevice(const std::string& deviceId) {
     m_ieeeToDeviceId.erase(ieeeAddr);
     m_deviceEndpoints.erase(ieeeAddr);
     m_savedDevices.erase(ieeeAddr);
+    m_addressChecks.erase(std::remove(m_addressChecks.begin(), m_addressChecks.end(), ieeeAddr),
+                          m_addressChecks.end());
 }
 
 std::optional<std::string> ZigbeeHandler::savedDeviceId(uint64_t ieeeAddr) const {
@@ -528,6 +599,7 @@ void ZigbeeHandler::onDeviceAnnounced(uint16_t nwkAddr, uint64_t ieeeAddr) {
     const std::optional<std::string> savedId = savedDeviceId(ieeeAddr);
     if (savedId) {
         notifyState(*savedId, "networkAddress", static_cast<int>(nwkAddr));  // It may have moved
+        notifyAvailability(*savedId, DeviceAvailability::Online);  // It may have left before this
     }
 
     // Publish event to notify UI that a device was detected
@@ -819,9 +891,13 @@ void ZigbeeHandler::onDeviceLeft(uint64_t ieeeAddr) {
         auto it = m_ieeeToDeviceId.find(ieeeAddr);
         if (it != m_ieeeToDeviceId.end()) {
             deviceId = it->second;
-            m_deviceIdToIeee.erase(deviceId);
-            m_ieeeToDeviceId.erase(it);
-            m_deviceEndpoints.erase(ieeeAddr);
+            // A device the hub keeps stays mapped, so it works as soon as it's back on the
+            // network, even if it doesn't answer the pairing questions then
+            if (m_savedDevices.count(ieeeAddr) == 0) {
+                m_deviceIdToIeee.erase(deviceId);
+                m_ieeeToDeviceId.erase(it);
+                m_deviceEndpoints.erase(ieeeAddr);
+            }
         }
     }
 

@@ -66,6 +66,8 @@ struct ZclAttributeValue {
  */
 using DeviceJoinedCallback = std::function<void(const ZigbeeDeviceInfo&)>;
 using DeviceLeftCallback = std::function<void(uint64_t ieeeAddress)>;
+// A lookup found this device's address. changed is false if that's what was already known.
+using NetworkAddressCallback = std::function<void(uint16_t nwkAddr, uint64_t ieeeAddr, bool changed)>;
 using DeviceAnnouncedCallback = std::function<void(uint16_t nwkAddr, uint64_t ieeeAddr)>;
 using AttributeReportCallback = std::function<void(uint16_t nwkAddr,
                                                     const ZclAttributeValue& attr)>;
@@ -186,10 +188,13 @@ public:
     bool requestNetworkAddress(uint64_t ieeeAddr);
 
     /**
-     * Make a saved device addressable after a restart. Does nothing if the device has already
-     * been heard from, since that address is newer. It isn't marked available.
+     * Make a saved device addressable after a restart. It isn't marked available.
+     *
+     * Returns false and does nothing if the device has already been heard from, since that
+     * address is newer, or if another device has this address, since one of them must be out of
+     * date and a command must not reach the wrong device.
      */
-    void restoreDevice(uint64_t ieeeAddr, uint16_t nwkAddr);
+    bool restoreDevice(uint64_t ieeeAddr, uint16_t nwkAddr);
 
     /**
      * Ask a device to describe an endpoint. The answer arrives in the device's
@@ -259,6 +264,7 @@ public:
 
     void setDeviceJoinedCallback(DeviceJoinedCallback cb);
     void setDeviceLeftCallback(DeviceLeftCallback cb);
+    void setNetworkAddressCallback(NetworkAddressCallback cb);
     void setDeviceAnnouncedCallback(DeviceAnnouncedCallback cb);
     void setAttributeReportCallback(AttributeReportCallback cb);
     void setCommandReceivedCallback(CommandReceivedCallback cb);
@@ -315,6 +321,7 @@ private:
     // Callbacks
     DeviceJoinedCallback m_deviceJoinedCb;
     DeviceLeftCallback m_deviceLeftCb;
+    NetworkAddressCallback m_networkAddressCb;
     DeviceAnnouncedCallback m_deviceAnnouncedCb;
     AttributeReportCallback m_attrReportCb;
     CommandReceivedCallback m_cmdReceivedCb;

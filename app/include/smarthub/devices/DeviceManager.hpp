@@ -231,6 +231,8 @@ public:
     void restoreSensorOptions(const std::string& id, std::string& typeName, nlohmann::json& config);
 
 private:
+    ProtocolHandlerPtr protocolNamed(const std::string& name) const;
+    void restoreDevices(IProtocolHandler& protocol, const std::string& name);
     void onDeviceDiscovered(DevicePtr device);
     void applyStateChange(const DevicePtr& device, const std::string& property,
                           const nlohmann::json& value);

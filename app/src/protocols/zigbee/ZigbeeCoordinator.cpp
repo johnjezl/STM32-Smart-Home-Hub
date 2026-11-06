@@ -515,15 +515,16 @@ bool ZigbeeCoordinator::requestNetworkAddress(uint64_t ieeeAddr) {
     return m_transport->send(req);
 }
 
-void ZigbeeCoordinator::restoreDevice(uint64_t ieeeAddr, uint16_t nwkAddr) {
+bool ZigbeeCoordinator::restoreDevice(uint64_t ieeeAddr, uint16_t nwkAddr) {
     std::lock_guard<std::mutex> lock(m_deviceMutex);
-    if (m_devices.count(ieeeAddr) > 0) {
-        return;
+    if (m_devices.count(ieeeAddr) > 0 || m_nwkToIeee.count(nwkAddr) > 0) {
+        return false;
     }
     ZigbeeDeviceInfo& device = m_devices[ieeeAddr];
     device.ieeeAddress = ieeeAddr;
     device.networkAddress = nwkAddr;
-    m_nwkToIeee.emplace(nwkAddr, ieeeAddr);  // A device heard from at this address keeps it
+    m_nwkToIeee[nwkAddr] = ieeeAddr;
+    return true;
 }
 
 bool ZigbeeCoordinator::requestDeviceInfo(uint16_t nwkAddr) {
@@ -626,6 +627,11 @@ void ZigbeeCoordinator::setDeviceJoinedCallback(DeviceJoinedCallback cb) {
 void ZigbeeCoordinator::setDeviceLeftCallback(DeviceLeftCallback cb) {
     std::lock_guard<std::mutex> lock(m_callbackMutex);
     m_deviceLeftCb = std::move(cb);
+}
+
+void ZigbeeCoordinator::setNetworkAddressCallback(NetworkAddressCallback cb) {
+    std::lock_guard<std::mutex> lock(m_callbackMutex);
+    m_networkAddressCb = std::move(cb);
 }
 
 void ZigbeeCoordinator::setDeviceAnnouncedCallback(DeviceAnnouncedCallback cb) {
@@ -804,17 +810,26 @@ void ZigbeeCoordinator::handleNwkAddrRsp(const ZnpFrame& frame) {
         return;
     }
 
-    std::lock_guard<std::mutex> lock(m_deviceMutex);
-    auto& device = m_devices[ieeeAddr];
-    if (device.networkAddress != nwkAddr) {
-        forgetAddress(device.networkAddress, ieeeAddr);
+    bool changed = false;
+    {
+        std::lock_guard<std::mutex> lock(m_deviceMutex);
+        auto& device = m_devices[ieeeAddr];
+        changed = device.networkAddress != nwkAddr;
+        if (changed) {
+            forgetAddress(device.networkAddress, ieeeAddr);
+        }
+        device.ieeeAddress = ieeeAddr;
+        device.networkAddress = nwkAddr;
+        device.lastSeen = std::chrono::duration_cast<std::chrono::seconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+        device.available = true;
+        m_nwkToIeee[nwkAddr] = ieeeAddr;
     }
-    device.ieeeAddress = ieeeAddr;
-    device.networkAddress = nwkAddr;
-    device.lastSeen = std::chrono::duration_cast<std::chrono::seconds>(
-        std::chrono::system_clock::now().time_since_epoch()).count();
-    device.available = true;
-    m_nwkToIeee[nwkAddr] = ieeeAddr;
+
+    std::lock_guard<std::mutex> lock(m_callbackMutex);
+    if (m_networkAddressCb) {
+        m_networkAddressCb(nwkAddr, ieeeAddr, changed);
+    }
 }
 
 void ZigbeeCoordinator::handleActiveEpRsp(const ZnpFrame& frame) {

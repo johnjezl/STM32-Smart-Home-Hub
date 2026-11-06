@@ -608,23 +608,114 @@ TEST_F(ZigbeeHandlerFlowTest, DeviceAddedByHandFindsItsNetworkAddress) {
     ASSERT_EQ(LIGHT.ieeeAddr, 0x00124B0000001234ULL) << "this test types in LIGHT's address";
     handler->restoreDevice(typed);
 
-    EXPECT_TRUE(eventually([&] {
-        fake.clearSentFrames();
-        return handler->sendCommand("my-lamp", "on", {{"on", true}});
-    }));
+    // Pairing follows, since it has never been asked about its endpoints
+    EXPECT_EQ(waitForState("my-lamp", "endpoint"), 1);
+    EXPECT_EQ(waitForState("my-lamp", "networkAddress"), LIGHT.nwkAddr);
+
+    fake.clearSentFrames();
+    ASSERT_TRUE(handler->sendCommand("my-lamp", "on", {{"on", true}}));
     auto frames = airFrames(fake);
     ASSERT_EQ(frames.size(), 1u);
     EXPECT_EQ(frames[0].nwkAddr, LIGHT.nwkAddr);
 }
 
 TEST_F(ZigbeeHandlerFlowTest, CommandAsksAgainWhenTheAddressIsStillUnknown) {
-    FakeZigbeeDevice late{0x7777, 0x00124B0000007777ULL, {{1, {zcl::cluster::ON_OFF}}}};
-    SwitchDevice typed("late", "Late", "zigbee", "00124B0000007777");
+    handlerConfig["addressLookupIntervalMs"] = 100;
+    handler->shutdown();
+    handler = makeHandler(fake);
+    ASSERT_TRUE(handler->initialize());
+
+    FakeZigbeeDevice late{0x7ABC, 0x00124B000000ABCDULL, {{1, {zcl::cluster::ON_OFF}}}};
+    SwitchDevice typed("late", "Late", "zigbee", "00124B000000ABCD");
     handler->restoreDevice(typed);  // It isn't on the network yet
     EXPECT_FALSE(handler->sendCommand("late", "on", {{"on", true}}));
 
     fake.addDevice(late);
     EXPECT_TRUE(eventually([&] { return handler->sendCommand("late", "on", {{"on", true}}); }));
+}
+
+TEST_F(ZigbeeHandlerFlowTest, RepeatedCommandsDoNotFloodTheNetworkWithLookups) {
+    SwitchDevice typed("absent", "Absent", "zigbee", "00124B000000ABCD");
+    fake.clearSentFrames();
+    handler->restoreDevice(typed);
+    for (int i = 0; i < 5; i++) {
+        EXPECT_FALSE(handler->sendCommand("absent", "on", {{"on", true}}));
+    }
+    ASSERT_TRUE(fake.waitForSent(ZnpSubsystem::ZDO, cmd::zdo::NWK_ADDR_REQ, 1));
+    std::this_thread::sleep_for(100ms);  // Long enough for any more to arrive
+    EXPECT_EQ(fake.sentFrames(ZnpSubsystem::ZDO, cmd::zdo::NWK_ADDR_REQ).size(), 1u);
+}
+
+TEST_F(ZigbeeHandlerFlowTest, SavedAddressIsCheckedAndFollowedIfOutOfDate) {
+    auto saved = savedDevice(LIGHT, 1);
+    saved->setState("networkAddress", 0x0BAD);  // It moved while the hub was off
+    handler->restoreDevice(*saved);
+
+    handler->poll();
+
+    EXPECT_EQ(waitForState(idOf(LIGHT), "networkAddress"), LIGHT.nwkAddr);
+    fake.clearSentFrames();
+    ASSERT_TRUE(handler->sendCommand(idOf(LIGHT), "on", {{"on", true}}));
+    auto frames = airFrames(fake);
+    ASSERT_EQ(frames.size(), 1u);
+    EXPECT_EQ(frames[0].nwkAddr, LIGHT.nwkAddr);
+}
+
+TEST_F(ZigbeeHandlerFlowTest, SavedAddressChecksAreSpreadOut) {
+    handler->restoreDevice(*savedDevice(LIGHT, 1));
+    handler->restoreDevice(*savedDevice(PLUG, 1));
+    fake.clearSentFrames();
+
+    handler->poll();
+    handler->poll();
+    handler->poll();
+
+    ASSERT_TRUE(fake.waitForSent(ZnpSubsystem::ZDO, cmd::zdo::NWK_ADDR_REQ, 1));
+    std::this_thread::sleep_for(100ms);  // Long enough for any more to arrive
+    EXPECT_EQ(fake.sentFrames(ZnpSubsystem::ZDO, cmd::zdo::NWK_ADDR_REQ).size(), 1u);
+}
+
+TEST_F(ZigbeeHandlerFlowTest, SavedDeviceWithAnAddressNowUsedElsewhereGetsNoCommands) {
+    // Both saved at PLUG's address, so one of them is out of date
+    auto outOfDate = savedDevice(LIGHT, 1);
+    outOfDate->setState("networkAddress", static_cast<int>(PLUG.nwkAddr));
+    handler->restoreDevice(*savedDevice(PLUG, 1));
+
+    handler->restoreDevice(*outOfDate);
+
+    // It's looked up rather than trusted, and commands go where the network says it is
+    EXPECT_EQ(waitForState(idOf(LIGHT), "networkAddress"), LIGHT.nwkAddr);
+    fake.clearSentFrames();
+    ASSERT_TRUE(handler->sendCommand(idOf(LIGHT), "on", {{"on", true}}));
+    auto frames = airFrames(fake);
+    ASSERT_GE(frames.size(), 1u);
+    EXPECT_EQ(frames.back().nwkAddr, LIGHT.nwkAddr);
+}
+
+TEST_F(ZigbeeHandlerFlowTest, TwoDevicesWithOneAddressKeepTheFirst) {
+    handler->restoreDevice(*savedDevice(LIGHT, 1));
+    SwitchDevice typed("copy", "Copy", "zigbee", "00124B0000001234");
+
+    handler->restoreDevice(typed);
+
+    EXPECT_TRUE(handler->sendCommand(idOf(LIGHT), "on", {{"on", true}}));
+    EXPECT_FALSE(handler->sendCommand("copy", "on", {{"on", true}}));
+
+    handler->forgetDevice("copy");
+    EXPECT_TRUE(handler->sendCommand(idOf(LIGHT), "on", {{"on", true}})) << "the copy going away changes nothing";
+}
+
+TEST_F(ZigbeeHandlerFlowTest, DeviceAnnouncingAsTheNetworkComesUpIsNotNew) {
+    handler->shutdown();
+    handler = makeHandler(fake);
+    auto saved = savedDevice(MULTI_ENDPOINT_LIGHT, 11);
+
+    handler->restoreDevice(*saved);  // Before it starts, which is what the device manager does
+    ASSERT_TRUE(handler->initialize());
+    fake.announceDevice(MULTI_ENDPOINT_LIGHT);
+
+    EXPECT_EQ(waitForState(idOf(MULTI_ENDPOINT_LIGHT), "endpoint"), 11);
+    EXPECT_EQ(discoveredCount(), 0u);
 }
 
 TEST_F(ZigbeeHandlerFlowTest, AddressThatIsNotOneIsIgnored) {
@@ -686,7 +777,31 @@ TEST_F(ZigbeeHandlerFlowTest, RestoredDeviceRejoiningAfterLeavingIsStillTheSameD
     fake.announceDevice(LIGHT);
 
     EXPECT_TRUE(eventually([&] { return handler->sendCommand(idOf(LIGHT), "on", {{"on", true}}); }));
+    EXPECT_EQ(waitForState(idOf(LIGHT), "endpoint"), 1);
     EXPECT_EQ(discoveredCount(), 0u);
+    std::lock_guard<std::mutex> lock(mutex);
+    ASSERT_FALSE(availabilityChanges.empty());
+    EXPECT_EQ(availabilityChanges.back().second, DeviceAvailability::Online) << "it left, and now it's back";
+}
+
+TEST_F(ZigbeeHandlerFlowTest, RestoredDeviceRejoiningWorksWhileItIsNotAnsweringPairing) {
+    handler->restoreDevice(*savedDevice(LIGHT, 1));
+    fake.deviceLeft(LIGHT);
+    fake.holdDescriptor(LIGHT.nwkAddr, 1);
+
+    fake.announceDevice(LIGHT);
+
+    EXPECT_TRUE(eventually([&] { return handler->sendCommand(idOf(LIGHT), "on", {{"on", true}}); }));
+}
+
+TEST_F(ZigbeeHandlerFlowTest, DeviceRemovedAfterLeavingIsNewWhenItRejoins) {
+    handler->restoreDevice(*savedDevice(LIGHT, 1));
+    fake.deviceLeft(LIGHT);
+    EXPECT_TRUE(eventually([&] { return !handler->sendCommand(idOf(LIGHT), "on", {{"on", true}}); }));
+
+    handler->forgetDevice(idOf(LIGHT));
+
+    EXPECT_NE(pair(LIGHT), nullptr);
 }
 
 TEST_F(ZigbeeHandlerFlowTest, ForgottenDeviceAnnouncingIsNewAgain) {
@@ -704,7 +819,7 @@ TEST_F(ZigbeeHandlerFlowTest, PairingADeviceWhenTheHubKeepsItDoesNotChangeItsId)
 
     fake.announceDevice(LIGHT);
 
-    EXPECT_FALSE(waitForState("my-lamp", "networkAddress").is_null());
+    EXPECT_EQ(waitForState("my-lamp", "endpoint"), 1);  // Pairing has finished
     EXPECT_EQ(discoveredCount(), 0u);
 }
 
