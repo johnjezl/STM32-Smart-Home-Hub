@@ -1158,6 +1158,101 @@ TEST_F(ZigbeeHandlerFlowTest, ShutdownDoesNotWaitOutARead) {
     EXPECT_LT(std::chrono::steady_clock::now() - start, 5s);
 }
 
+// ---- The Add Device wizard ----------------------------------------------------
+
+TEST_F(ZigbeeHandlerFlowTest, DeviceJoiningDuringACancelledWizardIsNotAdded) {
+    handler->startDiscovery();
+    fake.holdDescriptor(MULTI_ENDPOINT_LIGHT.nwkAddr, 1);
+    fake.announceDevice(MULTI_ENDPOINT_LIGHT);
+    ASSERT_TRUE(fake.waitForSent(ZnpSubsystem::ZDO, cmd::zdo::SIMPLE_DESC_REQ, 1));
+
+    // Cancelled while pairing waits on the device
+    handler->stopDiscovery();
+    handler->clearPendingDevice();
+    fake.releaseDescriptors();
+
+    EXPECT_TRUE(eventually([&] {
+        return !handler->sendCommand(idOf(MULTI_ENDPOINT_LIGHT), "on", {{"on", true}});
+    }));
+    std::this_thread::sleep_for(500ms);  // Long enough for pairing to have finished
+    EXPECT_EQ(discoveredCount(), 0u);
+    EXPECT_EQ(pendingCount(), 0u);
+}
+
+TEST_F(ZigbeeHandlerFlowTest, DeviceHeldByACancelledWizardIsNotAddedWhenItAnnounces) {
+    handler->startDiscovery();
+    fake.announceDevice(LIGHT);
+    ASSERT_TRUE(eventually([&] { return pendingCount() == 1; }));
+
+    handler->stopDiscovery();
+    handler->clearPendingDevice();
+    fake.announceDevice(LIGHT);
+
+    ASSERT_TRUE(fake.waitForSent(ZnpSubsystem::ZDO, cmd::zdo::ACTIVE_EP_REQ, 2));
+    std::this_thread::sleep_for(500ms);
+    EXPECT_EQ(discoveredCount(), 0u);
+}
+
+TEST_F(ZigbeeHandlerFlowTest, DeclinedDeviceIsOfferedInTheNextWizard) {
+    handler->startDiscovery();
+    fake.announceDevice(LIGHT);
+    ASSERT_TRUE(eventually([&] { return pendingCount() == 1; }));
+    handler->stopDiscovery();
+    handler->clearPendingDevice();
+
+    handler->startDiscovery();
+    fake.announceDevice(LIGHT);
+
+    EXPECT_TRUE(eventually([&] { return pendingCount() == 2; }));
+    EXPECT_NE(handler->getPendingDevice(), nullptr);
+}
+
+TEST_F(ZigbeeHandlerFlowTest, RepeatAnnounceCannotMakeTheWizardsAddFail) {
+    handler->startDiscovery();
+    fake.announceDevice(LIGHT);
+    ASSERT_TRUE(eventually([&] { return pendingCount() == 1; }));
+    DevicePtr held = handler->getPendingDevice();
+
+    // The wizard has stopped discovery and is asking for a name
+    handler->stopDiscovery();
+    FakeZigbeeDevice moved = LIGHT;
+    moved.nwkAddr = 0x4242;
+    fake.addDevice(moved);
+    fake.announceDevice(moved);
+
+    ASSERT_TRUE(eventually([&] { return held->getProperty("networkAddress") == 0x4242; }));
+    EXPECT_EQ(discoveredCount(), 0u) << "this is what would make the wizard's add fail";
+    EXPECT_EQ(pendingCount(), 1u);
+    EXPECT_EQ(handler->getPendingDevice(), held);
+}
+
+TEST_F(ZigbeeHandlerFlowTest, DeviceAddedByTheWizardIsNotDeclinedByClearingIt) {
+    handler->startDiscovery();
+    fake.announceDevice(LIGHT);
+    ASSERT_TRUE(eventually([&] { return pendingCount() == 1; }));
+    DevicePtr held = handler->getPendingDevice();
+    handler->stopDiscovery();
+
+    handler->restoreDevice(*held);  // The device manager does this when it adds it
+    handler->clearPendingDevice();
+
+    EXPECT_TRUE(handler->sendCommand(held->id(), "on", {{"on", true}}));
+}
+
+TEST_F(ZigbeeHandlerFlowTest, RemovedDeviceThatWasDeclinedBeforeIsNewAgain) {
+    handler->startDiscovery();
+    fake.announceDevice(LIGHT);
+    ASSERT_TRUE(eventually([&] { return pendingCount() == 1; }));
+    DevicePtr held = handler->getPendingDevice();
+    handler->stopDiscovery();
+    handler->restoreDevice(*held);
+    handler->clearPendingDevice();
+
+    handler->forgetDevice(held->id());
+
+    EXPECT_NE(pair(LIGHT), nullptr);
+}
+
 TEST_F(ZigbeeHandlerFlowTest, UnknownDeviceGetsNoReporting) {
     auto device = pair(BASIC_ONLY);
     ASSERT_NE(device, nullptr);
