@@ -32,9 +32,7 @@ Application::Application(const std::string& configPath)
 }
 
 Application::~Application() {
-    if (m_running) {
-        shutdown();
-    }
+    shutdown();
 }
 
 bool Application::initialize() {
@@ -116,7 +114,7 @@ bool Application::initialize() {
     return true;
 }
 
-void Application::run() {
+void Application::run(const std::atomic<bool>& stopRequested) {
     if (!m_initialized) {
         LOG_ERROR("Cannot run: application not initialized");
         return;
@@ -131,32 +129,36 @@ void Application::run() {
     readyEvent.message = "SmartHub ready";
     m_eventBus->publish(readyEvent);
 
-    mainLoop();
+    mainLoop(stopRequested);
+    m_running = false;
 
     // Publish shutdown event
     SystemEvent shutdownEvent;
     shutdownEvent.status = SystemEvent::Status::ShuttingDown;
     shutdownEvent.message = "SmartHub shutting down";
     m_eventBus->publish(shutdownEvent);
+
+    shutdown();
 }
 
 void Application::shutdown() {
-    if (!m_running.exchange(false)) {
-        return; // Already shut down
+    if (m_shutDown) {
+        return;
     }
+    m_shutDown = true;
 
     LOG_INFO("Shutting down SmartHub...");
     shutdownSubsystems();
     LOG_INFO("SmartHub shutdown complete");
 }
 
-void Application::mainLoop() {
+void Application::mainLoop(const std::atomic<bool>& stopRequested) {
     using namespace std::chrono;
 
     const auto targetFrameTime = milliseconds(5); // ~200 Hz for LVGL
     auto lastAutomationPoll = steady_clock::now();
 
-    while (m_running) {
+    while (!stopRequested) {
         auto frameStart = steady_clock::now();
 
         // Process async events
@@ -356,7 +358,11 @@ bool Application::initializeUI() {
 }
 
 void Application::shutdownSubsystems() {
-    // Shutdown in reverse order of initialization
+    // First stop automations, so a run that's waiting in a delay can't hold up the threads
+    // being stopped below, or use anything after it's gone.
+    if (m_automationManager) {
+        m_automationManager->shutdown();
+    }
 
 #ifdef SMARTHUB_ENABLE_LVGL
     if (m_uiManager) {
@@ -368,11 +374,6 @@ void Application::shutdownSubsystems() {
     if (m_webServer) {
         m_webServer->stop();
         m_webServer.reset();
-    }
-
-    if (m_automationManager) {
-        m_automationManager->shutdown();
-        m_automationManager.reset();
     }
 
     m_apiTokenManager.reset();
@@ -389,10 +390,13 @@ void Application::shutdownSubsystems() {
         m_mqttClient.reset();
     }
 
+    // This joins the protocol threads, which are what call into the automation manager
     if (m_deviceManager) {
         m_deviceManager->shutdown();
-        m_deviceManager.reset();
     }
+
+    m_automationManager.reset();
+    m_deviceManager.reset();
 
     if (m_database) {
         m_database->close();

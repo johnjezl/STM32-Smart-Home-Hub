@@ -35,6 +35,11 @@ AutomationManager::~AutomationManager() {
 bool AutomationManager::initialize() {
     if (m_initialized) return true;
 
+    {
+        std::lock_guard<std::mutex> lock(m_stopMutex);
+        m_stopping = false;
+    }
+
     LOG_INFO("Initializing automation manager");
 
     loadFromDatabase();
@@ -57,6 +62,13 @@ void AutomationManager::shutdown() {
     if (!m_initialized) return;
 
     LOG_INFO("Shutting down automation manager");
+
+    // Wake runs waiting in a delay, then wait for them to finish
+    {
+        std::lock_guard<std::mutex> lock(m_stopMutex);
+        m_stopping = true;
+    }
+    m_stopSignal.notify_all();
 
     if (m_eventSubscription > 0) {
         m_eventBus.unsubscribe(m_eventSubscription);
@@ -388,7 +400,14 @@ void AutomationManager::executeAutomation(const Automation& automation,
             // Older saved automations could have longer delays than validation allows
             const auto delayMs = std::min<int64_t>(action.delayMs, delayBudgetMs);
             delayBudgetMs -= delayMs;
-            std::this_thread::sleep_for(std::chrono::milliseconds(delayMs));
+            {
+                std::unique_lock<std::mutex> lock(m_stopMutex);
+                if (m_stopSignal.wait_for(lock, std::chrono::milliseconds(delayMs),
+                                          [this] { return m_stopping; })) {
+                    LOG_INFO("Automation %s stopped by shutdown", automation.name.c_str());
+                    return;
+                }
+            }
 
             // It could have been turned off or removed during the wait. An edit doesn't stop
             // this run, which finishes the actions it started with.

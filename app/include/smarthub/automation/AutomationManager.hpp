@@ -10,6 +10,7 @@
 #include "smarthub/core/EventBus.hpp"
 
 #include <map>
+#include <condition_variable>
 #include <mutex>
 #include <vector>
 #include <functional>
@@ -140,6 +141,11 @@ private:
     mutable std::mutex m_mutex;
 
     uint64_t m_eventSubscription = 0;
+
+    // Lets shutdown interrupt a run that's waiting in a delay
+    std::mutex m_stopMutex;
+    std::condition_variable m_stopSignal;
+    bool m_stopping = false;
 
     // Timer state
     int m_lastCheckedMinute = -1;

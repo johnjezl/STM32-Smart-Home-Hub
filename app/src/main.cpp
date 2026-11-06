@@ -8,26 +8,31 @@
 #include <smarthub/core/Application.hpp>
 #include <smarthub/core/Logger.hpp>
 
+#include <unistd.h>
+
+#include <atomic>
 #include <csignal>
 #include <cstdlib>
 #include <cstring>
 
 using namespace smarthub;
 
-// Global application pointer for signal handler
-static Application* g_app = nullptr;
+namespace {
 
-/**
- * Signal handler for graceful shutdown
- */
+// Written by the signal handler, so it has to be safe to use from one
+std::atomic<bool> g_stopRequested{false};
+static_assert(std::atomic<bool>::is_always_lock_free);
+
+// A signal can arrive at any point, on any thread, so this can't take a lock, which rules out
+// logging. Application::run notices the flag and shuts down on the main thread.
 void signalHandler(int signum) {
-    if (signum == SIGINT || signum == SIGTERM) {
-        LOG_INFO("Received signal %d, initiating shutdown...", signum);
-        if (g_app) {
-            g_app->shutdown();
-        }
+    if (g_stopRequested.exchange(true)) {
+        // A second signal means shutdown is stuck and someone wants out
+        _exit(128 + signum);
     }
 }
+
+}  // namespace
 
 /**
  * Print usage information
@@ -87,17 +92,14 @@ int main(int argc, char* argv[]) {
 
     try {
         Application app(configPath);
-        g_app = &app;
 
         if (!app.initialize()) {
             LOG_ERROR("Failed to initialize application");
             exitCode = EXIT_FAILURE;
         } else {
-            // Run main loop (blocks until shutdown)
-            app.run();
+            // Blocks until a signal asks to stop, then shuts down
+            app.run(g_stopRequested);
         }
-
-        g_app = nullptr;
 
     } catch (const std::exception& e) {
         LOG_ERROR("Fatal error: %s", e.what());

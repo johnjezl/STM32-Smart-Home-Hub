@@ -260,6 +260,14 @@ if(GTEST_AVAILABLE)
     target_link_libraries(test_integration PRIVATE smarthub_lib GTest::gtest GTest::gtest_main)
     add_test(NAME Integration COMMAND test_integration)
 
+    # Runs the smarthub program itself, and stops it with signals
+    add_executable(test_shutdown integration/test_shutdown.cpp)
+    target_include_directories(test_shutdown PRIVATE ${CMAKE_SOURCE_DIR}/third_party)
+    target_link_libraries(test_shutdown PRIVATE GTest::gtest GTest::gtest_main)
+    target_compile_definitions(test_shutdown PRIVATE SMARTHUB_BINARY="$<TARGET_FILE:smarthub>")
+    add_dependencies(test_shutdown smarthub)
+    add_test(NAME Shutdown COMMAND test_shutdown)
+
     # ==== Automation Tests ====
 
     add_executable(test_automation automation/test_automation.cpp)
