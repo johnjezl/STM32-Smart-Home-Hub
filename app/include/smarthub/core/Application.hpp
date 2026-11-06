@@ -70,11 +70,6 @@ public:
      */
     void shutdown();
 
-    /**
-     * Check if application is running
-     */
-    bool isRunning() const { return m_running.load(); }
-
     // Component accessors
     Config& config();
     EventBus& eventBus();
@@ -101,7 +96,6 @@ private:
     void shutdownSubsystems();
 
     std::string m_configPath;
-    std::atomic<bool> m_running{false};
     bool m_shutDown = false;
     std::atomic<bool> m_initialized{false};
 

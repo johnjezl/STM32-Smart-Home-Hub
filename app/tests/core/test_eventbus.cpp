@@ -201,3 +201,41 @@ TEST_F(EventBusTest, ThrowingHandlerStillLetsUnsubscribeFinish) {
     eventBus.unsubscribe(id);
     EXPECT_EQ(eventBus.subscriberCount("TestEvent"), 0u);
 }
+
+TEST_F(EventBusTest, UnsubscribingAnEarlierHandlerKeepsTheLaterOnes) {
+    int firstCalls = 0;
+    int secondCalls = 0;
+    int globalCalls = 0;
+    const auto first = eventBus.subscribe("TestEvent", [&](const smarthub::Event&) { ++firstCalls; });
+    eventBus.subscribe("TestEvent", [&](const smarthub::Event&) { ++secondCalls; });
+    const auto global = eventBus.subscribeAll([&](const smarthub::Event&) { ++globalCalls; });
+    eventBus.subscribeAll([](const smarthub::Event&) {});
+
+    eventBus.unsubscribe(first);
+    eventBus.unsubscribe(global);
+    eventBus.publish(TestEvent(1));
+
+    EXPECT_EQ(firstCalls, 0);
+    EXPECT_EQ(secondCalls, 1);
+    EXPECT_EQ(globalCalls, 0);
+}
+
+TEST_F(EventBusTest, UnsubscribingAnEarlierHandlerWaitsForIt) {
+    std::atomic<bool> started{false};
+    std::atomic<bool> finished{false};
+    const auto first = eventBus.subscribe("TestEvent", [&](const smarthub::Event&) {
+        started = true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        finished = true;
+    });
+    eventBus.subscribe("TestEvent", [](const smarthub::Event&) {});
+
+    std::thread publisher([&] { eventBus.publish(TestEvent(1)); });
+    while (!started) {
+        std::this_thread::yield();
+    }
+
+    eventBus.unsubscribe(first);
+    EXPECT_TRUE(finished);
+    publisher.join();
+}

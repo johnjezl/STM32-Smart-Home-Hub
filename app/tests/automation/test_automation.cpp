@@ -592,6 +592,9 @@ TEST_F(AutomationManagerTest, StopFlagEndsADelayAndTheRemainingActions) {
 
     EXPECT_LT(std::chrono::steady_clock::now() - start, std::chrono::seconds(5));
     EXPECT_NE(light->getProperty("on"), true);
+
+    automationManager->shutdown();
+    automationManager->initialize();  // Stops watching the flag, which goes out of scope
 }
 
 TEST_F(AutomationManagerTest, ReturnedAutomationsAreCopies) {
