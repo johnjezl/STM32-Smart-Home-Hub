@@ -11,6 +11,7 @@
 #include <smarthub/devices/types/ColorLightDevice.hpp>
 #include <smarthub/devices/types/TemperatureSensor.hpp>
 #include <smarthub/devices/types/MotionSensor.hpp>
+#include <smarthub/devices/types/ContactSensor.hpp>
 #include <smarthub/devices/DeviceTypeRegistry.hpp>
 
 using namespace smarthub;
@@ -390,6 +391,30 @@ TEST(SensorDisplay, MotionSensorReadsMotion) {
 
     sensor.setMotionDetected(true);
     EXPECT_EQ(sensorValueText(sensor.type(), sensor.getState()), "Motion");
+}
+
+TEST(ContactSensorDevice, HasNoReadingUntilItReports) {
+    ContactSensor sensor("c", "C");
+    EXPECT_EQ(sensor.type(), DeviceType::ContactSensor);
+    EXPECT_TRUE(sensor.hasCapability(DeviceCapability::Contact));
+    EXPECT_EQ(sensorValueText(sensor.type(), sensor.getState()), "--");
+    EXPECT_FALSE(sensor.isOpen());
+
+    sensor.setOpen(true);
+    EXPECT_TRUE(sensor.isOpen());
+    EXPECT_EQ(sensorValueText(sensor.type(), sensor.getState()), "Open");
+
+    sensor.setOpen(false);
+    EXPECT_FALSE(sensor.isOpen());
+    EXPECT_EQ(sensorValueText(sensor.type(), sensor.getState()), "Closed");
+}
+
+TEST(ContactSensorDevice, IsRegisteredSoItCanBeAddedAndLoaded) {
+    auto device = DeviceTypeRegistry::instance().createFromTypeName(
+        "contact_sensor", "c", "C", "local", "", {{"has_battery", true}});
+    ASSERT_NE(device, nullptr);
+    EXPECT_EQ(device->type(), DeviceType::ContactSensor);
+    EXPECT_TRUE(device->hasCapability(DeviceCapability::Battery));
 }
 
 TEST(SensorDisplay, ContactSensorReadsContact) {

@@ -10,6 +10,7 @@
 #include <smarthub/devices/types/ColorLightDevice.hpp>
 #include <smarthub/devices/types/TemperatureSensor.hpp>
 #include <smarthub/devices/types/MotionSensor.hpp>
+#include <smarthub/devices/types/ContactSensor.hpp>
 
 namespace smarthub {
 
@@ -75,6 +76,15 @@ void DeviceTypeRegistry::registerBuiltinTypes() {
             bool hasBattery = config.value("has_battery", false);
             return std::make_shared<MotionSensor>(
                 id, name, protocol, address, hasIlluminance, hasBattery);
+        });
+
+    // Contact sensor
+    registerType(DeviceType::ContactSensor, "contact_sensor",
+        [](const std::string& id, const std::string& name,
+           const std::string& protocol, const std::string& address,
+           const nlohmann::json& config) -> DevicePtr {
+            return std::make_shared<ContactSensor>(
+                id, name, protocol, address, config.value("has_battery", false));
         });
 
     // Multi-sensor (temperature + humidity)

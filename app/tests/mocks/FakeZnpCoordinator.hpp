@@ -36,6 +36,11 @@ struct FakeZigbeeDevice {
     uint64_t ieeeAddr = 0;
     /** Endpoint -> input clusters */
     std::map<uint8_t, std::vector<uint16_t>> inClusters;
+    std::string manufacturer = {};
+    std::string model = {};
+    std::optional<uint16_t> zoneType = {};
+    /** Doesn't answer Read Attributes at all, rather than saying it has no such attribute */
+    bool ignoresReads = false;
 };
 
 class FakeZnpCoordinator {
@@ -326,7 +331,57 @@ private:
         if (req.subsystem() == ZnpSubsystem::ZDO) {
             answerZdoRequest(req);
         }
+        if (req.subsystem() == ZnpSubsystem::AF && req.command() == cmd::af::DATA_REQUEST) {
+            answerReadAttributes(req);
+        }
         m_rxCv.notify_all();
+    }
+
+    // Caller holds m_mutex
+    void answerReadAttributes(const ZnpFrame& req) {
+        constexpr size_t kZclStart = 10;
+        if (req.payload().size() < kZclStart + 3 ||
+            req.getByte(kZclStart + 2) != zcl::global_cmd::READ_ATTRIBUTES ||
+            (req.getByte(kZclStart) & zcl::frame_ctrl::CLUSTER_SPECIFIC) != 0) {
+            return;
+        }
+        const uint16_t nwkAddr = req.getWord(0);
+        const uint8_t endpoint = req.getByte(2);
+        const uint16_t cluster = req.getWord(4);
+        auto device = m_devices.find(nwkAddr);
+        if (device == m_devices.end() || device->second.ignoresReads) {
+            return;
+        }
+
+        std::vector<uint8_t> zcl = {0x18, req.getByte(kZclStart + 1), zcl::global_cmd::READ_ATTRIBUTES_RSP};
+        const auto addString = [&zcl](const std::string& text) {
+            zcl.push_back(zcl::datatype::CHAR_STR);
+            zcl.push_back(static_cast<uint8_t>(text.size()));
+            zcl.insert(zcl.end(), text.begin(), text.end());
+        };
+        for (size_t offset = kZclStart + 3; offset + 2 <= req.payload().size(); offset += 2) {
+            const uint16_t attrId = req.getWord(offset);
+            zcl.push_back(static_cast<uint8_t>(attrId & 0xFF));
+            zcl.push_back(static_cast<uint8_t>(attrId >> 8));
+            if (cluster == zcl::cluster::BASIC && attrId == zcl::attr::basic::MANUFACTURER_NAME &&
+                !device->second.manufacturer.empty()) {
+                zcl.push_back(zcl::status::SUCCESS);
+                addString(device->second.manufacturer);
+            } else if (cluster == zcl::cluster::BASIC && attrId == zcl::attr::basic::MODEL_ID &&
+                       !device->second.model.empty()) {
+                zcl.push_back(zcl::status::SUCCESS);
+                addString(device->second.model);
+            } else if (cluster == zcl::cluster::IAS_ZONE && attrId == zcl::attr::ias_zone::ZONE_TYPE &&
+                       device->second.zoneType) {
+                zcl.push_back(zcl::status::SUCCESS);
+                zcl.push_back(zcl::datatype::ENUM16);
+                zcl.push_back(static_cast<uint8_t>(*device->second.zoneType & 0xFF));
+                zcl.push_back(static_cast<uint8_t>(*device->second.zoneType >> 8));
+            } else {
+                zcl.push_back(zcl::status::UNSUPPORTED_ATTRIBUTE);
+            }
+        }
+        queueFrame(incomingMessage(nwkAddr, endpoint, cluster, zcl));
     }
 
     std::vector<uint8_t> defaultResponse(const ZnpFrame& req) const {

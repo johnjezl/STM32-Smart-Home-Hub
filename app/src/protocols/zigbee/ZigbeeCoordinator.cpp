@@ -362,14 +362,36 @@ bool ZigbeeCoordinator::sendCommand(uint16_t nwkAddr, uint8_t endpoint,
 
 std::optional<ZclAttributeValue> ZigbeeCoordinator::readAttribute(
         uint16_t nwkAddr, uint8_t endpoint, uint16_t cluster, uint16_t attrId) {
+    constexpr int kTimeoutMs = 3000;
+    auto values = readAttributes(nwkAddr, endpoint, cluster, {attrId}, kTimeoutMs);
+    if (values.empty()) {
+        return std::nullopt;
+    }
+    return values.front();
+}
 
+std::vector<ZclAttributeValue> ZigbeeCoordinator::readAttributes(
+        uint16_t nwkAddr, uint8_t endpoint, uint16_t cluster,
+        const std::vector<uint16_t>& attributes, int timeoutMs) {
     // Build ZCL Read Attributes frame
+    const uint8_t seq = nextTransactionSeq();
     std::vector<uint8_t> zclFrame;
     zclFrame.push_back(0x00);                    // Frame control: global, client-to-server
-    zclFrame.push_back(nextTransactionSeq());    // Transaction seq
+    zclFrame.push_back(seq);
     zclFrame.push_back(zcl::global_cmd::READ_ATTRIBUTES);
-    zclFrame.push_back(attrId & 0xFF);
-    zclFrame.push_back((attrId >> 8) & 0xFF);
+    for (uint16_t attrId : attributes) {
+        zclFrame.push_back(attrId & 0xFF);
+        zclFrame.push_back((attrId >> 8) & 0xFF);
+    }
+
+    const std::pair<uint16_t, uint8_t> key{nwkAddr, seq};
+    {
+        std::lock_guard<std::mutex> lock(m_readMutex);
+        if (m_readsCancelled) {
+            return {};
+        }
+        m_pendingReads[key];  // Before sending, as the answer can arrive before request() returns
+    }
 
     // Send via AF
     ZnpFrame req(ZnpType::SREQ, ZnpSubsystem::AF, cmd::af::DATA_REQUEST);
@@ -377,20 +399,113 @@ std::optional<ZclAttributeValue> ZigbeeCoordinator::readAttribute(
     req.appendByte(endpoint);
     req.appendByte(1);
     req.appendWord(cluster);
-    req.appendByte(zclFrame[1]);
+    req.appendByte(seq);
     req.appendByte(0x30);
     req.appendByte(15);
     req.appendByte(static_cast<uint8_t>(zclFrame.size()));
     req.appendBytes(zclFrame);
 
     auto rsp = m_transport->request(req);
-    if (!rsp || rsp->getByte(0) != 0) {
-        return std::nullopt;
+
+    std::unique_lock<std::mutex> lock(m_readMutex);
+    if (rsp && rsp->getByte(0) == 0) {
+        m_readCv.wait_for(lock, std::chrono::milliseconds(timeoutMs), [&] {
+            return m_readsCancelled || m_pendingReads[key].answered;
+        });
+    }
+    std::vector<ZclAttributeValue> values = std::move(m_pendingReads[key].values);
+    m_pendingReads.erase(key);
+    return values;
+}
+
+void ZigbeeCoordinator::cancelReads() {
+    {
+        std::lock_guard<std::mutex> lock(m_readMutex);
+        m_readsCancelled = true;
+    }
+    m_readCv.notify_all();
+}
+
+void ZigbeeCoordinator::handleReadAttributesRsp(uint16_t srcAddr, uint8_t transSeq, uint16_t clusterId,
+                                                uint8_t endpoint, const std::vector<uint8_t>& zcl) {
+    // Each record: AttributeId(2) + Status(1), then DataType(1) + Value(N) if the status is success
+    std::vector<ZclAttributeValue> values;
+    size_t offset = 3;
+    while (offset + 3 <= zcl.size()) {
+        const uint16_t attrId = zcl[offset] | (zcl[offset + 1] << 8);
+        const uint8_t status = zcl[offset + 2];
+        offset += 3;
+        if (status != zcl::status::SUCCESS) {
+            continue;
+        }
+        if (offset >= zcl.size()) {
+            break;
+        }
+        const uint8_t dataType = zcl[offset++];
+
+        size_t dataSize = zcl::getDataTypeSize(dataType);
+        if (dataSize == 0) {
+            // Variable length - first byte is length
+            if (offset >= zcl.size()) {
+                break;
+            }
+            dataSize = zcl[offset] + 1;
+        }
+        if (offset + dataSize > zcl.size()) {
+            break;
+        }
+
+        ZclAttributeValue attr;
+        attr.clusterId = clusterId;
+        attr.endpoint = endpoint;
+        attr.attributeId = attrId;
+        attr.dataType = dataType;
+        attr.data.assign(zcl.begin() + offset, zcl.begin() + offset + dataSize);
+        values.push_back(std::move(attr));
+        offset += dataSize;
     }
 
-    // TODO: Need to wait for AF_INCOMING_MSG with the response
-    // For now, return empty - this will be improved when we add async handling
-    return std::nullopt;
+    {
+        std::lock_guard<std::mutex> lock(m_readMutex);
+        auto pending = m_pendingReads.find({srcAddr, transSeq});
+        if (pending == m_pendingReads.end()) {
+            return;  // Nobody's waiting any more
+        }
+        pending->second.values = std::move(values);
+        pending->second.answered = true;
+    }
+    m_readCv.notify_all();
+}
+
+void ZigbeeCoordinator::setDeviceDetails(uint64_t ieeeAddr, const std::string& manufacturer,
+                                         const std::string& model, std::optional<uint16_t> zoneType) {
+    std::lock_guard<std::mutex> lock(m_deviceMutex);
+    auto it = m_devices.find(ieeeAddr);
+    if (it == m_devices.end()) {
+        return;
+    }
+    if (!manufacturer.empty()) it->second.manufacturer = manufacturer;
+    if (!model.empty()) it->second.model = model;
+    if (zoneType) it->second.zoneType = zoneType;
+}
+
+bool ZigbeeCoordinator::sendZoneEnrollResponse(uint16_t nwkAddr, uint8_t endpoint, uint8_t zoneId) {
+    constexpr uint8_t kZoneEnrollResponse = 0x00;
+    constexpr uint8_t kEnrollSuccess = 0x00;
+    std::vector<uint8_t> zclFrame = {zcl::frame_ctrl::CLUSTER_SPECIFIC, nextTransactionSeq(),
+                                     kZoneEnrollResponse, kEnrollSuccess, zoneId};
+
+    ZnpFrame req(ZnpType::SREQ, ZnpSubsystem::AF, cmd::af::DATA_REQUEST);
+    req.appendWord(nwkAddr);
+    req.appendByte(endpoint);
+    req.appendByte(1);
+    req.appendWord(zcl::cluster::IAS_ZONE);
+    req.appendByte(zclFrame[1]);
+    req.appendByte(0x30);
+    req.appendByte(15);
+    req.appendByte(static_cast<uint8_t>(zclFrame.size()));
+    req.appendBytes(zclFrame);
+    return m_transport->send(req);
 }
 
 bool ZigbeeCoordinator::writeAttribute(uint16_t nwkAddr, uint8_t endpoint,
@@ -989,6 +1104,12 @@ void ZigbeeCoordinator::handleIncomingMessage(const ZnpFrame& frame) {
 
     LOG_DEBUG("Incoming ZCL: cluster=%04X, src=%04X:%d, cmd=0x%02X",
               clusterId, srcAddr, srcEndpoint, cmdId);
+
+    if ((frameCtrl & zcl::frame_ctrl::CLUSTER_SPECIFIC) == 0 &&
+        cmdId == zcl::global_cmd::READ_ATTRIBUTES_RSP) {
+        handleReadAttributesRsp(srcAddr, transSeq, clusterId, srcEndpoint, zclData);
+        return;
+    }
 
     // Handle attribute reports
     if ((frameCtrl & zcl::frame_ctrl::CLUSTER_SPECIFIC) == 0 &&
