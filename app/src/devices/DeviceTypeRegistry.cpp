@@ -3,6 +3,7 @@
  */
 
 #include <smarthub/devices/DeviceTypeRegistry.hpp>
+#include <smarthub/core/Logger.hpp>
 #include <smarthub/devices/Device.hpp>
 #include <smarthub/devices/types/SwitchDevice.hpp>
 #include <smarthub/devices/types/DimmerDevice.hpp>
@@ -35,8 +36,7 @@ void DeviceTypeRegistry::registerBuiltinTypes() {
         [](const std::string& id, const std::string& name,
            const std::string& protocol, const std::string& address,
            const nlohmann::json& /* config */) -> DevicePtr {
-            auto device = std::make_shared<SwitchDevice>(id, name, protocol, address);
-            return device;
+            return std::make_shared<SwitchDevice>(id, name, protocol, address, DeviceType::Light);
         });
 
     // Dimmer device
@@ -92,16 +92,23 @@ void DeviceTypeRegistry::registerBuiltinTypes() {
         [](const std::string& id, const std::string& name,
            const std::string& protocol, const std::string& address,
            const nlohmann::json& /* config */) -> DevicePtr {
-            return std::make_shared<SwitchDevice>(id, name, protocol, address);
+            return std::make_shared<SwitchDevice>(id, name, protocol, address, DeviceType::Outlet);
         });
 
-    // Generic/Unknown device
-    registerType(DeviceType::Unknown, "unknown",
-        [](const std::string& id, const std::string& name,
-           const std::string& protocol, const std::string& address,
-           const nlohmann::json& /* config */) -> DevicePtr {
-            return std::make_shared<Device>(id, name, DeviceType::Unknown, protocol, address);
-        });
+    // Every other type has no class of its own yet, but has to keep its type through a save and
+    // load. Otherwise it comes back as Unknown, and the next save makes that permanent.
+    for (int value = 0; value <= static_cast<int>(kLastDeviceType); ++value) {
+        const auto type = static_cast<DeviceType>(value);
+        if (hasType(type)) {
+            continue;
+        }
+        registerType(type, deviceTypeToString(type),
+            [type](const std::string& id, const std::string& name,
+                   const std::string& protocol, const std::string& address,
+                   const nlohmann::json& /* config */) -> DevicePtr {
+                return std::make_shared<Device>(id, name, type, protocol, address);
+            });
+    }
 }
 
 void DeviceTypeRegistry::registerType(DeviceType type, const std::string& typeName,
@@ -140,7 +147,13 @@ DevicePtr DeviceTypeRegistry::create(DeviceType type,
         // Fall back to generic device
         return std::make_shared<Device>(id, name, type, protocol, protocolAddress);
     }
-    return it->second.creator(id, name, protocol, protocolAddress, config);
+
+    DevicePtr device = it->second.creator(id, name, protocol, protocolAddress, config);
+    // Creators only read what they need, and the rest of the config has to survive too
+    if (device && config.is_object() && !config.empty()) {
+        device->setConfig(config);
+    }
+    return device;
 }
 
 DevicePtr DeviceTypeRegistry::createFromTypeName(const std::string& typeName,
@@ -152,6 +165,7 @@ DevicePtr DeviceTypeRegistry::createFromTypeName(const std::string& typeName,
     auto it = m_nameToType.find(typeName);
     if (it == m_nameToType.end()) {
         // Fall back to generic device
+        LOG_WARN("Device %s has unknown type '%s'", id.c_str(), typeName.c_str());
         return std::make_shared<Device>(id, name, DeviceType::Unknown, protocol, protocolAddress);
     }
     return create(it->second, id, name, protocol, protocolAddress, config);

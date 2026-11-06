@@ -28,6 +28,8 @@ TemperatureSensor::TemperatureSensor(const std::string& id,
         addCapability(DeviceCapability::Battery);
     }
 
+    TemperatureSensor::setConfig(nlohmann::json::object());
+
     // Initialize state
     setStateInternal("temperature", 0.0);
     if (hasHumidity) {
@@ -93,6 +95,13 @@ void TemperatureSensor::setBatteryLevel(int percent) {
 void TemperatureSensor::onStateChange(const std::string& property, const nlohmann::json& value) {
     (void)property;
     (void)value;
+}
+
+void TemperatureSensor::setConfig(const nlohmann::json& config) {
+    nlohmann::json merged = config.is_object() ? config : nlohmann::json::object();
+    merged["has_humidity"] = m_hasHumidity;
+    merged["has_battery"] = m_hasBattery;
+    Device::setConfig(merged);
 }
 
 } // namespace smarthub

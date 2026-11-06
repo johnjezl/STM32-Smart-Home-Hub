@@ -24,7 +24,8 @@ public:
     SwitchDevice(const std::string& id,
                  const std::string& name,
                  const std::string& protocol = "local",
-                 const std::string& protocolAddress = "");
+                 const std::string& protocolAddress = "",
+                 DeviceType type = DeviceType::Switch);
 
     /**
      * Check if switch is on

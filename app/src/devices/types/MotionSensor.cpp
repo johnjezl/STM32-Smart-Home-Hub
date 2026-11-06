@@ -23,12 +23,13 @@ MotionSensor::MotionSensor(const std::string& id,
 
     if (hasIlluminance) {
         addCapability(DeviceCapability::Illuminance);
-        m_type = DeviceType::MultiSensor;
     }
 
     if (hasBattery) {
         addCapability(DeviceCapability::Battery);
     }
+
+    MotionSensor::setConfig(nlohmann::json::object());
 
     // Initialize state
     setStateInternal("motion", false);
@@ -114,6 +115,13 @@ void MotionSensor::setBatteryLevel(int percent) {
 void MotionSensor::onStateChange(const std::string& property, const nlohmann::json& value) {
     (void)property;
     (void)value;
+}
+
+void MotionSensor::setConfig(const nlohmann::json& config) {
+    nlohmann::json merged = config.is_object() ? config : nlohmann::json::object();
+    merged["has_illuminance"] = m_hasIlluminance;
+    merged["has_battery"] = m_hasBattery;
+    Device::setConfig(merged);
 }
 
 } // namespace smarthub

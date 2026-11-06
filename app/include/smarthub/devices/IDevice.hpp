@@ -69,8 +69,10 @@ enum class DeviceType {
     Doorbell,           // Video doorbell
     Camera,             // Security camera
     Speaker,            // Smart speaker
-    Custom              // Custom/generic device
+    Custom              // Custom/generic device. Keep this last: kLastDeviceType relies on it.
 };
+
+constexpr DeviceType kLastDeviceType = DeviceType::Custom;
 
 /**
  * Device availability state
