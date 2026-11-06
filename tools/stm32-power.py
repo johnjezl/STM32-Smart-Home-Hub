@@ -2,6 +2,9 @@
 """
 STM32 Power Control via Kasa Smart Plug
 
+Don't use this for the lab board. It's powered through labctl (see CLAUDE.md), and
+the default host below is its old plug, so it may no longer switch the board.
+
 Usage:
     stm32-power.py [on|off|cycle|status] [--host IP]
 

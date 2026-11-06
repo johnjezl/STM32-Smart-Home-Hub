@@ -27,7 +27,7 @@ Power control and health checks go through the **labctl MCP tools**, with the SB
 The SmartHub is accessible via SSH over both Ethernet and WiFi:
 
 ```bash
-# Via mDNS (preferred)
+# Via mDNS, if this machine resolves .local names
 ssh root@smarthub.local
 
 # Via WiFi IP
@@ -75,7 +75,7 @@ ssh root@smarthub.local reboot
 
 ### Connection
 
-The ST-Link provides a USB serial port for console access:
+The ST-Link provides a USB serial port for console access. No serial port is assigned to this board in labctl, so `/dev/ttyACM0` exists only while the ST-Link USB cable is plugged into the machine you're using. Ask the maintainer if it's missing.
 
 ```bash
 # Check for device
@@ -112,7 +112,6 @@ sudo usermod -aG dialout $USER
 sudo timeout 60 cat /dev/ttyACM0 > boot_log.txt &
 
 # Then power cycle with the power_cycle MCP tool to capture the full boot
-
 
 # Wait for boot, then check log
 cat boot_log.txt
