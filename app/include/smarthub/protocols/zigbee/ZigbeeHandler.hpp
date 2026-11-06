@@ -133,7 +133,7 @@ private:
     DevicePtr createDeviceFromInfo(const ZigbeeDeviceInfo& info);
     DeviceType inferDeviceType(const ZigbeeDeviceInfo& info);
     DeviceType resolveDeviceType(const ZigbeeDeviceInfo& info);
-    void setupReporting(uint16_t nwkAddr, uint8_t endpoint, DeviceType type);
+    void setupReporting(uint64_t ieeeAddr, uint16_t nwkAddr, DeviceType type);
 
     // Command handling
     bool handleOnOffCommand(uint16_t nwkAddr, uint8_t endpoint, const std::string& command);
@@ -205,6 +205,11 @@ private:
     std::map<uint64_t, std::string> m_ieeeToDeviceId;
     std::map<std::string, uint64_t> m_deviceIdToIeee;
     std::map<uint64_t, uint8_t> m_deviceEndpoints;  // Primary endpoint per device
+    // Which endpoint has each cluster, per device. Devices can split them across endpoints. A
+    // cluster on several, as on a two-gang switch, means the first: one device, one of each.
+    std::map<uint64_t, std::map<uint16_t, uint8_t>> m_clusterEndpoints;
+    uint8_t endpointFor(uint64_t ieeeAddr, uint16_t cluster) const;
+    bool isOtherEndpoint(uint64_t ieeeAddr, uint16_t cluster, uint8_t endpoint) const;
     // Devices the hub keeps, IEEE to device id. Announcing again doesn't make one of these new, and
     // this outlives a leave, because the hub still has the device when it rejoins.
     std::map<uint64_t, std::string> m_savedDevices;

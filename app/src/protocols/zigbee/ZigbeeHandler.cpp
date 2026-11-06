@@ -16,6 +16,7 @@
 #include <cctype>
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <iomanip>
 #include <sstream>
 #include <thread>
@@ -74,6 +75,27 @@ std::vector<uint16_t> clustersFor(DeviceType type) {
 }
 
 /** The endpoint that does the work for this device type, or else the first application one. */
+/** The first application endpoint with each cluster. */
+std::map<uint16_t, uint8_t> clusterEndpointsOf(const ZigbeeDeviceInfo& info) {
+    std::map<uint16_t, uint8_t> endpoints;
+    for (uint8_t endpoint : info.endpoints) {
+        auto clusters = info.inClusters.find(endpoint);
+        if (!isApplicationEndpoint(endpoint) || clusters == info.inClusters.end()) continue;
+        for (uint16_t cluster : clusters->second) {
+            endpoints.emplace(cluster, endpoint);
+        }
+    }
+    return endpoints;
+}
+
+nlohmann::json clusterEndpointsJson(const std::map<uint16_t, uint8_t>& endpoints) {
+    nlohmann::json json = nlohmann::json::object();
+    for (const auto& [cluster, endpoint] : endpoints) {
+        json[std::to_string(cluster)] = endpoint;
+    }
+    return json;
+}
+
 std::optional<uint8_t> primaryEndpoint(const ZigbeeDeviceInfo& info, DeviceType type) {
     for (uint16_t cluster : clustersFor(type)) {
         for (uint8_t endpoint : info.endpoints) {
@@ -262,6 +284,7 @@ void ZigbeeHandler::shutdown() {
         m_ieeeToDeviceId.clear();
         m_deviceIdToIeee.clear();
         m_deviceEndpoints.clear();
+        m_clusterEndpoints.clear();
         m_savedDevices.clear();
         m_addressChecks.clear();
         m_lastAddressLookup.clear();
@@ -402,25 +425,16 @@ bool ZigbeeHandler::sendCommand(const std::string& deviceAddress,
         return false;
     }
 
-    // Get primary endpoint
-    uint8_t endpoint = 1;
-    {
-        std::lock_guard<std::mutex> lock(m_deviceMutex);
-        auto it = m_deviceEndpoints.find(ieeeAddr);
-        if (it != m_deviceEndpoints.end()) {
-            endpoint = it->second;
-        }
-    }
-
-    LOG_DEBUG("Sending command '%s' to %s (endpoint %d)", command.c_str(), deviceAddress.c_str(), endpoint);
+    LOG_DEBUG("Sending command '%s' to %s", command.c_str(), deviceAddress.c_str());
 
     // Route command based on type
+    const uint16_t nwkAddr = deviceInfo->networkAddress;
     if (command == "on" || command == "off" || command == "toggle") {
-        return handleOnOffCommand(deviceInfo->networkAddress, endpoint, command);
+        return handleOnOffCommand(nwkAddr, endpointFor(ieeeAddr, zcl::cluster::ON_OFF), command);
     } else if (command == "brightness" || command == "level") {
-        return handleBrightnessCommand(deviceInfo->networkAddress, endpoint, params);
+        return handleBrightnessCommand(nwkAddr, endpointFor(ieeeAddr, zcl::cluster::LEVEL_CONTROL), params);
     } else if (command == "color" || command == "colorTemp" || command == "hue" || command == "saturation") {
-        return handleColorCommand(deviceInfo->networkAddress, endpoint, params);
+        return handleColorCommand(nwkAddr, endpointFor(ieeeAddr, zcl::cluster::COLOR_CONTROL), params);
     }
 
     fail("Unknown command: " + command);
@@ -483,7 +497,31 @@ void ZigbeeHandler::eraseMappingLocked(uint64_t ieeeAddr) {
         m_ieeeToDeviceId.erase(it);
     }
     m_deviceEndpoints.erase(ieeeAddr);
+    m_clusterEndpoints.erase(ieeeAddr);
     m_zoneAlarms.erase(ieeeAddr);
+}
+
+uint8_t ZigbeeHandler::endpointFor(uint64_t ieeeAddr, uint16_t cluster) const {
+    std::lock_guard<std::mutex> lock(m_deviceMutex);
+    auto device = m_clusterEndpoints.find(ieeeAddr);
+    if (device != m_clusterEndpoints.end()) {
+        auto found = device->second.find(cluster);
+        if (found != device->second.end()) {
+            return found->second;
+        }
+    }
+    auto primary = m_deviceEndpoints.find(ieeeAddr);
+    return primary != m_deviceEndpoints.end() ? primary->second : 1;
+}
+
+bool ZigbeeHandler::isOtherEndpoint(uint64_t ieeeAddr, uint16_t cluster, uint8_t endpoint) const {
+    std::lock_guard<std::mutex> lock(m_deviceMutex);
+    auto device = m_clusterEndpoints.find(ieeeAddr);
+    if (device == m_clusterEndpoints.end()) {
+        return false;
+    }
+    auto found = device->second.find(cluster);
+    return found != device->second.end() && found->second != endpoint;
 }
 
 void ZigbeeHandler::declineLocked(uint64_t ieeeAddr) {
@@ -576,6 +614,18 @@ void ZigbeeHandler::restoreDevice(const IDevice& device) {
             const int endpoint = state["endpoint"].get<int>();
             if (endpoint >= 1 && endpoint <= 240) {
                 m_deviceEndpoints[*ieeeAddr] = static_cast<uint8_t>(endpoint);
+            }
+        }
+        if (state.contains("clusterEndpoints") && state["clusterEndpoints"].is_object()) {
+            auto& endpoints = m_clusterEndpoints[*ieeeAddr];
+            for (const auto& [cluster, endpoint] : state["clusterEndpoints"].items()) {
+                if (!endpoint.is_number_integer()) continue;
+                char* end = nullptr;
+                const unsigned long id = std::strtoul(cluster.c_str(), &end, 10);
+                const int number = endpoint.get<int>();
+                if (*end == '\0' && !cluster.empty() && id <= 0xFFFF && number >= 1 && number <= 240) {
+                    endpoints[static_cast<uint16_t>(id)] = static_cast<uint8_t>(number);
+                }
             }
         }
     }
@@ -1031,10 +1081,12 @@ void ZigbeeHandler::finishPairing(uint64_t ieeeAddr) {
             if (savedEndpoint) {
                 m_deviceEndpoints[ieeeAddr] = *savedEndpoint;
             }
+            m_clusterEndpoints[ieeeAddr] = clusterEndpointsOf(*deviceInfo);
         }
         if (savedEndpoint) {
-            setupReporting(deviceInfo->networkAddress, *savedEndpoint, savedType);
+            setupReporting(ieeeAddr, deviceInfo->networkAddress, savedType);
             notifyState(*savedId, "endpoint", static_cast<int>(*savedEndpoint));
+            notifyState(*savedId, "clusterEndpoints", clusterEndpointsJson(clusterEndpointsOf(*deviceInfo)));
         }
         return;
     }
@@ -1085,7 +1137,9 @@ void ZigbeeHandler::finishPairing(uint64_t ieeeAddr) {
     std::optional<uint8_t> endpoint = primaryEndpoint(*deviceInfo, type);
 
     if (endpoint) {
-        device->setState("endpoint", static_cast<int>(*endpoint));  // Commands need it after a restart
+        // Commands need these after a restart
+        device->setState("endpoint", static_cast<int>(*endpoint));
+        device->setState("clusterEndpoints", clusterEndpointsJson(clusterEndpointsOf(*deviceInfo)));
     }
     if (deviceInfo->zoneType) {
         device->setState("zoneType", static_cast<int>(*deviceInfo->zoneType));
@@ -1108,6 +1162,7 @@ void ZigbeeHandler::finishPairing(uint64_t ieeeAddr) {
         m_ieeeToDeviceId[ieeeAddr] = deviceId;
         m_deviceIdToIeee[deviceId] = ieeeAddr;
         m_zoneAlarms[ieeeAddr] = zoneAlarmFor(type, deviceInfo->zoneType);
+        m_clusterEndpoints[ieeeAddr] = clusterEndpointsOf(*deviceInfo);
         if (endpoint) {
             m_deviceEndpoints[ieeeAddr] = *endpoint;
         }
@@ -1115,7 +1170,7 @@ void ZigbeeHandler::finishPairing(uint64_t ieeeAddr) {
 
     // Set up attribute reporting for the device type
     if (endpoint) {
-        setupReporting(deviceInfo->networkAddress, *endpoint, type);
+        setupReporting(ieeeAddr, deviceInfo->networkAddress, type);
     }
 
     if (pairingStopped()) {
@@ -1209,6 +1264,12 @@ void ZigbeeHandler::onAttributeReport(uint16_t nwkAddr, const ZclAttributeValue&
     }
 
     // Convert attribute to state update - call callback for each property
+    // On a device with several of something, like a two-gang switch, only the first is this device
+    if (isOtherEndpoint(deviceInfo->ieeeAddress, attr.clusterId, attr.endpoint)) {
+        LOG_DEBUG("Ignoring report from endpoint %d of %s", attr.endpoint, deviceId.c_str());
+        return;
+    }
+
     switch (attr.clusterId) {
         case zcl::cluster::ON_OFF:
             if (attr.attributeId == zcl::attr::onoff::ON_OFF) {
@@ -1314,6 +1375,11 @@ void ZigbeeHandler::onCommandReceived(uint16_t nwkAddr, uint8_t endpoint,
     }
 
     if (deviceId.empty()) {
+        return;
+    }
+
+    if (isOtherEndpoint(deviceInfo->ieeeAddress, cluster, endpoint)) {
+        LOG_DEBUG("Ignoring command from endpoint %d of %s", endpoint, deviceId.c_str());
         return;
     }
 
@@ -1497,57 +1563,65 @@ DeviceType ZigbeeHandler::inferDeviceType(const ZigbeeDeviceInfo& info) {
     return DeviceType::Unknown;
 }
 
-void ZigbeeHandler::setupReporting(uint16_t nwkAddr, uint8_t endpoint, DeviceType type) {
+void ZigbeeHandler::setupReporting(uint64_t ieeeAddr, uint16_t nwkAddr, DeviceType type) {
     // Configure attribute reporting based on device type
     // Min interval: 1 second, Max interval: 5 minutes
+
+    // A device's clusters can be on different endpoints, and it might not have them all. With no
+    // cluster information, as with a database entry, assume it does, on its primary endpoint.
+    const auto report = [&](uint16_t cluster, uint16_t attribute, uint8_t dataType, uint16_t minInterval,
+                            const std::vector<uint8_t>& change) {
+        if (pairingStopped()) return;  // Each request can block on an unresponsive radio
+        {
+            std::lock_guard<std::mutex> lock(m_deviceMutex);
+            auto device = m_clusterEndpoints.find(ieeeAddr);
+            if (device != m_clusterEndpoints.end() && !device->second.empty() &&
+                device->second.count(cluster) == 0) {
+                return;
+            }
+        }
+        m_coordinator->configureReporting(nwkAddr, endpointFor(ieeeAddr, cluster), cluster, attribute,
+                                          dataType, minInterval, 300, change);
+    };
 
     switch (type) {
         case DeviceType::Switch:
         case DeviceType::Dimmer:
         case DeviceType::ColorLight:
             // Report on/off state changes
-            // Each request can block on an unresponsive radio, so check for shutdown between them
-            if (pairingStopped()) return;
-            m_coordinator->configureReporting(nwkAddr, endpoint,
-                zcl::cluster::ON_OFF, zcl::attr::onoff::ON_OFF,
-                zcl::datatype::BOOLEAN, 1, 300);
+            report(zcl::cluster::ON_OFF, zcl::attr::onoff::ON_OFF, zcl::datatype::BOOLEAN, 1, {});
 
             if (type == DeviceType::Dimmer || type == DeviceType::ColorLight) {
                 // Report level changes
-                if (pairingStopped()) return;
-                m_coordinator->configureReporting(nwkAddr, endpoint,
-                    zcl::cluster::LEVEL_CONTROL, zcl::attr::level::CURRENT_LEVEL,
-                    zcl::datatype::UINT8, 1, 300, {0x01}); // 1% change
+                report(zcl::cluster::LEVEL_CONTROL, zcl::attr::level::CURRENT_LEVEL,
+                       zcl::datatype::UINT8, 1, {0x01});  // 1% change
             }
 
             if (type == DeviceType::ColorLight) {
                 // Report color temp changes
-                if (pairingStopped()) return;
-                m_coordinator->configureReporting(nwkAddr, endpoint,
-                    zcl::cluster::COLOR_CONTROL, zcl::attr::color::COLOR_TEMP,
-                    zcl::datatype::UINT16, 1, 300, {0x0A, 0x00}); // 10 mireds change
+                report(zcl::cluster::COLOR_CONTROL, zcl::attr::color::COLOR_TEMP,
+                       zcl::datatype::UINT16, 1, {0x0A, 0x00});  // 10 mireds change
             }
             break;
 
         case DeviceType::TemperatureSensor:
             // Report temperature every 5 minutes or on 0.5°C change
-            m_coordinator->configureReporting(nwkAddr, endpoint,
-                zcl::cluster::TEMPERATURE_MEASUREMENT, zcl::attr::temperature::MEASURED_VALUE,
-                zcl::datatype::INT16, 60, 300, {0x32, 0x00}); // 50 = 0.5°C
+            report(zcl::cluster::TEMPERATURE_MEASUREMENT, zcl::attr::temperature::MEASURED_VALUE,
+                   zcl::datatype::INT16, 60, {0x32, 0x00});  // 50 = 0.5°C
             break;
 
         case DeviceType::MotionSensor: {
             // IAS Zone status arrives as notifications. An occupancy sensor needs asking to report.
-            const auto info = m_coordinator->getDeviceByNwkAddr(nwkAddr);
-            if (info) {
-                const auto clusters = info->inClusters.find(endpoint);
-                if (clusters != info->inClusters.end() &&
-                    std::find(clusters->second.begin(), clusters->second.end(),
-                              zcl::cluster::OCCUPANCY_SENSING) != clusters->second.end()) {
-                    m_coordinator->configureReporting(nwkAddr, endpoint,
-                        zcl::cluster::OCCUPANCY_SENSING, zcl::attr::occupancy::OCCUPANCY,
-                        zcl::datatype::BITMAP8, 1, 300, {});
-                }
+            bool hasOccupancy = false;
+            {
+                std::lock_guard<std::mutex> lock(m_deviceMutex);
+                auto device = m_clusterEndpoints.find(ieeeAddr);
+                hasOccupancy = device != m_clusterEndpoints.end() &&
+                               device->second.count(zcl::cluster::OCCUPANCY_SENSING) > 0;
+            }
+            if (hasOccupancy) {
+                report(zcl::cluster::OCCUPANCY_SENSING, zcl::attr::occupancy::OCCUPANCY,
+                       zcl::datatype::BITMAP8, 1, {});
             }
             break;
         }

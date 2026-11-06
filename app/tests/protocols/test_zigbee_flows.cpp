@@ -1337,6 +1337,129 @@ TEST_F(ZigbeeHandlerFlowTest, DeviceWhosePairingFailedInAWizardIsNotAddedLater) 
     EXPECT_EQ(discoveredCount(), 0u);
 }
 
+// ---- Clusters on different endpoints ------------------------------------------
+
+namespace {
+
+const FakeZigbeeDevice SPLIT_LIGHT{
+    0x8401, 0x00124B0000008401ULL,
+    {{1, {zcl::cluster::ON_OFF, zcl::cluster::LEVEL_CONTROL}},
+     {2, {zcl::cluster::COLOR_CONTROL}}}};
+const FakeZigbeeDevice TWO_GANG{
+    0x8402, 0x00124B0000008402ULL,
+    {{1, {zcl::cluster::ON_OFF}},
+     {2, {zcl::cluster::ON_OFF}}}};
+
+} // namespace
+
+TEST_F(ZigbeeHandlerFlowTest, EachCommandGoesToTheEndpointWithItsCluster) {
+    fake.addDevice(SPLIT_LIGHT);
+    ASSERT_NE(pair(SPLIT_LIGHT), nullptr);
+    const std::string id = idOf(SPLIT_LIGHT);
+
+    const auto endpointOf = [&](const char* command, const nlohmann::json& params) {
+        fake.clearSentFrames();
+        EXPECT_TRUE(handler->sendCommand(id, command, params)) << command;
+        auto frames = airFrames(fake);
+        EXPECT_EQ(frames.size(), 1u) << command;
+        return frames.empty() ? 0 : frames[0].endpoint;
+    };
+
+    EXPECT_EQ(endpointOf("on", {{"on", true}}), 1);
+    EXPECT_EQ(endpointOf("brightness", {{"brightness", 50}}), 1);
+    EXPECT_EQ(endpointOf("colorTemp", {{"colorTemp", 300}}), 2);
+}
+
+TEST_F(ZigbeeHandlerFlowTest, ReportingGoesToTheEndpointWithItsCluster) {
+    fake.addDevice(SPLIT_LIGHT);
+    fake.clearSentFrames();
+    ASSERT_NE(pair(SPLIT_LIGHT), nullptr);
+
+    std::map<uint16_t, int> endpoints;
+    for (const AirFrame& frame : airFrames(fake)) {
+        if (frame.zclCommand == zcl::global_cmd::CONFIGURE_REPORTING) {
+            endpoints[frame.cluster] = frame.endpoint;
+        }
+    }
+    EXPECT_EQ(endpoints[zcl::cluster::ON_OFF], 1);
+    EXPECT_EQ(endpoints[zcl::cluster::LEVEL_CONTROL], 1);
+    EXPECT_EQ(endpoints[zcl::cluster::COLOR_CONTROL], 2);
+}
+
+TEST_F(ZigbeeHandlerFlowTest, ReportingSkipsClustersTheDeviceDoesNotHave) {
+    const FakeZigbeeDevice colorOnly{
+        0x8403, 0x00124B0000008403ULL,
+        {{1, {zcl::cluster::COLOR_CONTROL, zcl::cluster::LEVEL_CONTROL}}}};
+    fake.addDevice(colorOnly);
+    fake.clearSentFrames();
+    ASSERT_NE(pair(colorOnly), nullptr);
+
+    for (const AirFrame& frame : airFrames(fake)) {
+        EXPECT_NE(frame.cluster, zcl::cluster::ON_OFF);
+    }
+}
+
+TEST_F(ZigbeeHandlerFlowTest, EndpointsSurviveARestart) {
+    fake.addDevice(SPLIT_LIGHT);
+    auto paired = pair(SPLIT_LIGHT);
+    ASSERT_NE(paired, nullptr);
+
+    handler->shutdown();
+    handler = makeHandler(fake);
+    ASSERT_TRUE(handler->initialize());
+    handler->restoreDevice(*paired);
+
+    fake.clearSentFrames();
+    ASSERT_TRUE(handler->sendCommand(idOf(SPLIT_LIGHT), "colorTemp", {{"colorTemp", 300}}));
+    auto frames = airFrames(fake);
+    ASSERT_EQ(frames.size(), 1u);
+    EXPECT_EQ(frames[0].endpoint, 2);
+}
+
+TEST_F(ZigbeeHandlerFlowTest, DeviceSavedWithoutClusterEndpointsUsesItsEndpoint) {
+    handler->restoreDevice(*savedDevice(MULTI_ENDPOINT_LIGHT, 11));
+    fake.clearSentFrames();
+    ASSERT_TRUE(handler->sendCommand(idOf(MULTI_ENDPOINT_LIGHT), "brightness", {{"brightness", 10}}));
+    auto frames = airFrames(fake);
+    ASSERT_EQ(frames.size(), 1u);
+    EXPECT_EQ(frames[0].endpoint, 11);
+}
+
+TEST_F(ZigbeeHandlerFlowTest, BadSavedClusterEndpointsAreIgnored) {
+    auto saved = savedDevice(LIGHT, 1);
+    saved->setState("clusterEndpoints", nlohmann::json{{"6", 0}, {"notanumber", 3}, {"99999", 3}, {"8", "two"}});
+    handler->restoreDevice(*saved);
+    fake.clearSentFrames();
+    ASSERT_TRUE(handler->sendCommand(idOf(LIGHT), "on", {{"on", true}}));
+    auto frames = airFrames(fake);
+    ASSERT_EQ(frames.size(), 1u);
+    EXPECT_EQ(frames[0].endpoint, 1);
+}
+
+TEST_F(ZigbeeHandlerFlowTest, TwoGangSwitchIsOneDeviceUsingTheFirstGang) {
+    fake.addDevice(TWO_GANG);
+    ASSERT_NE(pair(TWO_GANG), nullptr);
+    fake.clearSentFrames();
+
+    ASSERT_TRUE(handler->sendCommand(idOf(TWO_GANG), "on", {{"on", true}}));
+    auto frames = airFrames(fake);
+    ASSERT_EQ(frames.size(), 1u);
+    EXPECT_EQ(frames[0].endpoint, 1);
+
+    // The second gang isn't this device, so it mustn't change what this device shows
+    fake.reportAttribute(TWO_GANG.nwkAddr, 2, zcl::cluster::ON_OFF, zcl::attr::onoff::ON_OFF,
+                         zcl::datatype::BOOLEAN, {0x01});
+    fake.reportAttribute(TWO_GANG.nwkAddr, 1, zcl::cluster::ON_OFF, zcl::attr::onoff::ON_OFF,
+                         zcl::datatype::BOOLEAN, {0x00});
+    EXPECT_EQ(waitForState(idOf(TWO_GANG), "on"), false);
+    std::lock_guard<std::mutex> lock(mutex);
+    for (const auto& change : states) {
+        if (change.deviceId == idOf(TWO_GANG) && change.property == "on") {
+            EXPECT_EQ(change.value, false) << "from the second gang";
+        }
+    }
+}
+
 TEST_F(ZigbeeHandlerFlowTest, UnknownDeviceGetsNoReporting) {
     auto device = pair(BASIC_ONLY);
     ASSERT_NE(device, nullptr);
