@@ -37,8 +37,8 @@ _lv_obj_t* findFirst(_lv_obj_t* root, const _lv_obj_class_t* objectClass);
 /** Number of objects of this class under root that are really visible on screen. */
 int countVisible(_lv_obj_t* root, const _lv_obj_class_t* objectClass);
 
-/** Number of labels and text areas under root (inclusive) with this exact text. */
-int countText(_lv_obj_t* root, const std::string& text);
+/** Number of labels and text areas under root (inclusive) with this exact text, optionally only unhidden ones. */
+int countText(_lv_obj_t* root, const std::string& text, bool visibleOnly = false);
 
 /** Number of distinct colours in the last rendered frame. A blank screen has very few. */
 size_t frameColorCount();

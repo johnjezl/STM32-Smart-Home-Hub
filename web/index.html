@@ -517,6 +517,50 @@
             </div>
         </div>
 
+        <!-- Room Detail Modal -->
+        <div id="room-detail-modal" class="modal modal-lg hidden">
+            <div class="modal-header">
+                <h3 id="room-detail-name">Room</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <!-- Each section shows only if the room has that kind of sensor -->
+                <div id="room-sensor-panel" class="room-sensor-panel">
+                    <div class="sensor-section" id="room-temp-section">
+                        <div class="sensor-section-header">
+                            <span class="sensor-icon">🌡️</span>
+                            <span class="sensor-label">Temperature</span>
+                        </div>
+                        <div class="sensor-value-large" id="room-detail-temp">--°F</div>
+                    </div>
+                    <div class="sensor-section" id="room-humidity-section">
+                        <div class="sensor-section-header">
+                            <span class="sensor-icon">💧</span>
+                            <span class="sensor-label">Humidity</span>
+                        </div>
+                        <div class="sensor-value-large" id="room-detail-humidity">--%</div>
+                    </div>
+                    <div class="sensor-section" id="room-motion-section">
+                        <div class="motion-indicator" id="room-motion-indicator">
+                            <span class="motion-icon">👁️</span>
+                        </div>
+                        <div class="sensor-label" id="room-motion-label">Clear</div>
+                    </div>
+                </div>
+
+                <div class="room-devices-section">
+                    <h4>Devices</h4>
+                    <div id="room-devices-list" class="room-devices-list"></div>
+                    <div id="room-empty-devices" class="empty-state hidden">
+                        <div class="empty-state-text">No devices in this room</div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline modal-cancel">Close</button>
+            </div>
+        </div>
+
         <!-- Confirm Delete Modal -->
         <div id="confirm-delete-modal" class="modal modal-sm hidden">
             <div class="modal-header">
@@ -533,6 +577,7 @@
         </div>
     </div>
 
+    <script src="sensors.js"></script>
     <script src="app.js"></script>
 </body>
 </html>

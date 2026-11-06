@@ -43,7 +43,7 @@ void RoomCard::createLayout() {
 
     // Temperature (bottom left)
     m_tempLabel = lv_label_create(m_card);
-    lv_label_set_text(m_tempLabel, "--°F");
+    lv_label_set_text(m_tempLabel, "");
     lv_obj_set_style_text_color(m_tempLabel, m_theme.textSecondary(), 0);
     lv_obj_align(m_tempLabel, LV_ALIGN_BOTTOM_LEFT, 0, 0);
 
@@ -62,13 +62,7 @@ void RoomCard::setRoomData(const RoomData& data) {
     }
 
     if (m_tempLabel) {
-        char buf[16];
-        if (data.hasTemperature) {
-            snprintf(buf, sizeof(buf), "%.0f°F", data.temperature);
-        } else {
-            snprintf(buf, sizeof(buf), "--°F");
-        }
-        lv_label_set_text(m_tempLabel, buf);
+        lv_label_set_text(m_tempLabel, data.climate.c_str());
     }
 
     if (m_devicesLabel) {
@@ -82,6 +76,12 @@ void RoomCard::setRoomData(const RoomData& data) {
         } else {
             lv_obj_set_style_text_color(m_devicesLabel, m_theme.textSecondary(), 0);
         }
+    }
+
+    // An outline, so the card's size and contents don't move
+    if (m_card) {
+        lv_obj_set_style_outline_color(m_card, m_theme.warning(), 0);
+        lv_obj_set_style_outline_width(m_card, data.motionDetected ? 3 : 0, 0);
     }
 }
 

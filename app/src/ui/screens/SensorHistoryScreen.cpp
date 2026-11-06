@@ -8,6 +8,7 @@
 #include "smarthub/ui/widgets/TimeSeriesChart.hpp"
 #include "smarthub/devices/DeviceManager.hpp"
 #include "smarthub/devices/Device.hpp"
+#include "smarthub/devices/SensorDisplay.hpp"
 #include "smarthub/core/Logger.hpp"
 
 #include <cstdlib>
@@ -144,35 +145,24 @@ void SensorHistoryScreen::loadSensorData() {
             lv_label_set_text(m_subtitleLabel, device->name().c_str());
         }
 
-        // Update current value
-        auto value = device->getProperty("value");
-        if (value.is_number() && m_currentValueLabel) {
-            char buf[32];
-            std::string unit;
+        if (m_currentValueLabel) {
+            lv_label_set_text(m_currentValueLabel, sensorValueText(device->type(), device->getState()).c_str());
+        }
 
+        if (m_chart) {
             switch (device->type()) {
                 case DeviceType::TemperatureSensor:
                 case DeviceType::MultiSensor:
-                    unit = "°F";
-                    snprintf(buf, sizeof(buf), "%.1f%s", value.get<float>(), unit.c_str());
-                    if (m_chart) {
-                        m_chart->setYAxis("Temperature", "°F");
-                        m_chart->setYRange(50, 90);
-                    }
+                    m_chart->setYAxis("Temperature", "°F");
+                    m_chart->setYRange(50, 90);
                     break;
                 case DeviceType::HumiditySensor:
-                    unit = "%";
-                    snprintf(buf, sizeof(buf), "%.0f%s", value.get<float>(), unit.c_str());
-                    if (m_chart) {
-                        m_chart->setYAxis("Humidity", "%");
-                        m_chart->setYRange(0, 100);
-                    }
+                    m_chart->setYAxis("Humidity", "%");
+                    m_chart->setYRange(0, 100);
                     break;
                 default:
-                    snprintf(buf, sizeof(buf), "%.1f", value.get<float>());
                     break;
             }
-            lv_label_set_text(m_currentValueLabel, buf);
         }
 
         // Update chart title
@@ -198,14 +188,12 @@ void SensorHistoryScreen::generateMockData() {
     float variation = 5.0f;
 
     if (device) {
-        auto value = device->getProperty("value");
-        if (value.is_number()) {
-            baseValue = value.get<float>();
-        }
-
+        const auto state = device->getState();
         if (device->type() == DeviceType::HumiditySensor) {
-            baseValue = 45.0f;
+            baseValue = static_cast<float>(humidityPercent(state).value_or(45.0));
             variation = 15.0f;
+        } else if (auto temperature = temperatureFahrenheit(state)) {
+            baseValue = static_cast<float>(*temperature);
         }
     }
 

@@ -24,19 +24,20 @@ class ThemeManager;
 struct RoomData {
     std::string id;
     std::string name;
-    float temperature = 0.0f;     // Current temp in Fahrenheit
+    std::string climate;          // Such as "72°F / 45%"; empty if the room has no such sensors
     int activeDevices = 0;        // Number of active lights/switches
-    bool hasTemperature = false;  // Whether temp sensor is available
+    bool motionDetected = false;  // Outlines the card
 };
 
 /**
  * RoomCard widget for dashboard
  *
  * Layout (~180x100):
- * +-------------+
- * | Living Rm   |
- * | 72°F   💡3  |
- * +-------------+
+ * +----------------+
+ * | Living Rm      |
+ * | 72°F / 45%  💡3|
+ * +----------------+
+ * Outlined while motion is detected
  */
 class RoomCard {
 public:

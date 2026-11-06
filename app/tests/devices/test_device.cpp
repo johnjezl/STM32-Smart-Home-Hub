@@ -3,6 +3,7 @@
  */
 
 #include <gtest/gtest.h>
+#include <smarthub/devices/SensorDisplay.hpp>
 #include <smarthub/devices/Device.hpp>
 #include <smarthub/devices/IDevice.hpp>
 #include <smarthub/devices/types/SwitchDevice.hpp>
@@ -355,4 +356,92 @@ TEST_F(DeviceTest, DeviceTypeRegistryWithConfig) {
     EXPECT_TRUE(sensor->hasCapability(DeviceCapability::Temperature));
     EXPECT_TRUE(sensor->hasCapability(DeviceCapability::Humidity));
     EXPECT_TRUE(sensor->hasCapability(DeviceCapability::Battery));
+}
+
+// ---- What the screens show for a sensor ----
+
+TEST(SensorDisplay, TemperatureSensorHasNoReadingUntilItReports) {
+    TemperatureSensor sensor("t", "T");
+    EXPECT_FALSE(sensor.getState().contains("temperature"));
+    EXPECT_EQ(sensorValueText(sensor.type(), sensor.getState()), "--");
+
+    sensor.setTemperature(0.0);
+    EXPECT_EQ(sensorValueText(sensor.type(), sensor.getState()), "32.0°F") << "0°C is a real reading";
+}
+
+TEST(SensorDisplay, TemperatureWithHumidityIsAMultiSensor) {
+    TemperatureSensor sensor("t", "T", "local", "", true);
+    EXPECT_EQ(sensor.type(), DeviceType::MultiSensor);
+    EXPECT_EQ(sensorValueText(sensor.type(), sensor.getState()), "--");
+
+    sensor.setHumidity(45.4);
+    EXPECT_EQ(sensorValueText(sensor.type(), sensor.getState()), "--°F / 45%");
+
+    sensor.setTemperature(20.0);
+    EXPECT_EQ(sensorValueText(sensor.type(), sensor.getState()), "68.0°F / 45%");
+}
+
+TEST(SensorDisplay, MotionSensorReadsMotion) {
+    MotionSensor sensor("m", "M");
+    EXPECT_EQ(sensorValueText(sensor.type(), sensor.getState()), "Clear");
+
+    sensor.setMotionDetected(true);
+    EXPECT_EQ(sensorValueText(sensor.type(), sensor.getState()), "Motion");
+}
+
+TEST(SensorDisplay, ContactSensorReadsContact) {
+    EXPECT_EQ(sensorValueText(DeviceType::ContactSensor, {{"contact", true}}), "Closed");
+    EXPECT_EQ(sensorValueText(DeviceType::ContactSensor, {{"contact", false}}), "Open");
+    EXPECT_EQ(sensorValueText(DeviceType::ContactSensor, nlohmann::json::object()), "--");
+}
+
+TEST(SensorDisplay, HumiditySensorShowsOnlyHumidity) {
+    EXPECT_EQ(sensorValueText(DeviceType::HumiditySensor, {{"humidity", 65.7}}), "66%");
+}
+
+TEST(SensorDisplay, WrongTypedStateIsNoReading) {
+    EXPECT_EQ(sensorValueText(DeviceType::TemperatureSensor, {{"temperature", "hot"}}), "--");
+    EXPECT_EQ(sensorValueText(DeviceType::MotionSensor, {{"motion", 1}}), "--");
+    EXPECT_EQ(sensorValueText(DeviceType::TemperatureSensor, nullptr), "--");
+}
+
+TEST(SensorDisplay, RoomWithoutSensorsShowsNothing) {
+    std::vector<DevicePtr> devices{std::make_shared<SwitchDevice>("s", "S")};
+    const RoomSensors room = summarizeRoomSensors(devices);
+    EXPECT_FALSE(room.any());
+    EXPECT_EQ(roomClimateText(room), "");
+}
+
+TEST(SensorDisplay, RoomWithSilentSensorShowsNoReading) {
+    std::vector<DevicePtr> devices{std::make_shared<TemperatureSensor>("t", "T")};
+    const RoomSensors room = summarizeRoomSensors(devices);
+    EXPECT_TRUE(room.hasTemperatureSensor);
+    EXPECT_FALSE(room.temperatureF.has_value());
+    EXPECT_EQ(roomClimateText(room), "--°F");
+}
+
+TEST(SensorDisplay, RoomUsesTheSensorWithAReading) {
+    auto silent = std::make_shared<TemperatureSensor>("a", "A");
+    auto reporting = std::make_shared<TemperatureSensor>("b", "B");
+    reporting->setTemperature(20.0);
+    std::vector<DevicePtr> devices{silent, reporting};
+    EXPECT_EQ(roomClimateText(summarizeRoomSensors(devices)), "68°F");
+}
+
+TEST(SensorDisplay, TemperatureSensorReportingHumidityCountsAsBoth) {
+    auto sensor = std::make_shared<TemperatureSensor>("t", "T");
+    sensor->setTemperature(20.0);
+    sensor->setState("humidity", 50.0);  // How a Zigbee report arrives
+    std::vector<DevicePtr> devices{sensor};
+    EXPECT_EQ(roomClimateText(summarizeRoomSensors(devices)), "68°F / 50%");
+}
+
+TEST(SensorDisplay, MotionFromAnySensorInTheRoom) {
+    auto still = std::make_shared<MotionSensor>("a", "A");
+    auto moving = std::make_shared<MotionSensor>("b", "B");
+    moving->setMotionDetected(true);
+    std::vector<DevicePtr> devices{still, moving};
+    const RoomSensors room = summarizeRoomSensors(devices);
+    EXPECT_TRUE(room.hasMotionSensor);
+    EXPECT_TRUE(room.motionDetected);
 }

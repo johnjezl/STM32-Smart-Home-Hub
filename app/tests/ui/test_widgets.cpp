@@ -149,9 +149,9 @@ TEST(RoomDataTest, DefaultValues) {
 
     EXPECT_EQ(data.id, "");
     EXPECT_EQ(data.name, "");
-    EXPECT_FLOAT_EQ(data.temperature, 0.0f);
+    EXPECT_EQ(data.climate, "");
     EXPECT_EQ(data.activeDevices, 0);
-    EXPECT_FALSE(data.hasTemperature);
+    EXPECT_FALSE(data.motionDetected);
 }
 
 TEST(RoomDataTest, Initialization) {
@@ -159,33 +159,15 @@ TEST(RoomDataTest, Initialization) {
     RoomData data;
     data.id = "living_room";
     data.name = "Living Room";
-    data.temperature = 72.5f;
+    data.climate = "72°F";
     data.activeDevices = 3;
-    data.hasTemperature = true;
+    data.motionDetected = true;
 
     EXPECT_EQ(data.id, "living_room");
     EXPECT_EQ(data.name, "Living Room");
-    EXPECT_FLOAT_EQ(data.temperature, 72.5f);
+    EXPECT_EQ(data.climate, "72°F");
     EXPECT_EQ(data.activeDevices, 3);
-    EXPECT_TRUE(data.hasTemperature);
-}
-
-TEST(RoomDataTest, TemperatureRange) {
-    // Test temperature values (Fahrenheit)
-    RoomData cold;
-    cold.temperature = 32.0f;  // Freezing
-    cold.hasTemperature = true;
-    EXPECT_FLOAT_EQ(cold.temperature, 32.0f);
-
-    RoomData hot;
-    hot.temperature = 100.0f;  // Very hot
-    hot.hasTemperature = true;
-    EXPECT_FLOAT_EQ(hot.temperature, 100.0f);
-
-    RoomData normal;
-    normal.temperature = 68.0f;  // Comfortable
-    normal.hasTemperature = true;
-    EXPECT_FLOAT_EQ(normal.temperature, 68.0f);
+    EXPECT_TRUE(data.motionDetected);
 }
 
 TEST(RoomDataTest, DeviceCounts) {

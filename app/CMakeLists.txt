@@ -169,6 +169,7 @@ set(DATABASE_SOURCES
 set(DEVICES_SOURCES
     src/devices/Device.cpp
     src/devices/DeviceManager.cpp
+    src/devices/SensorDisplay.cpp
     src/devices/DeviceTypeRegistry.cpp
     src/devices/Room.cpp
     src/devices/DeviceGroup.cpp

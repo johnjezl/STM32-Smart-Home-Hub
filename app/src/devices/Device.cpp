@@ -64,7 +64,7 @@ bool Device::hasCapability(DeviceCapability cap) const {
 
 nlohmann::json Device::getState() const {
     std::lock_guard<std::mutex> lock(m_mutex);
-    nlohmann::json state;
+    nlohmann::json state = nlohmann::json::object();
     for (const auto& [key, value] : m_state) {
         state[key] = value;
     }

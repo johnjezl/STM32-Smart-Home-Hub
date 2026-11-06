@@ -12,6 +12,7 @@
 #include "smarthub/ui/widgets/Header.hpp"
 #include "smarthub/devices/DeviceManager.hpp"
 #include "smarthub/devices/Device.hpp"
+#include "smarthub/devices/SensorDisplay.hpp"
 #include "smarthub/core/Logger.hpp"
 
 namespace smarthub {
@@ -51,6 +52,8 @@ void RoomDetailScreen::onShow() {
     if (m_titleLabel) {
         lv_label_set_text(m_titleLabel, m_roomName.c_str());
     }
+    refreshSensorPanel();
+    m_sensorUpdateMs = 0;
     refreshDeviceList();
     LOG_DEBUG("RoomDetailScreen shown for room: %s", m_roomName.c_str());
 #endif
@@ -60,8 +63,16 @@ void RoomDetailScreen::onHide() {
     LOG_DEBUG("RoomDetailScreen hidden");
 }
 
-void RoomDetailScreen::onUpdate(uint32_t /* deltaMs */) {
-    // Could refresh device states periodically
+void RoomDetailScreen::onUpdate(uint32_t deltaMs) {
+#ifdef SMARTHUB_ENABLE_LVGL
+    m_sensorUpdateMs += deltaMs;
+    if (m_sensorUpdateMs >= SENSOR_UPDATE_INTERVAL) {
+        refreshSensorPanel();
+        m_sensorUpdateMs = 0;
+    }
+#else
+    (void)deltaMs;
+#endif
 }
 
 void RoomDetailScreen::onDestroy() {
@@ -137,6 +148,10 @@ void RoomDetailScreen::createContent() {
     lv_obj_set_style_border_width(m_content, 0, 0);
     lv_obj_set_style_pad_all(m_content, ThemeManager::SPACING_MD, 0);
     lv_obj_set_scroll_dir(m_content, LV_DIR_VER);
+    lv_obj_set_flex_flow(m_content, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(m_content, ThemeManager::SPACING_MD, 0);
+
+    createSensorPanel();
 
     // Device list container
     m_deviceList = lv_obj_create(m_content);
@@ -152,8 +167,83 @@ void RoomDetailScreen::createContent() {
     m_emptyLabel = lv_label_create(m_content);
     lv_label_set_text(m_emptyLabel, "No devices in this room");
     lv_obj_set_style_text_color(m_emptyLabel, m_theme.textSecondary(), 0);
+    lv_obj_add_flag(m_emptyLabel, LV_OBJ_FLAG_IGNORE_LAYOUT);
     lv_obj_align(m_emptyLabel, LV_ALIGN_CENTER, 0, 0);
     lv_obj_add_flag(m_emptyLabel, LV_OBJ_FLAG_HIDDEN);
+}
+
+void RoomDetailScreen::createSensorPanel() {
+    m_sensorPanel = lv_obj_create(m_content);
+    lv_obj_set_size(m_sensorPanel, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_color(m_sensorPanel, m_theme.surface(), 0);
+    lv_obj_set_style_radius(m_sensorPanel, ThemeManager::CARD_RADIUS, 0);
+    lv_obj_set_style_pad_all(m_sensorPanel, ThemeManager::SPACING_MD, 0);
+    lv_obj_clear_flag(m_sensorPanel, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_flex_flow(m_sensorPanel, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(m_sensorPanel, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+    m_tempSection = createSensorSection("Temperature", &m_tempValueLabel);
+    m_humiditySection = createSensorSection("Humidity", &m_humidityValueLabel);
+    m_motionSection = createSensorSection("Motion", &m_motionValueLabel);
+
+    lv_obj_add_flag(m_sensorPanel, LV_OBJ_FLAG_HIDDEN);
+}
+
+lv_obj_t* RoomDetailScreen::createSensorSection(const char* title, lv_obj_t** valueLabel) {
+    lv_obj_t* section = lv_obj_create(m_sensorPanel);
+    lv_obj_set_size(section, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_opa(section, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(section, 0, 0);
+    lv_obj_set_style_pad_all(section, 0, 0);
+    lv_obj_set_style_pad_row(section, ThemeManager::SPACING_SM, 0);
+    lv_obj_clear_flag(section, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_flex_flow(section, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(section, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+    lv_obj_t* titleLabel = lv_label_create(section);
+    lv_label_set_text(titleLabel, title);
+    lv_obj_set_style_text_color(titleLabel, m_theme.textSecondary(), 0);
+    lv_obj_set_style_text_font(titleLabel, &lv_font_montserrat_12, 0);
+
+    *valueLabel = lv_label_create(section);
+    lv_label_set_text(*valueLabel, "--");
+    lv_obj_set_style_text_font(*valueLabel, &lv_font_montserrat_32, 0);
+    return section;
+}
+
+void RoomDetailScreen::refreshSensorPanel() {
+    if (!m_sensorPanel) return;
+
+    const RoomSensors sensors = summarizeRoomSensors(m_deviceManager.getDevicesByRoom(m_roomId));
+    if (!sensors.any()) {
+        lv_obj_add_flag(m_sensorPanel, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
+    lv_obj_clear_flag(m_sensorPanel, LV_OBJ_FLAG_HIDDEN);
+
+    // The screen is reused from room to room, so each section has to be set both ways
+    auto setSection = [](lv_obj_t* section, bool show) {
+        if (show) {
+            lv_obj_clear_flag(section, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(section, LV_OBJ_FLAG_HIDDEN);
+        }
+    };
+    auto setValue = [this](lv_obj_t* label, const std::string& text, bool hasReading) {
+        lv_label_set_text(label, text.c_str());
+        lv_obj_set_style_text_color(label, hasReading ? m_theme.textPrimary() : m_theme.textSecondary(), 0);
+    };
+
+    setSection(m_tempSection, sensors.hasTemperatureSensor);
+    setValue(m_tempValueLabel, temperatureText(sensors.temperatureF), sensors.temperatureF.has_value());
+
+    setSection(m_humiditySection, sensors.hasHumiditySensor);
+    setValue(m_humidityValueLabel, humidityText(sensors.humidity), sensors.humidity.has_value());
+
+    setSection(m_motionSection, sensors.hasMotionSensor);
+    lv_label_set_text(m_motionValueLabel, sensors.motionDetected ? "Motion" : "Clear");
+    lv_obj_set_style_text_color(m_motionValueLabel,
+                                sensors.motionDetected ? m_theme.warning() : m_theme.textSecondary(), 0);
 }
 
 void RoomDetailScreen::refreshDeviceList() {
@@ -179,13 +269,12 @@ void RoomDetailScreen::refreshDeviceList() {
 
         const std::string typeStr = deviceTypeLabel(device->type());
 
-        bool isOn = false;
+        // Sensors have nothing to switch; their readings are in the panel above
         auto state = device->getState();
-        if (state.contains("on")) {
-            isOn = state["on"].get<bool>();
-        }
+        const bool canSwitch = state.contains("on");
+        const bool isOn = canSwitch && state["on"].get<bool>();
 
-        createDeviceRow(m_deviceList, device->id(), device->name(), typeStr, isOn);
+        createDeviceRow(m_deviceList, device->id(), device->name(), typeStr, canSwitch, isOn);
     }
 }
 
@@ -193,6 +282,7 @@ lv_obj_t* RoomDetailScreen::createDeviceRow(lv_obj_t* parent,
                                              const std::string& deviceId,
                                              const std::string& name,
                                              const std::string& type,
+                                             bool canSwitch,
                                              bool isOn) {
     // Row container
     lv_obj_t* row = lv_obj_create(parent);
@@ -232,6 +322,10 @@ lv_obj_t* RoomDetailScreen::createDeviceRow(lv_obj_t* parent,
     lv_obj_set_style_text_color(typeLabel, m_theme.textSecondary(), 0);
     lv_obj_set_style_text_font(typeLabel, &lv_font_montserrat_12, 0);
     lv_obj_align(typeLabel, LV_ALIGN_LEFT_MID, 40, 10);
+
+    if (!canSwitch) {
+        return row;
+    }
 
     // Power toggle
     lv_obj_t* toggle = lv_switch_create(row);

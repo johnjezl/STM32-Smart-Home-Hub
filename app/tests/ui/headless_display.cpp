@@ -123,7 +123,10 @@ int countVisible(lv_obj_t* root, const lv_obj_class_t* objectClass) {
     return count;
 }
 
-int countText(lv_obj_t* root, const std::string& text) {
+int countText(lv_obj_t* root, const std::string& text, bool visibleOnly) {
+    if (visibleOnly && lv_obj_has_flag(root, LV_OBJ_FLAG_HIDDEN)) {
+        return 0;
+    }
     int count = 0;
     if (lv_obj_check_type(root, &lv_label_class) && text == lv_label_get_text(root)) {
         ++count;
@@ -132,7 +135,7 @@ int countText(lv_obj_t* root, const std::string& text) {
         ++count;
     }
     for (uint32_t i = 0; i < lv_obj_get_child_cnt(root); ++i) {
-        count += countText(lv_obj_get_child(root, static_cast<int32_t>(i)), text);
+        count += countText(lv_obj_get_child(root, static_cast<int32_t>(i)), text, visibleOnly);
     }
     return count;
 }

@@ -450,21 +450,20 @@ class SmartHubApp {
         this.rooms.forEach(room => {
             const roomDevices = [...this.devices, ...this.sensors].filter(d => d.room === room.name);
             const activeCount = roomDevices.filter(d => d.state?.on).length;
-            const tempSensor = roomDevices.find(d => d.type?.includes('temperature'));
-            const temp = tempSensor?.state?.value;
+            const sensors = SensorDisplay.roomSensors(roomDevices);
 
             const card = document.createElement('div');
-            card.className = 'room-card';
+            card.className = 'room-card' + (sensors.motionDetected ? ' motion-active' : '');
             card.innerHTML = `
                 <button class="room-card-menu admin-only" data-room-id="${this.escapeHtml(room.id)}">⋮</button>
                 <div class="room-header">
                     <div class="room-name">${this.escapeHtml(room.name)}</div>
-                    <div class="room-temp">${temp ? `${this.escapeHtml(temp)}°` : ''}</div>
+                    <div class="room-climate">${this.escapeHtml(SensorDisplay.roomClimateText(sensors))}</div>
                 </div>
                 <div class="room-devices">
                     ${roomDevices.slice(0, 6).map(d => `
                         <div class="room-device ${d.state?.on ? 'on' : ''}">
-                            ${this.getDeviceIcon(d.type)}
+                            ${this.isSensor(d.type) ? this.getSensorIcon(d.type) : this.getDeviceIcon(d.type)}
                             <span>${this.escapeHtml(d.name.split(' ').slice(-1)[0])}</span>
                         </div>
                     `).join('')}
@@ -478,8 +477,94 @@ class SmartHubApp {
                 this.openEditRoomModal(room);
             });
 
+            card.addEventListener('click', () => this.openRoomDetailModal(room));
+
             container.appendChild(card);
         });
+
+        // Keep an open room detail current as readings arrive
+        if (this.detailRoomId) {
+            const room = this.rooms.find(r => r.id === this.detailRoomId);
+            if (room) {
+                this.renderRoomDetail(room);
+            }
+        }
+    }
+
+    openRoomDetailModal(room) {
+        this.detailRoomId = room.id;
+        this.renderRoomDetail(room);
+        this.openModal('room-detail-modal');
+    }
+
+    renderRoomDetail(room) {
+        document.getElementById('room-detail-name').textContent = room.name;
+
+        const roomDevices = [...this.devices, ...this.sensors].filter(d => d.room === room.name);
+        const sensors = SensorDisplay.roomSensors(roomDevices);
+
+        document.getElementById('room-sensor-panel').classList.toggle('hidden',
+            !sensors.hasTemperatureSensor && !sensors.hasHumiditySensor && !sensors.hasMotionSensor);
+
+        document.getElementById('room-temp-section').classList.toggle('hidden', !sensors.hasTemperatureSensor);
+        document.getElementById('room-detail-temp').textContent = SensorDisplay.temperatureText(sensors.temperatureF);
+
+        document.getElementById('room-humidity-section').classList.toggle('hidden', !sensors.hasHumiditySensor);
+        document.getElementById('room-detail-humidity').textContent = SensorDisplay.humidityText(sensors.humidity);
+
+        document.getElementById('room-motion-section').classList.toggle('hidden', !sensors.hasMotionSensor);
+        document.getElementById('room-motion-indicator').classList.toggle('active', sensors.motionDetected);
+        const motionLabel = document.getElementById('room-motion-label');
+        motionLabel.textContent = sensors.motionDetected ? 'Motion' : 'Clear';
+        motionLabel.classList.toggle('active', sensors.motionDetected);
+
+        document.getElementById('room-empty-devices').classList.toggle('hidden', roomDevices.length > 0);
+
+        const list = document.getElementById('room-devices-list');
+        list.innerHTML = '';
+        roomDevices.forEach(device => {
+            list.appendChild(this.isSensor(device.type) ? this.roomSensorRow(device) : this.roomDeviceRow(device));
+        });
+    }
+
+    roomDeviceRow(device) {
+        const isOn = device.state?.on || false;
+        const row = document.createElement('div');
+        row.className = 'room-device-row';
+        row.innerHTML = `
+            <div class="room-device-info">
+                <div class="room-device-icon ${isOn ? 'on' : ''}">${this.getDeviceIcon(device.type)}</div>
+                <div>
+                    <div class="room-device-name">${this.escapeHtml(device.name)}</div>
+                    <div class="room-device-type">${this.escapeHtml(device.type)}</div>
+                </div>
+            </div>
+            <label class="toggle">
+                <input type="checkbox" ${isOn ? 'checked' : ''}>
+                <span class="toggle-slider"></span>
+            </label>
+        `;
+        row.querySelector('.toggle input').addEventListener('change', (e) => {
+            this.toggleDevice(device.id, e.target.checked);
+        });
+        return row;
+    }
+
+    roomSensorRow(sensor) {
+        const value = SensorDisplay.sensorValue(sensor);
+        const row = document.createElement('div');
+        row.className = 'room-device-row';
+        row.innerHTML = `
+            <div class="room-device-info">
+                <div class="room-device-icon">${this.getSensorIcon(sensor.type)}</div>
+                <div>
+                    <div class="room-device-name">${this.escapeHtml(sensor.name)}</div>
+                    <div class="room-device-type">${this.escapeHtml(sensor.type)}</div>
+                </div>
+            </div>
+            <div class="room-sensor-value">${this.escapeHtml(value.text)}</div>
+        `;
+        return row;
     }
 
     renderDevices() {
@@ -574,8 +659,7 @@ class SmartHubApp {
             const card = document.createElement('div');
             card.className = 'sensor-card';
 
-            const value = sensor.state?.value;
-            const { displayValue, unit, colorClass } = this.formatSensorValue(sensor.type, value);
+            const { text, colorClass } = SensorDisplay.sensorValue(sensor);
 
             card.innerHTML = `
                 <div class="sensor-header">
@@ -585,7 +669,7 @@ class SmartHubApp {
                     </div>
                     <div>${this.getSensorIcon(sensor.type)}</div>
                 </div>
-                <div class="sensor-value ${colorClass}">${this.escapeHtml(displayValue)}${unit}</div>
+                <div class="sensor-value ${colorClass}">${this.escapeHtml(text)}</div>
                 <div class="sensor-updated">Updated just now</div>
             `;
 
@@ -699,6 +783,7 @@ class SmartHubApp {
     }
 
     closeAllModals() {
+        this.detailRoomId = null;
         document.getElementById('modal-overlay').classList.add('hidden');
         document.querySelectorAll('.modal').forEach(modal => {
             modal.classList.add('hidden');
@@ -1494,33 +1579,12 @@ class SmartHubApp {
     }
 
     getSensorIcon(type) {
-        if (type.includes('temperature')) return '🌡️';
+        if (type.includes('temperature') || type.includes('multi')) return '🌡️';
         if (type.includes('humidity')) return '💧';
         if (type.includes('motion')) return '👁️';
         if (type.includes('contact')) return '🚪';
         if (type.includes('light')) return '☀️';
         return '📊';
-    }
-
-    formatSensorValue(type, value) {
-        if (value === undefined || value === null) {
-            return { displayValue: '--', unit: '', colorClass: '' };
-        }
-
-        if (type.includes('temperature')) {
-            return { displayValue: Number(value).toFixed(1), unit: '°F', colorClass: 'temperature' };
-        }
-        if (type.includes('humidity')) {
-            return { displayValue: Math.round(value), unit: '%', colorClass: 'humidity' };
-        }
-        if (type.includes('motion')) {
-            return { displayValue: value ? 'Motion' : 'Clear', unit: '', colorClass: 'motion' };
-        }
-        if (type.includes('contact')) {
-            return { displayValue: value ? 'Closed' : 'Open', unit: '', colorClass: '' };
-        }
-
-        return { displayValue: value, unit: '', colorClass: '' };
     }
 
     switchTab(tabName) {

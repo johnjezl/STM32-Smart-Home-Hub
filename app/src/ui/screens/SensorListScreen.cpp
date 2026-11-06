@@ -10,6 +10,7 @@
 #include "smarthub/ui/widgets/NavBar.hpp"
 #include "smarthub/devices/DeviceManager.hpp"
 #include "smarthub/devices/Device.hpp"
+#include "smarthub/devices/SensorDisplay.hpp"
 #include "smarthub/core/Logger.hpp"
 
 namespace smarthub {
@@ -199,23 +200,7 @@ void SensorListScreen::createSensorCards() {
         lv_obj_set_style_text_color(valueLabel, m_theme.textPrimary(), 0);
         lv_obj_align(valueLabel, LV_ALIGN_CENTER, 0, 10);
 
-        // Get current value
-        auto value = device->getProperty("value");
-        if (value.is_number()) {
-            char buf[32];
-            if (unit == "°F") {
-                snprintf(buf, sizeof(buf), "%.1f%s", value.get<float>(), unit.c_str());
-            } else if (unit == "%") {
-                snprintf(buf, sizeof(buf), "%.0f%s", value.get<float>(), unit.c_str());
-            } else {
-                snprintf(buf, sizeof(buf), "%.1f", value.get<float>());
-            }
-            lv_label_set_text(valueLabel, buf);
-        } else if (value.is_boolean()) {
-            lv_label_set_text(valueLabel, value.get<bool>() ? "Active" : "Inactive");
-        } else {
-            lv_label_set_text(valueLabel, "--");
-        }
+        lv_label_set_text(valueLabel, sensorValueText(device->type(), device->getState()).c_str());
 
         // Store reference
         SensorCard sc;
@@ -238,28 +223,7 @@ void SensorListScreen::refreshSensorValues() {
         auto device = m_deviceManager.getDevice(sc.id);
         if (!device || !sc.valueLabel) continue;
 
-        std::string unit;
-        switch (device->type()) {
-            case DeviceType::TemperatureSensor:
-            case DeviceType::MultiSensor: unit = "°F"; break;
-            case DeviceType::HumiditySensor: unit = "%"; break;
-            default: break;
-        }
-
-        auto value = device->getProperty("value");
-        if (value.is_number()) {
-            char buf[32];
-            if (unit == "°F") {
-                snprintf(buf, sizeof(buf), "%.1f%s", value.get<float>(), unit.c_str());
-            } else if (unit == "%") {
-                snprintf(buf, sizeof(buf), "%.0f%s", value.get<float>(), unit.c_str());
-            } else {
-                snprintf(buf, sizeof(buf), "%.1f", value.get<float>());
-            }
-            lv_label_set_text(sc.valueLabel, buf);
-        } else if (value.is_boolean()) {
-            lv_label_set_text(sc.valueLabel, value.get<bool>() ? "Active" : "Inactive");
-        }
+        lv_label_set_text(sc.valueLabel, sensorValueText(device->type(), device->getState()).c_str());
     }
 }
 
