@@ -15,6 +15,7 @@
 #include <deque>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <vector>
 #include <cstdint>
 
@@ -248,6 +249,7 @@ private:
         std::string username;
         std::string password;
         std::string clientIp;
+        bool closeAfterReply = false;
     };
     struct PasswordResult {
         unsigned long connectionId = 0;
@@ -255,9 +257,10 @@ private:
         bool isLogin = false;
         std::optional<security::User> user;
         int status = 0;  // For a response without a session
+        bool closeAfterReply = false;
         std::string error;
     };
-    bool queuePasswordJob(struct mg_connection* c, PasswordJob job);
+    void queuePasswordJob(struct mg_connection* c, PasswordJob job);
     void passwordWorkerLoop();
     PasswordResult runPasswordJob(const PasswordJob& job);
     void sendPasswordResults();
@@ -266,6 +269,7 @@ private:
     std::mutex m_passwordMutex;
     std::condition_variable m_passwordWake;
     std::deque<PasswordJob> m_passwordJobs;
+    std::set<std::string> m_passwordJobsByIp;  // Queued, or waiting for their failure to be counted
     std::vector<PasswordResult> m_passwordResults;
     bool m_passwordWorkerStopping = false;
     std::atomic<bool> m_running{false};

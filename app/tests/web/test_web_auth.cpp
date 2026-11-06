@@ -21,6 +21,11 @@
 
 #include <nlohmann/json.hpp>
 
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
+
 #include <array>
 #include <chrono>
 #include <cstdio>
@@ -717,7 +722,7 @@ TEST_F(WebAuthTest, OnlyOneOfTwoSetupsAtOnceSucceeds) {
     EXPECT_EQ(created, 1);
 }
 
-TEST_F(WebAuthTest, ManyLoginsAtOnceAllGetAnAnswer) {
+TEST_F(WebAuthTest, OnlyOneLoginAtATimeFromAnIp) {
     startApp();
     setUpAdmin();
 
@@ -738,25 +743,77 @@ TEST_F(WebAuthTest, ManyLoginsAtOnceAllGetAnAnswer) {
         EXPECT_TRUE(status == 200 || status == 503) << status;
     }
     EXPECT_GE(succeeded, 1);
+
+    // And the next one isn't held up by those
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    EXPECT_EQ(login(kAdminName, kAdminPassword).status, 200);
 }
 
-TEST_F(WebAuthTest, ClientHangingUpDuringALoginStillCountsAndLeavesTheServerWorking) {
+TEST_F(WebAuthTest, SeveralGuessesAtOnceCantGetPastTheLockout) {
     startApp("security:\n  login_max_failures: 2\n  login_failure_window_seconds: 300\n");
     setUpAdmin();
 
-    // Gone long before the hash finishes
-    const std::string hangUp =
-        "curl -s --max-time 0.001 -o /dev/null -X POST -H 'Content-Type: application/json' "
-        "--data-binary " + shellQuote(credentials(kAdminName, "Wrong-Password-1")) +
-        " " + shellQuote("http://127.0.0.1:" + std::to_string(s_port) + "/api/auth/login");
-    for (int attempt = 0; attempt < 3; ++attempt) {
-        shellOutput(hangUp);
-        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    const std::string wrong = credentials(kAdminName, "Wrong-Password-1");
+    int hashed = 0;
+    for (int round = 0; round < 10; ++round) {
+        std::vector<int> statuses(4);
+        std::vector<std::thread> clients;
+        for (size_t i = 0; i < statuses.size(); ++i) {
+            clients.emplace_back([&, i] { statuses[i] = postStatus("/api/auth/login", wrong); });
+        }
+        for (auto& client : clients) {
+            client.join();
+        }
+        for (const int status : statuses) {
+            hashed += status == 401 ? 1 : 0;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+
+    EXPECT_LE(hashed, 2);
+    EXPECT_EQ(login(kAdminName, kAdminPassword).status, 429);
+}
+
+TEST_F(WebAuthTest, ClientHangingUpDuringALoginStillCounts) {
+    startApp("security:\n  login_max_failures: 2\n  login_failure_window_seconds: 300\n");
+    setUpAdmin();
+
+    const std::string body = credentials(kAdminName, "Wrong-Password-1");
+    const std::string message = "POST /api/auth/login HTTP/1.1\r\nHost: 127.0.0.1\r\n"
+                                "Content-Type: application/json\r\nContent-Length: " +
+                                std::to_string(body.size()) + "\r\n\r\n" + body;
+    for (int attempt = 0; attempt < 2; ++attempt) {
+        // Sends the whole request, then goes without waiting for the answer
+        const int fd = socket(AF_INET, SOCK_STREAM, 0);
+        ASSERT_GE(fd, 0);
+        sockaddr_in address{};
+        address.sin_family = AF_INET;
+        address.sin_port = htons(static_cast<uint16_t>(s_port));
+        address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        ASSERT_EQ(connect(fd, reinterpret_cast<sockaddr*>(&address), sizeof(address)), 0);
+        ASSERT_EQ(send(fd, message.data(), message.size(), 0), static_cast<ssize_t>(message.size()));
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        close(fd);
+        std::this_thread::sleep_for(std::chrono::seconds(1));  // The hash finishes
     }
 
     EXPECT_EQ(request("GET", "/api/setup/status").status, 200);
-    const int status = login(kAdminName, "Wrong-Password-1").status;
-    EXPECT_TRUE(status == 401 || status == 429) << status;
+    EXPECT_EQ(login(kAdminName, kAdminPassword).status, 429);
+}
+
+TEST_F(WebAuthTest, LoginReplyHonorsConnectionClose) {
+    startApp();
+    setUpAdmin();
+
+    // curl would fail its time limit if the server left this connection open, because
+    // --no-keepalive doesn't apply here: it reads until the server closes
+    const std::string status = shellOutput(
+        "curl -s --max-time 10 --http1.0 -o /dev/null -w '%{http_code} %{time_total}' -X POST "
+        "-H 'Connection: close' -H 'Content-Type: application/json' --data-binary " +
+        shellQuote(credentials(kAdminName, kAdminPassword)) + " " +
+        shellQuote("http://127.0.0.1:" + std::to_string(s_port) + "/api/auth/login"));
+    EXPECT_EQ(status.substr(0, 3), "200") << status;
+    EXPECT_LT(std::stod(status.substr(4)), 8.0) << status;
 }
 
 TEST_F(WebAuthTest, OnlyTheExactSessionCookieIsAccepted) {
