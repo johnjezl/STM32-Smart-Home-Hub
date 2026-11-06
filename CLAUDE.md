@@ -1,48 +1,44 @@
 # Claude Code Project Notes
 
-## Serial Console Access
+## Lab Operations (labctl)
 
-### Important: Cygwin Environment Setup
+Hardware interaction with the STM32MP157F-DK2 is managed through **labctl**, a centralized lab management system available as an MCP server, configured in this repo's `.mcp.json`. It provides tools for power control, health checks, and SBC management.
 
-Claude Code runs in Git Bash, which has different mount points than Cygwin. When running Cygwin bash from Claude Code, the inherited Git Bash environment causes `/usr/bin` to point to Git Bash's binaries instead of Cygwin's. This makes Cygwin-installed programs like `picocom` invisible.
+**Only use labctl through its MCP tools. Never run the `labctl` CLI**, not even for read-only commands. If the tools aren't available in a session, get the MCP server loaded instead of falling back to the CLI.
 
-**Solution:** Always use `env -i` to clear the inherited environment before running Cygwin:
+The SBC is registered as **`stm32mp157f-dk2`** in labctl.
 
+### Power Management
+
+Power control is the primary lab operation for this project. Use the labctl MCP tools:
+
+| Operation | MCP Tool | Parameters |
+|-----------|----------|------------|
+| Power on | `power_on` | `sbc_name: "stm32mp157f-dk2"` |
+| Power off | `power_off` | `sbc_name: "stm32mp157f-dk2"` |
+| Power cycle | `power_cycle` | `sbc_name: "stm32mp157f-dk2"` |
+| Check health | `run_health_check` | `sbc_name: "stm32mp157f-dk2"` |
+
+The board is powered via a Kasa smart plug (HS300 strip, index 5) at `192.168.4.140`.
+
+**Prefer software reboot when possible:**
 ```bash
-# CORRECT: Clean environment - picocom will be found
-C:/cygwin64/bin/env.exe -i HOME=/tmp PATH=/usr/bin:/bin C:/cygwin64/bin/bash.exe --login -c "picocom -b 115200 /dev/ttyS7"
-
-# WRONG: Inherits Git Bash mounts - picocom not found
-C:/cygwin64/bin/bash.exe --login -c "picocom -b 115200 /dev/ttyS7"
+ssh root@smarthub.local reboot
 ```
 
-**Verification:** Check which `/usr/bin` is active:
+Use power cycle only when SSH is unresponsive or the system is hung.
+
+### Network Access
 
 ```bash
-C:/cygwin64/bin/env.exe -i PATH=/usr/bin:/bin C:/cygwin64/bin/bash.exe -c "mount | grep usr"
-# Should show: C:/cygwin64/bin on /usr/bin
-# NOT: C:/Program Files/Git/usr/bin on /usr/bin
+ssh root@smarthub.local          # mDNS (preferred)
+ssh root@192.168.4.99            # Ethernet
+ssh root@192.168.4.67            # WiFi
 ```
 
-### Serial Port Mapping
+### Serial and SDWire
 
-| Cygwin Device | Windows Port | Connection |
-|---------------|--------------|------------|
-| /dev/ttyS7 | COM8 | ST-LINK serial port |
-
-### Interactive Serial Session
-
-To open an interactive serial console to the STM32MP157F-DK2:
-
-```bash
-C:/cygwin64/bin/env.exe -i HOME=/tmp PATH=/usr/bin:/bin C:/cygwin64/bin/bash.exe --login -c "picocom -b 115200 /dev/ttyS7"
-```
-
-### Avoid Using `cat` with TTY Devices
-
-**Never use `cat` to read from tty devices** (e.g., `/dev/ttyS7`, `/dev/ttyUSB0`). The `cat` command will block indefinitely waiting for EOF, which never comes from a serial port. This causes Claude Code to hang.
-
-Use `picocom` or other proper terminal emulators instead for interactive sessions.
+Serial console and SDWire are **not currently assigned** for this SBC in labctl. If needed in the future, they can be added via `labctl port assign` and `labctl sdwire assign`. See the [labctl documentation](https://github.com/johnjezl/Embedded-Lab-Control) for details.
 
 ---
 
@@ -71,12 +67,14 @@ ninja
 ### Deploying to Device
 
 ```bash
-# Transfer binary (use cat pipe since scp may fail)
-cat app/build-arm/smarthub | ssh root@192.168.4.102 "cat > /usr/bin/smarthub && chmod +x /usr/bin/smarthub"
+# Transfer binary
+cat app/build-arm/smarthub | ssh root@smarthub.local "cat > /usr/bin/smarthub && chmod +x /usr/bin/smarthub"
 
 # Restart the application
-ssh root@192.168.4.102 "killall smarthub; nohup smarthub > /var/log/smarthub.log 2>&1 &"
+ssh root@smarthub.local "killall smarthub; nohup smarthub > /var/log/smarthub.log 2>&1 &"
 ```
+
+If the board is unresponsive, use the `power_cycle` MCP tool with `sbc_name: "stm32mp157f-dk2"` before deploying.
 
 ---
 
@@ -119,9 +117,9 @@ Use emoji markers for task status:
 
 Every PR gets a code review **before** it merges, and fast-forwarding `main` counts as merging.
 
-1. Work on a branch, and get CI green on it.
-2. Run a code review of the branch.
-3. Address the findings, then review the combined changes again.
-4. Merge only after that, when the maintainer asks.
+1. Work on a branch, and validate on the board (`stm32mp157f-dk2`). Runs on an x86-64 host don't count as validation.
+2. Open the PR, then run a code review of it.
+3. Address all actionable findings, and review again. Repeat until the review is clean.
+4. Merge, then go on to the next ticket. Stop only for a roadblock, or if the loop runs too long.
 
 Don't treat green CI as approval to merge.

@@ -57,6 +57,10 @@
       "Bash(git reset --hard)",
       "Bash(git clean -fd)"
     ]
+  },
+  "skills": ["/opt/labctl/skills/deploy-and-test.md"],
+  "env": {
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
   }
 }
 
