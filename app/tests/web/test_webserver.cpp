@@ -8,6 +8,7 @@
 #include <smarthub/web/WebServer.hpp>
 #include <smarthub/core/EventBus.hpp>
 #include <smarthub/devices/DeviceManager.hpp>
+#include <smarthub/devices/types/SwitchDevice.hpp>
 #include <smarthub/devices/Device.hpp>
 #include <smarthub/devices/types/DimmerDevice.hpp>
 #include <smarthub/database/Database.hpp>
@@ -791,7 +792,7 @@ protected:
         WebServerTest::SetUp();
 
         // Add a test device for automations
-        auto device = std::make_shared<smarthub::Device>("test-light", "Test Light", smarthub::DeviceType::Light);
+        auto device = std::make_shared<smarthub::SwitchDevice>("test-light", "Test Light");
         deviceManager->addDevice(device);
 
         // Set up automation manager
@@ -814,7 +815,7 @@ TEST_F(WebServerAutomationApiTest, CreateAutomation_DeviceStateTrigger) {
             "type": "device_state",
             "deviceId": "test-light",
             "property": "on",
-            "value": true
+            "to_value": true
         },
         "actions": [
             {"deviceId": "test-light", "property": "on", "value": true}
@@ -1012,7 +1013,7 @@ TEST_F(WebServerAutomationApiTest, DeleteAutomation) {
 
 TEST_F(WebServerAutomationApiTest, CreateAutomation_MultipleActions) {
     // Add another device
-    auto device2 = std::make_shared<smarthub::Device>("test-switch", "Test Switch", smarthub::DeviceType::Switch);
+    auto device2 = std::make_shared<smarthub::SwitchDevice>("test-switch", "Test Switch");
     deviceManager->addDevice(device2);
 
     std::string json = R"({
@@ -1127,7 +1128,7 @@ TEST_F(WebServerIntegrationTest, FullRoomDeviceWorkflow) {
 
 TEST_F(WebServerIntegrationTest, FullAutomationWorkflow) {
     // 1. Create a device
-    auto device = std::make_shared<smarthub::Device>("living-light", "Living Room Light", smarthub::DeviceType::Light);
+    auto device = std::make_shared<smarthub::SwitchDevice>("living-light", "Living Room Light");
     deviceManager->addDevice(device);
 
     // 2. Create an automation

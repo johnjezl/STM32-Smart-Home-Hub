@@ -748,6 +748,17 @@ TEST_F(WebAuthTest, AutomationsThatCouldNeverRunAreRejected) {
         {{"name", "Bad action type"},
          {"trigger", {{"type", "time"}, {"hour", 8}, {"minute", 0}}},
          {"actions", {{{"type", "bogus"}, {"deviceId", "x"}}}}},
+        {{"name", "Bad id"}, {"id", "a/b"},
+         {"trigger", {{"type", "time"}, {"hour", 8}, {"minute", 0}}},
+         {"actions", {action}}},
+        {{"name", "Old value field"},
+         {"trigger", {{"type", "device_state"}, {"device_id", "s"}, {"property", "on"},
+                      {"value", true}}},
+         {"actions", {action}}},
+        {{"name", "Overflowing delays"},
+         {"trigger", {{"type", "time"}, {"hour", 8}, {"minute", 0}}},
+         {"actions", {{{"type", "delay"}, {"delayMs", 1}},
+                      {{"type", "delay"}, {"delayMs", 2147483647}}}}},
         {{"name", "Long delay"},
          {"trigger", {{"type", "time"}, {"hour", 8}, {"minute", 0}}},
          {"actions", {{{"type", "delay"}, {"delayMs", 60001}}}}},
@@ -778,6 +789,33 @@ TEST_F(WebAuthTest, AutomationsThatCouldNeverRunAreRejected) {
         EXPECT_EQ(request("POST", "/api/automations", options).status, 400) << body.dump();
     }
     EXPECT_EQ(request("GET", "/api/automations", admin).json().size(), 0u);
+
+    // Conditions nested too deeply
+    nlohmann::json deep = {{"leaf", {{"device_id", "x"}, {"property", "on"}, {"op", "eq"},
+                                     {"value", true}}}};
+    for (int i = 0; i < 20; ++i) {
+        deep = {{"is_group", true}, {"children", {deep}}};
+    }
+    RequestOptions nested = admin;
+    nested.body = nlohmann::json{{"name", "Deep"},
+                                 {"trigger", {{"type", "time"}, {"hour", 8}, {"minute", 0}}},
+                                 {"condition", deep},
+                                 {"actions", {action}}}.dump();
+    EXPECT_EQ(request("POST", "/api/automations", nested).status, 400);
+
+    // An action on an existing device has to be something a client could do
+    RequestOptions sensor = admin;
+    sensor.body = R"({"type":"temperature_sensor","name":"Hall","protocol":"local"})";
+    const Response createdSensor = request("POST", "/api/devices", sensor);
+    ASSERT_EQ(createdSensor.status, 201) << createdSensor.body;
+    RequestOptions fake = admin;
+    fake.body = nlohmann::json{
+        {"name", "Fake reading"},
+        {"trigger", {{"type", "time"}, {"hour", 8}, {"minute", 0}}},
+        {"actions", {{{"deviceId", createdSensor.json()["id"]}, {"property", "temperature"},
+                      {"value", 500}}}},
+    }.dump();
+    EXPECT_EQ(request("POST", "/api/automations", fake).status, 400);
 
     // A problem echoing what the client sent is still valid JSON
     RequestOptions quoted = admin;

@@ -417,6 +417,44 @@ bool canControl(const DevicePtr& device, const std::string& property) {
 
 } // namespace
 
+// What the API can change on a device. Anything else on a device's state is
+// reported by the device: a client writing it could fake a sensor reading, set
+// off automations, or store a string the dashboard then has to display.
+bool DeviceManager::isControllableProperty(const IDevice& device, const std::string& property,
+                            const nlohmann::json& value) {
+    struct Control {
+        const char* property;
+        DeviceCapability capability;
+        double min;
+        double max;
+    };
+    static const Control kNumeric[] = {
+        {"brightness", DeviceCapability::Brightness, 0, 100},
+        {"colorTemp", DeviceCapability::ColorTemperature, 1000, 10000},  // kelvin
+        {"color_h", DeviceCapability::ColorHSV, 0, 360},
+        {"color_s", DeviceCapability::ColorHSV, 0, 100},
+        {"color_v", DeviceCapability::ColorHSV, 0, 100},
+        {"color_r", DeviceCapability::ColorRGB, 0, 255},
+        {"color_g", DeviceCapability::ColorRGB, 0, 255},
+        {"color_b", DeviceCapability::ColorRGB, 0, 255},
+    };
+
+    if (property == "on") {
+        return value.is_boolean() && device.hasCapability(DeviceCapability::OnOff);
+    }
+    if (!value.is_number()) {
+        return false;
+    }
+    for (const Control& control : kNumeric) {
+        if (property == control.property) {
+            const double number = value.get<double>();
+            return number >= control.min && number <= control.max &&
+                   device.hasCapability(control.capability);
+        }
+    }
+    return false;
+}
+
 bool DeviceManager::setDeviceState(const std::string& deviceId, const std::string& property,
                                    const nlohmann::json& value) {
     if (!isValidStateValue(property, value)) {

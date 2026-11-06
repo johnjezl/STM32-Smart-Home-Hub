@@ -185,6 +185,13 @@ public:
     // State management
 
     /**
+     * Whether a client or automation may set this property to this value.
+     * Other properties are reported by the device.
+     */
+    static bool isControllableProperty(const IDevice& device, const std::string& property,
+                                       const nlohmann::json& value);
+
+    /**
      * Set device state (routes through protocol handler)
      */
     bool setDeviceState(const std::string& deviceId, const std::string& property,

@@ -9,6 +9,7 @@
 
 #include <smarthub/devices/types/DimmerDevice.hpp>
 #include <smarthub/devices/types/SwitchDevice.hpp>
+#include <smarthub/devices/types/TemperatureSensor.hpp>
 #include <smarthub/automation/Automation.hpp>
 #include <smarthub/automation/AutomationManager.hpp>
 #include <smarthub/devices/DeviceManager.hpp>
@@ -352,6 +353,71 @@ TEST_F(AutomationManagerTest, ThresholdTriggerUsesTheNewValue) {
 
     ASSERT_TRUE(deviceManager->setDeviceState("source", "brightness", 60));
     EXPECT_EQ(light->getProperty("on"), true);
+}
+
+TEST_F(AutomationManagerTest, EachIntervalTriggerKeepsItsOwnTimer) {
+    automationManager->initialize();
+    auto light = std::make_shared<SwitchDevice>("light_001", "Light");
+    deviceManager->addDevice(light);
+
+    Trigger hourly;
+    hourly.type = TriggerType::TimeInterval;
+    hourly.intervalMinutes = 60;
+    Automation automation = lightOnWhen(hourly);
+    Trigger frequent;
+    frequent.type = TriggerType::TimeInterval;
+    frequent.intervalMinutes = 5;
+    automation.triggers.push_back(frequent);
+    ASSERT_TRUE(automationManager->addAutomation(automation));
+
+    const uint64_t minute = 60 * 1000;
+    automationManager->poll(1);
+    for (uint64_t elapsed = 5; elapsed < 60; elapsed += 5) {
+        automationManager->poll(1 + elapsed * minute);
+    }
+    ASSERT_TRUE(deviceManager->setDeviceState("light_001", "on", false));
+
+    // Hourly is due now, and fires even though the 5-minute trigger fired recently
+    automationManager->poll(1 + 60 * minute);
+    EXPECT_EQ(light->getProperty("on"), true);
+    ASSERT_TRUE(deviceManager->setDeviceState("light_001", "on", false));
+
+    // The 5-minute trigger is due too, and hasn't been reset by the hourly one
+    automationManager->poll(2 + 60 * minute);
+    EXPECT_EQ(light->getProperty("on"), true);
+}
+
+TEST_F(AutomationManagerTest, ActionCantSetAReportedProperty) {
+    automationManager->initialize();
+    auto sensor = std::make_shared<TemperatureSensor>("sensor", "Sensor");
+    auto source = std::make_shared<SwitchDevice>("source", "Source");
+    deviceManager->addDevice(sensor);
+    deviceManager->addDevice(source);
+    const nlohmann::json before = sensor->getProperty("temperature");
+
+    Trigger trigger;
+    trigger.type = TriggerType::DeviceState;
+    trigger.deviceId = "source";
+    trigger.property = "on";
+    Automation automation = lightOnWhen(trigger);
+    automation.actions[0].deviceId = "sensor";
+    automation.actions[0].property = "temperature";
+    automation.actions[0].value = 500;
+    ASSERT_TRUE(automationManager->addAutomation(automation));
+
+    ASSERT_TRUE(deviceManager->setDeviceState("source", "on", true));
+    EXPECT_EQ(sensor->getProperty("temperature"), before);
+}
+
+TEST_F(AutomationManagerTest, ReturnedAutomationsAreCopies) {
+    automationManager->initialize();
+    ASSERT_TRUE(automationManager->addAutomation(createTestAutomation()));
+    const std::string id = createTestAutomation().id;
+
+    automationManager->getAutomation(id)->name = "Changed";
+    automationManager->getAllAutomations()[0]->name = "Changed";
+
+    EXPECT_NE(automationManager->getAutomation(id)->name, "Changed");
 }
 
 TEST(AutomationTest, JsonRoundTripKeepsEveryPart) {

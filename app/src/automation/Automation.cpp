@@ -6,6 +6,8 @@
 
 #include "smarthub/automation/Automation.hpp"
 
+#include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <string>
 #include <vector>
@@ -289,6 +291,9 @@ std::string validateTrigger(const nlohmann::json& trigger) {
 
     const std::string type = trigger.value("type", "device_state");
     if (type == "device_state" || type == "sensor_threshold") {
+        if (trigger.contains("value")) {
+            return "a trigger compares with to_value, from_value or threshold, not value";
+        }
         if (trigger.value("deviceId", trigger.value("device_id", "")).empty()) {
             return type + " trigger needs a device_id";
         }
@@ -345,14 +350,19 @@ std::string validateAction(const nlohmann::json& action) {
         }
     } else if (type == "delay") {
         const int delayMs = action.value("delayMs", action.value("delay_ms", 0));
-        if (delayMs <= 0) return "delay action needs a positive delayMs";
+        if (delayMs <= 0 || delayMs > kMaxTotalDelayMs) {
+            return "delay action needs a delayMs from 1 to " + std::to_string(kMaxTotalDelayMs);
+        }
     } else {
         return "unknown action type: " + type;
     }
     return "";
 }
 
-std::string validateCondition(const nlohmann::json& condition) {
+std::string validateCondition(const nlohmann::json& condition, int depth = 0) {
+    // Conditions are handled recursively, so a request can't be allowed to nest them deeply
+    constexpr int kMaxConditionDepth = 8;
+    if (depth > kMaxConditionDepth) return "conditions are nested too deeply";
     if (!condition.is_object()) return "a condition must be an object";
 
     if (condition.value("is_group", false)) {
@@ -362,7 +372,7 @@ std::string validateCondition(const nlohmann::json& condition) {
             return "a condition group needs children";
         }
         for (const auto& child : condition["children"]) {
-            const std::string problem = validateCondition(child);
+            const std::string problem = validateCondition(child, depth + 1);
             if (!problem.empty()) return problem;
         }
         return "";
@@ -398,6 +408,16 @@ nlohmann::json triggerList(const nlohmann::json& j) {
 
 std::string Automation::validateJson(const nlohmann::json& j) {
     if (j.value("name", "").empty()) return "name is required";
+
+    // The API addresses automations by id in the URL path
+    const std::string id = j.value("id", "");
+    constexpr size_t kMaxIdLength = 64;
+    if (id.size() > kMaxIdLength ||
+        !std::all_of(id.begin(), id.end(), [](unsigned char ch) {
+            return std::isalnum(ch) || ch == '_' || ch == '-';
+        })) {
+        return "id can only use letters, digits, _ and -, up to 64 characters";
+    }
 
     if (j.contains("trigger") && j.contains("triggers")) {
         return "send either trigger or triggers, not both";
