@@ -236,7 +236,7 @@ std::vector<Credential> CredentialStore::list(const std::string& category) {
     }
     sql += " ORDER BY name";
 
-    auto stmt = m_db.prepare(sql.c_str());
+    auto stmt = m_db.prepare(sql);
     if (!stmt || !stmt->isValid()) {
         return credentials;
     }
@@ -265,7 +265,7 @@ int CredentialStore::count(const std::string& category) {
         sql += " WHERE category = ?";
     }
 
-    auto stmt = m_db.prepare(sql.c_str());
+    auto stmt = m_db.prepare(sql);
     if (!stmt || !stmt->isValid()) {
         return 0;
     }

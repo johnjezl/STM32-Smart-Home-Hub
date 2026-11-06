@@ -9,6 +9,7 @@
 
 #include <chrono>
 #include <string>
+#include <utility>
 #include <vector>
 #include <functional>
 #include <cstdint>
@@ -94,7 +95,7 @@ public:
     /**
      * Set message callback
      */
-    void setMessageCallback(MessageCallback callback) { m_callback = callback; }
+    void setMessageCallback(MessageCallback callback) { m_callback = std::move(callback); }
 
 private:
     void handleReceived(const uint8_t* data, size_t size);

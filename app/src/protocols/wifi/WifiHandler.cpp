@@ -66,7 +66,9 @@ bool WifiHandler::initialize() {
             entry.shellyDevice = std::move(device);
             entry.available = true;
 
-            addDevice(entry.id, std::move(entry));
+            // Not entry.id itself: entry may be moved from before the call reads it
+            const std::string entryId = entry.id;
+            addDevice(entryId, std::move(entry));
         }
     });
 
@@ -120,15 +122,20 @@ void WifiHandler::shutdown() {
 
     m_discovering = false;
 
-    // Disconnect all Tuya devices
+    // Disconnect all Tuya devices. Taken out of the map, so nothing else can remove them meanwhile
+    // and destroying this handler can't reach them, and unlocked, because disconnecting reports back
+    // through a callback that takes the lock.
+    decltype(m_devices) devices;
     {
         std::lock_guard<std::mutex> lock(m_deviceMutex);
-        for (auto& [id, entry] : m_devices) {
-            if (entry.tuyaDevice) {
-                entry.tuyaDevice->disconnect();
-            }
+        devices.swap(m_devices);
+    }
+    for (auto& [id, entry] : devices) {
+        if (entry.tuyaDevice) {
+            entry.tuyaDevice->disconnect();
         }
     }
+    devices.clear();
 
     // Disconnect MQTT
     if (m_mqtt) {
@@ -160,16 +167,24 @@ void WifiHandler::poll() {
 }
 
 void WifiHandler::pollShellyDevices() {
-    std::lock_guard<std::mutex> lock(m_deviceMutex);
+    std::vector<std::pair<std::string, bool>> changes;
+    {
+        std::lock_guard<std::mutex> lock(m_deviceMutex);
 
-    for (auto& [id, entry] : m_devices) {
-        if (entry.type == "shelly" && entry.shellyDevice) {
-            bool success = entry.shellyDevice->pollStatus();
-            if (success != entry.available) {
-                entry.available = success;
-                onDeviceAvailabilityUpdate(id, success);
+        for (auto& [id, entry] : m_devices) {
+            if (entry.type == "shelly" && entry.shellyDevice) {
+                bool success = entry.shellyDevice->pollStatus();
+                if (success != entry.available) {
+                    entry.available = success;
+                    changes.emplace_back(id, success);
+                }
             }
         }
+    }
+
+    // Unlocked, because this takes the lock
+    for (const auto& [id, available] : changes) {
+        onDeviceAvailabilityUpdate(id, available);
     }
 }
 
@@ -308,59 +323,75 @@ void WifiHandler::onDeviceStateUpdate(const std::string& deviceId,
 }
 
 void WifiHandler::onDeviceAvailabilityUpdate(const std::string& deviceId, bool available) {
-    std::lock_guard<std::mutex> lock(m_deviceMutex);
+    DeviceAvailabilityCallback callback;
+    {
+        std::lock_guard<std::mutex> lock(m_deviceMutex);
 
-    auto it = m_devices.find(deviceId);
-    if (it != m_devices.end()) {
-        it->second.available = available;
-        if (it->second.device) {
-            // Cast to Device to access setAvailability
-            auto deviceImpl = std::dynamic_pointer_cast<Device>(it->second.device);
-            if (deviceImpl) {
-                deviceImpl->setAvailability(
-                    available ? DeviceAvailability::Online : DeviceAvailability::Offline);
+        auto it = m_devices.find(deviceId);
+        if (it != m_devices.end()) {
+            it->second.available = available;
+            if (it->second.device) {
+                // Cast to Device to access setAvailability
+                auto deviceImpl = std::dynamic_pointer_cast<Device>(it->second.device);
+                if (deviceImpl) {
+                    deviceImpl->setAvailability(
+                        available ? DeviceAvailability::Online : DeviceAvailability::Offline);
+                }
             }
         }
+        callback = m_availabilityCallback;
     }
 
-    if (m_availabilityCallback) {
-        m_availabilityCallback(deviceId,
+    // Unlocked, because it can lead back into this class
+    if (callback) {
+        callback(deviceId,
             available ? DeviceAvailability::Online : DeviceAvailability::Offline);
     }
 }
 
 void WifiHandler::addDevice(const std::string& id, WifiDeviceEntry entry) {
+    // What this replaces is destroyed unlocked, as that can disconnect it, which takes the lock
+    WifiDeviceEntry replaced;
+    DevicePtr added;
+    DeviceDiscoveredCallback callback;
+    bool isNew = false;
     {
         std::lock_guard<std::mutex> lock(m_deviceMutex);
 
-        // Check if device already exists
-        if (m_devices.find(id) != m_devices.end()) {
-            // Update existing entry
-            m_devices[id] = std::move(entry);
-            return;
+        added = entry.device;
+        callback = m_discoveredCallback;
+        auto it = m_devices.find(id);
+        if (it != m_devices.end()) {
+            replaced = std::move(it->second);
+            it->second = std::move(entry);
+        } else {
+            m_devices.emplace(id, std::move(entry));
+            isNew = true;
         }
-
-        m_devices[id] = std::move(entry);
     }
 
     // Notify discovery callback
-    auto& addedEntry = m_devices[id];
-    if (m_discoveredCallback && addedEntry.device) {
-        m_discoveredCallback(addedEntry.device);
+    if (isNew && callback && added) {
+        callback(added);
     }
 }
 
 void WifiHandler::removeDevice(const std::string& id) {
-    std::lock_guard<std::mutex> lock(m_deviceMutex);
+    WifiDeviceEntry entry;
+    {
+        std::lock_guard<std::mutex> lock(m_deviceMutex);
 
-    auto it = m_devices.find(id);
-    if (it != m_devices.end()) {
-        // Disconnect Tuya device if applicable
-        if (it->second.tuyaDevice) {
-            it->second.tuyaDevice->disconnect();
+        auto it = m_devices.find(id);
+        if (it == m_devices.end()) {
+            return;
         }
-
+        entry = std::move(it->second);
         m_devices.erase(it);
+    }
+
+    // Unlocked, because that reports back through a callback that takes the lock
+    if (entry.tuyaDevice) {
+        entry.tuyaDevice->disconnect();
     }
 }
 
@@ -538,7 +569,9 @@ bool WifiHandler::addShellyDevice(const std::string& ipAddress) {
         entry.shellyDevice->pollStatus();
     }
 
-    addDevice(entry.id, std::move(entry));
+    // Not entry.id itself: entry may be moved from before the call reads it
+    const std::string entryId = entry.id;
+    addDevice(entryId, std::move(entry));
     return true;
 }
 
@@ -579,7 +612,9 @@ bool WifiHandler::addTuyaDevice(const TuyaDeviceConfig& config) {
     entry.tuyaDevice = std::move(device);
     entry.available = true;
 
-    addDevice(entry.id, std::move(entry));
+    // Not entry.id itself: entry may be moved from before the call reads it
+    const std::string entryId = entry.id;
+    addDevice(entryId, std::move(entry));
     return true;
 }
 

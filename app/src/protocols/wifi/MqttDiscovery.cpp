@@ -52,7 +52,6 @@ MqttDiscoveryConfig::Source detectSource(const nlohmann::json& j) {
 
     // Check for Zigbee2MQTT
     if (j.contains("device") && j["device"].contains("manufacturer")) {
-        std::string mfr = j["device"]["manufacturer"].get<std::string>();
         if (j.contains("via_device")) {
             std::string via = j["via_device"].get<std::string>();
             if (via.find("zigbee2mqtt") != std::string::npos) {

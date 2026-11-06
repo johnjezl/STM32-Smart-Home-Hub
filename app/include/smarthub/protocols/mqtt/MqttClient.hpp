@@ -9,6 +9,7 @@
 #include <functional>
 #include <vector>
 #include <mutex>
+#include <utility>
 
 // Forward declarations - these are from mosquitto.h
 extern "C" {
@@ -92,7 +93,7 @@ public:
     /**
      * Set message callback (in addition to EventBus)
      */
-    void setMessageCallback(MessageCallback callback) { m_messageCallback = callback; }
+    void setMessageCallback(MessageCallback callback) { m_messageCallback = std::move(callback); }
 
 private:
     static void onConnect(struct mosquitto* mosq, void* obj, int rc);

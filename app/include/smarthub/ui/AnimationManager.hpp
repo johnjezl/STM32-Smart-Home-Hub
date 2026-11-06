@@ -39,7 +39,7 @@ enum class AnimationEasing {
 class AnimationManager {
 public:
     AnimationManager();
-    ~AnimationManager();
+    ~AnimationManager() = default;
 
     // Animation timing defaults
     static constexpr uint32_t DURATION_FAST = 150;     // Quick feedback
@@ -86,7 +86,7 @@ public:
      */
     void animateValue(lv_obj_t* obj, int32_t startVal, int32_t endVal,
                       uint32_t durationMs = DURATION_NORMAL,
-                      std::function<void(lv_obj_t*, int32_t)> setter = nullptr);
+                      const std::function<void(lv_obj_t*, int32_t)>& setter = nullptr);
 
     /**
      * Pulse animation (scale up then back to normal)

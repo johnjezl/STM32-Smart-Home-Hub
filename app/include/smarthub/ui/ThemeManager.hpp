@@ -58,7 +58,7 @@ struct ThemeColors {
 class ThemeManager {
 public:
     ThemeManager();
-    ~ThemeManager();
+    ~ThemeManager() = default;
 
     /**
      * Set the theme mode

@@ -19,6 +19,7 @@ SettingsScreen::SettingsScreen(ScreenManager& screenManager,
     , m_deviceManager(deviceManager)
 {
     // Initialize settings categories
+    // cppcheck-suppress useInitializationList ; too long to read well as one
     m_categories = {
         {"network", "Network", "WiFi, IP settings", LV_SYMBOL_WIFI},
         {"display", "Display", "Brightness, theme, timeout", LV_SYMBOL_IMAGE},

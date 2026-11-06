@@ -614,6 +614,7 @@ std::vector<std::string> ZigbeeHandler::getKnownDeviceAddresses() const {
     std::vector<std::string> addresses;
     std::lock_guard<std::mutex> lock(m_deviceMutex);
 
+    addresses.reserve(m_ieeeToDeviceId.size());
     for (const auto& [ieee, deviceId] : m_ieeeToDeviceId) {
         addresses.push_back(deviceId);
     }
@@ -1061,6 +1062,7 @@ void ZigbeeHandler::enrollIasZone(uint16_t nwkAddr, uint8_t endpoint) {
     // Tell it where to send alarms, which is what makes it ask to enroll
     uint64_t address = m_coordinator->ieeeAddress();
     std::vector<uint8_t> value;
+    value.reserve(8);
     for (int i = 0; i < 8; i++) {
         value.push_back(static_cast<uint8_t>(address >> (8 * i)));
     }
@@ -1590,6 +1592,8 @@ DeviceType ZigbeeHandler::inferDeviceType(const ZigbeeDeviceInfo& info) {
                     break;
                 case zcl::cluster::OCCUPANCY_SENSING:
                     hasOccupancy = true;
+                    break;
+                default:
                     break;
             }
         }

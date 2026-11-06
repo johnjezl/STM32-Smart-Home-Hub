@@ -10,6 +10,7 @@
 #include "smarthub/automation/AutomationManager.hpp"
 #include "smarthub/automation/Automation.hpp"
 #include "smarthub/core/Logger.hpp"
+#include <utility>
 
 namespace smarthub {
 namespace ui {
@@ -30,11 +31,11 @@ void EditAutomationScreen::setAutomationId(const std::string& id) {
 }
 
 void EditAutomationScreen::onAutomationUpdated(UpdatedCallback callback) {
-    m_onUpdated = callback;
+    m_onUpdated = std::move(callback);
 }
 
 void EditAutomationScreen::onAutomationDeleted(DeletedCallback callback) {
-    m_onDeleted = callback;
+    m_onDeleted = std::move(callback);
 }
 
 void EditAutomationScreen::onCreate() {
