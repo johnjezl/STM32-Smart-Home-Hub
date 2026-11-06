@@ -1248,10 +1248,6 @@ body:not(.is-admin) .admin-only {
     font-weight: 500;
 }
 
-.room-sensor-value.active {
-    color: var(--success);
-}
-
 @media (max-width: 640px) {
     .room-sensor-panel {
         flex-direction: column;
