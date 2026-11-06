@@ -1092,6 +1092,19 @@ TEST_F(ZigbeeHandlerFlowTest, ContactReachesTheContactProperty) {
     EXPECT_TRUE(eventually([&] { return stateOf(idOf(DOOR), "contact") == nlohmann::json(true); }));
 }
 
+TEST_F(ZigbeeHandlerFlowTest, ContactSensorReportingOverOnOffReachesTheContactProperty) {
+    ContactSensor saved(idOf(DOOR), "Door", "zigbee");
+    saved.setState("ieeeAddress", idOf(DOOR));
+    saved.setState("networkAddress", static_cast<int>(DOOR.nwkAddr));
+    handler->restoreDevice(saved);
+
+    fake.reportAttribute(DOOR.nwkAddr, 1, zcl::cluster::ON_OFF, zcl::attr::onoff::ON_OFF,
+                         zcl::datatype::BOOLEAN, {0x01});
+
+    EXPECT_EQ(waitForState(idOf(DOOR), "contact"), false) << "on means open";
+    EXPECT_FALSE(stateOf(idOf(DOOR), "on").has_value());
+}
+
 TEST_F(ZigbeeHandlerFlowTest, ZoneStatusInAnAttributeReportCountsToo) {
     ASSERT_NE(pair(MOTION), nullptr);
     fake.reportAttribute(MOTION.nwkAddr, 1, zcl::cluster::IAS_ZONE,
