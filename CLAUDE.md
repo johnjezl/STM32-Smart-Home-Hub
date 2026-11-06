@@ -23,7 +23,7 @@ The board is powered via a Kasa smart plug (HS300 strip, index 5) at `192.168.4.
 
 **Prefer software reboot when possible:**
 ```bash
-ssh root@smarthub.local reboot
+ssh root@192.168.4.99 reboot
 ```
 
 Use power cycle only when SSH is unresponsive or the system is hung.
@@ -31,14 +31,14 @@ Use power cycle only when SSH is unresponsive or the system is hung.
 ### Network Access
 
 ```bash
-ssh root@smarthub.local          # mDNS (preferred)
-ssh root@192.168.4.99            # Ethernet
+ssh root@192.168.4.99            # Ethernet (preferred)
 ssh root@192.168.4.67            # WiFi
+ssh root@smarthub.local          # mDNS, if this machine resolves .local names
 ```
 
 ### Serial and SDWire
 
-Serial console and SDWire are **not currently assigned** for this SBC in labctl. If needed in the future, they can be added via `labctl port assign` and `labctl sdwire assign`. See the [labctl documentation](https://github.com/johnjezl/Embedded-Lab-Control) for details.
+Serial console and SDWire are **not currently assigned** for this SBC in labctl. Ask the maintainer if you need them. See the [labctl documentation](https://github.com/johnjezl/Embedded-Lab-Control) for details.
 
 ---
 
@@ -55,7 +55,7 @@ ninja            # Build all
 ninja smarthub   # Build just the main binary
 ```
 
-**Native build (for testing):**
+**Native build (quick host checks only, not validation; see Pull Requests):**
 ```bash
 cd app/build-test
 ninja
@@ -67,11 +67,14 @@ ninja
 ### Deploying to Device
 
 ```bash
-# Transfer binary
-cat app/build-arm/smarthub | ssh root@smarthub.local "cat > /usr/bin/smarthub && chmod +x /usr/bin/smarthub"
+# Stop the application first: a running binary can't be overwritten
+ssh root@192.168.4.99 "killall smarthub; sleep 1"
 
-# Restart the application
-ssh root@smarthub.local "killall smarthub; nohup smarthub > /var/log/smarthub.log 2>&1 &"
+# Transfer binary
+cat app/build-arm/smarthub | ssh root@192.168.4.99 "cat > /usr/bin/smarthub && chmod +x /usr/bin/smarthub"
+
+# Start the application
+ssh root@192.168.4.99 "nohup smarthub > /var/log/smarthub.log 2>&1 &"
 ```
 
 If the board is unresponsive, use the `power_cycle` MCP tool with `sbc_name: "stm32mp157f-dk2"` before deploying.
@@ -117,7 +120,7 @@ Use emoji markers for task status:
 
 Every PR gets a code review **before** it merges, and fast-forwarding `main` counts as merging.
 
-1. Work on a branch, and validate on the board (`stm32mp157f-dk2`). Runs on an x86-64 host don't count as validation.
+1. Work on a branch, get CI green, and validate on the board (`stm32mp157f-dk2`). Runs on an x86-64 host don't count as validation. Only changes that can't affect the board, such as docs and tooling config, skip the board.
 2. Open the PR, then run a code review of it.
 3. Address all actionable findings, and review again. Repeat until the review is clean.
 4. Merge, then go on to the next ticket. Stop only for a roadblock, or if the loop runs too long.
