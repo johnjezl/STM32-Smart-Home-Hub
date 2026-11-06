@@ -72,8 +72,9 @@ ninja
 
 ```bash
 # Install under a temp name, then rename: this works while the old binary is running.
-# Uses a cat pipe because scp may fail against the board's Dropbear. Restarts only if the install succeeded.
-cat app/build-arm/smarthub | ssh root@192.168.4.102 "cat > /usr/bin/smarthub.new && chmod +x /usr/bin/smarthub.new && mv -f /usr/bin/smarthub.new /usr/bin/smarthub" && \
+# Sends the file over ssh stdin because scp may fail against the board's Dropbear. Don't use `cat file | ssh`:
+# if the file is missing, the pipeline would still install an empty binary. Restarts only if the install succeeded.
+ssh root@192.168.4.102 "cat > /usr/bin/smarthub.new && chmod +x /usr/bin/smarthub.new && mv -f /usr/bin/smarthub.new /usr/bin/smarthub" < app/build-arm/smarthub && \
   ssh root@192.168.4.102 "killall smarthub; for i in 1 2 3 4 5 6 7 8 9 10; do pidof smarthub > /dev/null || break; sleep 1; done; nohup smarthub > /var/log/smarthub.log 2>&1 < /dev/null &"
 ```
 
