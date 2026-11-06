@@ -461,7 +461,7 @@ TEST_F(ScreenManagerTest, NavigationIsBlockedDuringTransition) {
 // Issue #27: runs the same steps as UIManager's main loop, at 60 Hz. LVGL crashes
 // on a null pointer if a screen load starts while another is pending, so
 // ScreenManager must not report a transition as over before LVGL has finished.
-TEST_F(ScreenManagerTest, DISABLED_TransitionIsNotReportedOverBeforeLvglFinishes) {
+TEST_F(ScreenManagerTest, TransitionIsNotReportedOverBeforeLvglFinishes) {
     screenManager = std::make_unique<ScreenManager>(*uiManager);
     screenManager->setTransitionDuration(300);
 
@@ -480,6 +480,29 @@ TEST_F(ScreenManagerTest, DISABLED_TransitionIsNotReportedOverBeforeLvglFinishes
         lv_timer_handler();
     }
     test::finishTransitions();
+}
+
+// Issue #27: a tap on each frame of a transition, including the one where LVGL finishes it, in the
+// same order as UIManager's main loop. Before the fix, one of these crashed inside LVGL.
+TEST_F(ScreenManagerTest, NavigatingOnEveryFrameOfATransitionIsSafe) {
+    screenManager = std::make_unique<ScreenManager>(*uiManager);
+    screenManager->setTransitionDuration(300);
+    screenManager->registerScreen("home", std::make_unique<TestScreen>(*screenManager, "home"));
+    screenManager->registerScreen("settings", std::make_unique<TestScreen>(*screenManager, "settings"));
+
+    ASSERT_TRUE(screenManager->showScreen("home"));
+
+    bool navigated = false;
+    for (int frame = 0; frame < 100 && !navigated; ++frame) {
+        lv_tick_inc(16);
+        screenManager->update(16);
+        navigated = screenManager->showScreen("settings");
+        lv_timer_handler();
+    }
+
+    EXPECT_TRUE(navigated);
+    test::finishTransitions();
+    EXPECT_EQ(screenManager->currentScreen()->name(), "settings");
 }
 
 // Test: Same screen navigation is no-op
