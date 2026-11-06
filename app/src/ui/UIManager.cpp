@@ -985,6 +985,12 @@ void UIManager::shutdown() {
         s_keyboard.fd = -1;
     }
 
+    // Its worker can be in a callback into a screen, so it has to stop before they go
+    if (m_networkManager) {
+        m_networkManager->shutdown();
+        m_networkManager.reset();
+    }
+
     // Clean up screen manager before LVGL buffers
     m_screenManager.reset();
     m_themeManager.reset();
@@ -996,7 +1002,6 @@ void UIManager::shutdown() {
     }
     s_modal_group_stack.clear();
     if (s_main_group) {
-        lv_group_set_default(nullptr);
         lv_group_del(s_main_group);
         s_main_group = nullptr;
     }
@@ -1011,6 +1016,15 @@ void UIManager::shutdown() {
     if (s_display) {
         lv_disp_remove(s_display);
         s_display = nullptr;
+
+        // Removing the display leaves this, and the next initialize() would lose track of it
+        if (s_disp_drv.draw_ctx) {
+            if (s_disp_drv.draw_ctx_deinit) {
+                s_disp_drv.draw_ctx_deinit(&s_disp_drv, s_disp_drv.draw_ctx);
+            }
+            lv_mem_free(s_disp_drv.draw_ctx);
+            s_disp_drv.draw_ctx = nullptr;
+        }
     }
 
     // Free LVGL buffers

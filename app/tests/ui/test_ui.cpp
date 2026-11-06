@@ -11,10 +11,7 @@
 #ifdef SMARTHUB_ENABLE_LVGL
 
 #include <smarthub/ui/UIManager.hpp>
-
-#ifdef SMARTHUB_ENABLE_LVGL
 #include <lvgl.h>
-#endif
 #include <smarthub/core/EventBus.hpp>
 #include <smarthub/devices/DeviceManager.hpp>
 #include <smarthub/database/Database.hpp>
@@ -165,6 +162,16 @@ TEST_F(UIManagerTest, DestructorAfterFailedInit) {
 TEST_F(UIManagerTest, InitializeWithRealDRM) {
     uiManager = std::make_unique<smarthub::UIManager>(*eventBus, *deviceManager, *database);
 
+    const auto displayCount = [] {
+        int count = 0;
+        for (lv_disp_t* display = lv_disp_get_next(nullptr); display;
+             display = lv_disp_get_next(display)) {
+            ++count;
+        }
+        return count;
+    };
+    const int displaysBefore = displayCount();
+
     // Check if DRM device exists
     if (access("/dev/dri/card0", R_OK | W_OK) != 0) {
         GTEST_SKIP() << "DRM device /dev/dri/card0 not accessible, skipping hardware test";
@@ -190,11 +197,10 @@ TEST_F(UIManagerTest, InitializeWithRealDRM) {
         });
         EXPECT_FALSE(uiManager->isRunning());
 
-#ifdef SMARTHUB_ENABLE_LVGL
         // LVGL keeps running, and mustn't draw to the buffers shutdown freed
-        lv_obj_invalidate(lv_scr_act());
+        EXPECT_EQ(displayCount(), displaysBefore);
+        lv_obj_report_style_change(nullptr);  // Marks every display as needing a redraw
         lv_refr_now(nullptr);
-#endif
     } else {
         // Failed init is acceptable if no display connected
         EXPECT_FALSE(uiManager->isRunning());
