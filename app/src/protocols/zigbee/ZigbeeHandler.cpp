@@ -1130,6 +1130,17 @@ void ZigbeeHandler::onAttributeReport(uint16_t nwkAddr, const ZclAttributeValue&
     switch (attr.clusterId) {
         case zcl::cluster::ON_OFF:
             if (attr.attributeId == zcl::attr::onoff::ON_OFF) {
+                // Some door sensors report this way rather than through an IAS zone: on means open
+                bool isContactSensor = false;
+                {
+                    std::lock_guard<std::mutex> lock(m_deviceMutex);
+                    auto meaning = m_zoneAlarms.find(deviceInfo->ieeeAddress);
+                    isContactSensor = meaning != m_zoneAlarms.end() && meaning->second == ZoneAlarm::Open;
+                }
+                if (isContactSensor) {
+                    notifyState(deviceId, "contact", !attr.asBool());
+                    break;
+                }
                 notifyState(deviceId, "on", attr.asBool());
             }
             break;
