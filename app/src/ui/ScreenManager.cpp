@@ -99,21 +99,13 @@ bool ScreenManager::unregisterScreen(const std::string& name) {
         m_currentScreen.clear();
     }
 
-#ifdef SMARTHUB_ENABLE_LVGL
-    // Deleting a screen can finish LVGL's load early, leaving nothing to wait for
-    lv_disp_t* display = lv_disp_get_default();
-    if (m_transitionInProgress && display && !display->scr_to_load) {
-        m_transitionInProgress = false;
-        m_transitionRemainingMs = 0;
-    }
-#endif
 
     return true;
 }
 
 bool ScreenManager::showScreen(const std::string& name, TransitionType transition, bool pushToStack) {
     // Block navigation during transitions to prevent touch interference
-    if (m_transitionInProgress) {
+    if (isTransitioning()) {
         LOG_DEBUG("Ignoring navigation to %s - transition in progress", name.c_str());
         return false;
     }
@@ -158,7 +150,7 @@ bool ScreenManager::showScreen(const std::string& name, TransitionType transitio
 
 bool ScreenManager::goBack(TransitionType transition) {
     // Block during transitions
-    if (m_transitionInProgress) {
+    if (isTransitioning()) {
         LOG_DEBUG("Ignoring goBack - transition in progress");
         return false;
     }
@@ -177,7 +169,7 @@ bool ScreenManager::goBack(TransitionType transition) {
 
 void ScreenManager::goHome(TransitionType transition) {
     // Block during transitions
-    if (m_transitionInProgress) {
+    if (isTransitioning()) {
         LOG_DEBUG("Ignoring goHome - transition in progress");
         return;
     }
@@ -240,21 +232,22 @@ void ScreenManager::runPostedTasks() {
 void ScreenManager::update(uint32_t deltaMs) {
     runPostedTasks();
 
-    // Track transition completion
-    if (m_transitionInProgress) {
-        if (deltaMs >= m_transitionRemainingMs) {
-            m_transitionInProgress = false;
-            m_transitionRemainingMs = 0;
-            LOG_DEBUG("Screen transition completed");
-        } else {
-            m_transitionRemainingMs -= deltaMs;
-        }
-    }
-
     Screen* screen = currentScreen();
     if (screen && screen->isVisible()) {
         screen->onUpdate(deltaMs);
     }
+}
+
+bool ScreenManager::isTransitioning() const {
+#ifdef SMARTHUB_ENABLE_LVGL
+    // LVGL's own state, rather than a timer that can disagree with it. Loading a screen while
+    // another load is pending crashes in LVGL 8.3.11, which passes a null pointer to
+    // lv_obj_set_pos, so this has to stay true until LVGL has really finished.
+    const lv_disp_t* display = lv_disp_get_default();
+    return display && display->scr_to_load;
+#else
+    return false;
+#endif
 }
 
 void ScreenManager::performTransition(Screen* from, Screen* to, TransitionType type) {
@@ -286,12 +279,6 @@ void ScreenManager::performTransition(Screen* from, Screen* to, TransitionType t
         case TransitionType::SlideDown:
             animType = LV_SCR_LOAD_ANIM_MOVE_BOTTOM;
             break;
-    }
-
-    // Start transition timer to block input during animation
-    if (duration > 0) {
-        m_transitionInProgress = true;
-        m_transitionRemainingMs = duration;
     }
 
     // Load the new screen with animation
