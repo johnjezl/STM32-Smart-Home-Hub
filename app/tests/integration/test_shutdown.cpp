@@ -241,6 +241,27 @@ TEST_F(ShutdownTest, SigtermUnderLoadExitsCleanly) {
     }
 }
 
+TEST_F(ShutdownTest, SigtermDuringALoginExitsCleanly) {
+    ASSERT_NO_FATAL_FAILURE(startProgram());
+    ASSERT_NO_FATAL_FAILURE(setUpAdmin());
+
+    std::vector<std::thread> clients;
+    for (int client = 0; client < 4; ++client) {
+        clients.emplace_back([&] {
+            runCommand(curl("POST", "/api/auth/login",
+                            R"({"username":"shutdownadmin","password":"Shutdown-Test-1!"})", 5));
+        });
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+
+    EXPECT_EQ(kill(m_pid, SIGTERM), 0);
+    expectCleanExit(30);
+
+    for (auto& client : clients) {
+        client.join();
+    }
+}
+
 TEST_F(ShutdownTest, SigtermDoesNotWaitForAnAutomationInADelay) {
     ASSERT_NO_FATAL_FAILURE(startProgram());
     ASSERT_NO_FATAL_FAILURE(setUpAdmin());

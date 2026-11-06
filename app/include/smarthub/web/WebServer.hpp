@@ -11,9 +11,14 @@
 #include <atomic>
 #include <functional>
 #include <unordered_map>
+#include <condition_variable>
+#include <deque>
 #include <mutex>
+#include <optional>
 #include <vector>
 #include <cstdint>
+
+#include <smarthub/security/UserManager.hpp>
 
 // Forward declaration
 struct mg_mgr;
@@ -234,6 +239,35 @@ private:
 
     struct mg_mgr* m_mgr = nullptr;
     std::thread m_thread;
+
+    // Hashing a password takes over a second on the board, so it happens on its own thread, and
+    // the connection gets its answer when that's done.
+    struct PasswordJob {
+        unsigned long connectionId = 0;
+        bool isSetup = false;
+        std::string username;
+        std::string password;
+        std::string clientIp;
+    };
+    struct PasswordResult {
+        unsigned long connectionId = 0;
+        std::string clientIp;
+        bool isLogin = false;
+        std::optional<security::User> user;
+        int status = 0;  // For a response without a session
+        std::string error;
+    };
+    bool queuePasswordJob(struct mg_connection* c, PasswordJob job);
+    void passwordWorkerLoop();
+    PasswordResult runPasswordJob(const PasswordJob& job);
+    void sendPasswordResults();
+
+    std::thread m_passwordWorker;
+    std::mutex m_passwordMutex;
+    std::condition_variable m_passwordWake;
+    std::deque<PasswordJob> m_passwordJobs;
+    std::vector<PasswordResult> m_passwordResults;
+    bool m_passwordWorkerStopping = false;
     std::atomic<bool> m_running{false};
 };
 
