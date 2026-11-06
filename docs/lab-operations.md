@@ -2,16 +2,19 @@
 
 This document describes how to interact with the STM32MP157F-DK2 lab hardware. It is primarily intended for Claude Code to reference when performing lab operations.
 
+Power control and health checks go through the **labctl MCP tools**, with the SBC name `stm32mp157f-dk2`. Never run the `labctl` CLI. See `CLAUDE.md`.
+
 ---
 
 ## Quick Reference
 
 | Operation | Command |
 |-----------|---------|
-| SSH to board | `ssh root@smarthub.local` or `ssh root@192.168.4.99` |
-| Power off | `tools/stm32-power.py off` |
-| Power on | `tools/stm32-power.py on` |
-| Power cycle | `tools/stm32-power.py cycle` |
+| SSH to board | `ssh root@smarthub.local` or `ssh root@192.168.4.102` |
+| Power off | `power_off` MCP tool |
+| Power on | `power_on` MCP tool |
+| Power cycle | `power_cycle` MCP tool |
+| Health check | `run_health_check` MCP tool |
 | Serial console | `sudo picocom -b 115200 /dev/ttyACM0` |
 | Flash SD card | `tools/flash.sh` |
 
@@ -50,25 +53,9 @@ Authentication is via SSH key (no password).
 
 ### Kasa Smart Plug
 
-The STM32MP157F-DK2 is powered via a Kasa smart plug at `192.168.4.96`.
+The STM32MP157F-DK2 is powered through a Kasa HS300 smart plug strip at `192.168.4.140` (outlet index 5), managed by labctl.
 
-**Using the power script:**
-
-```bash
-cd ~/projects/smarthub/STM32-Smart-Home-Hub
-
-# Check status
-./venv/bin/python tools/stm32-power.py status
-
-# Turn off
-./venv/bin/python tools/stm32-power.py off
-
-# Turn on
-./venv/bin/python tools/stm32-power.py on
-
-# Power cycle (off, wait 3s, on)
-./venv/bin/python tools/stm32-power.py cycle
-```
+Use the `power_on`, `power_off`, `power_cycle` and `run_health_check` MCP tools with `sbc_name: "stm32mp157f-dk2"`.
 
 ### When to Use Power Control
 
@@ -81,19 +68,6 @@ ssh root@smarthub.local reboot
 - SSH not responding
 - System hung/crashed
 - Need cold boot
-
-### Python Environment
-
-The power script requires the `python-kasa` package:
-
-```bash
-# Virtual environment already set up at:
-~/projects/smarthub/STM32-Smart-Home-Hub/venv/
-
-# If needed, recreate:
-python3 -m venv venv
-./venv/bin/pip install python-kasa
-```
 
 ---
 
@@ -137,12 +111,14 @@ sudo usermod -aG dialout $USER
 # Capture boot messages to file
 sudo timeout 60 cat /dev/ttyACM0 > boot_log.txt &
 
-# Power cycle to capture full boot
-./venv/bin/python tools/stm32-power.py cycle
+# Then power cycle with the power_cycle MCP tool to capture the full boot
+
 
 # Wait for boot, then check log
 cat boot_log.txt
 ```
+
+**Never use a bare `cat` on a tty device.** It waits for an EOF that never comes. Always wrap it in `timeout`, as above.
 
 ---
 
@@ -261,10 +237,10 @@ ssh root@smarthub.local "echo stop > /sys/class/remoteproc/remoteproc0/state; \
 
 ### Board Not Responding to SSH
 
-1. Check power: `./venv/bin/python tools/stm32-power.py status`
+1. Check power: `run_health_check` MCP tool
 2. Try ping: `ping smarthub.local`
 3. Check serial console for errors
-4. Power cycle: `./venv/bin/python tools/stm32-power.py cycle`
+4. Power cycle: `power_cycle` MCP tool
 
 ### No Serial Output
 

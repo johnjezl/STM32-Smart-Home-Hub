@@ -55,13 +55,11 @@
       "Bash(git push --force)",
       "Bash(git push -f)",
       "Bash(git reset --hard)",
-      "Bash(git clean -fd)"
+      "Bash(git clean -fd)",
+      "Bash(labctl:*)",
+      "Bash(/opt/labctl/venv/bin/labctl:*)"
     ]
   },
-  "enabledMcpjsonServers": ["labctl"],
-  "skills": ["/opt/labctl/skills/deploy-and-test.md"],
-  "env": {
-    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
-  }
+  "enabledMcpjsonServers": ["labctl"]
 }
 
