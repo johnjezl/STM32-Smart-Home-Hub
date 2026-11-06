@@ -4,6 +4,7 @@
 
 #include <smarthub/protocols/zigbee/ZigbeeCoordinator.hpp>
 #include <smarthub/core/Logger.hpp>
+#include <cinttypes>
 #include <chrono>
 #include <cstring>
 
@@ -242,7 +243,7 @@ bool ZigbeeCoordinator::startNetwork() {
         uint16_t nwkAddr = infoRsp->getWord(9);
         m_deviceState = static_cast<ZnpDeviceState>(infoRsp->getByte(12));
 
-        LOG_INFO("Coordinator IEEE: %016llX, NWK: %04X", static_cast<unsigned long long>(m_ieeeAddr), nwkAddr);
+        LOG_INFO("Coordinator IEEE: %016" PRIX64 ", NWK: %04X", m_ieeeAddr, nwkAddr);
     }
 
     m_networkUp = true;
@@ -700,8 +701,8 @@ void ZigbeeCoordinator::handleDeviceAnnounce(const ZnpFrame& frame) {
     uint64_t ieeeAddr = frame.getQWord(4);
     uint8_t capabilities = frame.getByte(12);
 
-    LOG_INFO("Device announced: NWK=%04X, IEEE=%016llX, caps=0x%02X",
-             nwkAddr, static_cast<unsigned long long>(ieeeAddr), capabilities);
+    LOG_INFO("Device announced: NWK=%04X, IEEE=%016" PRIX64 ", caps=0x%02X",
+             nwkAddr, ieeeAddr, capabilities);
 
     // Add/update device in database
     {
@@ -736,7 +737,7 @@ void ZigbeeCoordinator::handleDeviceLeave(const ZnpFrame& frame) {
     uint8_t request = frame.getByte(10);
     uint8_t remove = frame.getByte(11);
 
-    LOG_INFO("Device left: IEEE=%016llX", static_cast<unsigned long long>(ieeeAddr));
+    LOG_INFO("Device left: IEEE=%016" PRIX64, ieeeAddr);
 
     // Remove from database
     {
@@ -764,8 +765,8 @@ void ZigbeeCoordinator::handleTcDeviceInd(const ZnpFrame& frame) {
     uint64_t ieeeAddr = frame.getQWord(2);
     uint16_t parentAddr = frame.getWord(10);
 
-    LOG_INFO("New device joining: NWK=%04X, IEEE=%016llX, parent=%04X",
-             nwkAddr, static_cast<unsigned long long>(ieeeAddr), parentAddr);
+    LOG_INFO("New device joining: NWK=%04X, IEEE=%016" PRIX64 ", parent=%04X",
+             nwkAddr, ieeeAddr, parentAddr);
 }
 
 void ZigbeeCoordinator::handleActiveEpRsp(const ZnpFrame& frame) {
@@ -881,8 +882,8 @@ void ZigbeeCoordinator::handleSimpleDescRsp(const ZnpFrame& frame) {
             if (devIt != m_devices.end()) {
                 devIt->second.inClusters[endpoint] = inClusters;
                 devIt->second.outClusters[endpoint] = outClusters;
-                LOG_INFO("Updated device %016llX with clusters for endpoint %d",
-                         static_cast<unsigned long long>(it->second), endpoint);
+                LOG_INFO("Updated device %016" PRIX64 " with clusters for endpoint %d",
+                         it->second, endpoint);
             }
         }
     }

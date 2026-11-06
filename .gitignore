@@ -65,4 +65,4 @@ buildroot/board/smarthub/overlay/etc/wpa_supplicant/wpa_supplicant.conf
 # Built tools and vendor documents
 tools/rpmsg_test
 tools/rpmsg_poll/rpmsg_poll
-*.pdf
+/docs/*.pdf

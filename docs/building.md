@@ -333,14 +333,12 @@ diff buildroot/configs/smarthub_defconfig .config
 
 ### Testing Without Reflash
 
-For quick iterations, deploy files via SSH:
+For quick iterations, deploy the binary over SSH (CLAUDE.md has the full command, including the restart):
 
 ```bash
-# Copy updated binary
-scp myapp root@smarthub.local:/opt/smarthub/bin/
-
-# Or sync overlay
-rsync -avz buildroot/board/smarthub/overlay/ root@smarthub.local:/
+# Install under a temp name, then rename, so this works while the old binary is running.
+# Sent over ssh stdin because scp may fail against the board's Dropbear.
+ssh root@192.168.4.102 "cat > /usr/bin/smarthub.new && chmod +x /usr/bin/smarthub.new && mv -f /usr/bin/smarthub.new /usr/bin/smarthub" < app/build-arm/smarthub
 ```
 
 ### NFS Root (Advanced)

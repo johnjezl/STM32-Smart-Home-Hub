@@ -4,6 +4,9 @@
 
 #include <gtest/gtest.h>
 #include <smarthub/core/Logger.hpp>
+#include <cinttypes>
+#include <cstdint>
+#include <string>
 
 class LoggerTest : public ::testing::Test {
 protected:
@@ -44,6 +47,17 @@ TEST_F(LoggerTest, FormatStrings) {
     LOG_INFO("String: %s", "test");
     LOG_INFO("Float: %.2f", 3.14);
     LOG_INFO("Multiple: %d, %s, %.1f", 1, "two", 3.0);
+}
+
+TEST_F(LoggerTest, RendersFormatArgumentsIntoTheLog) {
+    // Every call site was converted from {} placeholders, which printed literally and dropped the
+    // values. This checks the values reach the log, including a 64-bit address on the 32-bit board.
+    const uint64_t ieee = 0x00124B0012345678ULL;
+    testing::internal::CaptureStderr();
+    LOG_ERROR("Device %016" PRIX64 " on port %s, code %d", ieee, "/dev/ttyUSB0", 7);
+    const std::string output = testing::internal::GetCapturedStderr();
+
+    EXPECT_NE(output.find("Device 00124B0012345678 on port /dev/ttyUSB0, code 7"), std::string::npos) << output;
 }
 
 TEST_F(LoggerTest, EmptyMessage) {
