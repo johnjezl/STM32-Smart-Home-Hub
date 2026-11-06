@@ -228,7 +228,9 @@ class SmartHubApp {
                 this.currentUser = { username: data.username, role: data.role };
                 errorEl.textContent = '';
                 this.showDashboard();
-            } else if (response.headers.get('Retry-After')) {
+            } else if (response.status === 503) {
+                errorEl.textContent = 'A login is already in progress. Try again in a moment.';
+            } else if (response.status === 429) {
                 const seconds = parseInt(response.headers.get('Retry-After'), 10);
                 const minutes = Math.max(1, Math.ceil(seconds / 60)) || 1;
                 errorEl.textContent = `Too many failed attempts. Try again in ${minutes} minute${minutes === 1 ? '' : 's'}.`;

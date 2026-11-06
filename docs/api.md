@@ -80,6 +80,8 @@ The request must have the `Content-Type: application/json` header, or it gets `4
 
 **Response (429 Too Many Requests):** too many failed logins from this IP address. The `Retry-After` header gives the wait in seconds.
 
+**Response (503 Service Unavailable):** a login from this IP address is already being checked, or several are from others. Passwords take over a second to check on the board. `Retry-After` says when to try again.
+
 ---
 
 ### POST /api/auth/logout

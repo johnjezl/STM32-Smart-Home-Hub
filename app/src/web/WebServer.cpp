@@ -192,6 +192,11 @@ bool parseCredentials(struct mg_http_message* hm, std::string& username, std::st
     return !username.empty() && !password.empty();
 }
 
+bool wantsClose(struct mg_http_message* hm) {
+    const struct mg_str* connection = mg_http_get_header(hm, "Connection");
+    return connection && mg_strcasecmp(*connection, mg_str("close")) == 0;
+}
+
 }  // namespace
 
 WebServer::WebServer(EventBus& eventBus, DeviceManager& deviceManager,
@@ -286,6 +291,7 @@ bool WebServer::start() {
 
     m_running = true;
 
+    mg_wakeup_init(m_mgr);
     {
         std::lock_guard<std::mutex> lock(m_passwordMutex);
         m_passwordWorkerStopping = false;
@@ -324,6 +330,7 @@ void WebServer::stop() {
         std::lock_guard<std::mutex> lock(m_passwordMutex);
         m_passwordWorkerStopping = true;
         m_passwordJobs.clear();
+        m_passwordJobsByIp.clear();
     }
     m_passwordWake.notify_all();
     if (m_passwordWorker.joinable()) {
@@ -903,7 +910,8 @@ void WebServer::apiLogin(struct mg_connection* c, struct mg_http_message* hm) {
         return;
     }
 
-    // Checked before the password: hashing is slow and blocks this thread
+    // Checked before the password, so a locked out client costs no hashing. Each IP also only gets
+    // one login at a time, so nothing gets past this before an earlier failure is counted.
     const std::string clientIp = getClientIp(c);
     const int retryAfter = loginRetryAfterSeconds(clientIp);
     if (retryAfter > 0) {
@@ -927,25 +935,34 @@ void WebServer::apiLogin(struct mg_connection* c, struct mg_http_message* hm) {
     job.username = std::move(username);
     job.password = std::move(password);
     job.clientIp = clientIp;
+    job.closeAfterReply = wantsClose(hm);
     queuePasswordJob(c, std::move(job));
 }
 
-bool WebServer::queuePasswordJob(struct mg_connection* c, PasswordJob job) {
+void WebServer::queuePasswordJob(struct mg_connection* c, PasswordJob job) {
     // Each one takes over a second on the board, so more than this is someone hammering it
     constexpr size_t kMaxQueuedPasswordJobs = 4;
 
     job.connectionId = c->id;
+    bool accepted = false;
     {
         std::lock_guard<std::mutex> lock(m_passwordMutex);
-        if (m_passwordJobs.size() >= kMaxQueuedPasswordJobs) {
-            sendJsonWithHeaders(c, 503, "{\"error\":\"Too many logins in progress\"}",
-                                "Retry-After: 5\r\n");
-            return false;
+        // One at a time from each IP keeps one client from taking every slot, and means each guess
+        // is counted before the next can start, so several at once can't get past the lockout
+        if (m_passwordJobs.size() < kMaxQueuedPasswordJobs &&
+            m_passwordJobsByIp.count(job.clientIp) == 0) {
+            m_passwordJobsByIp.insert(job.clientIp);
+            m_passwordJobs.push_back(std::move(job));
+            accepted = true;
         }
-        m_passwordJobs.push_back(std::move(job));
+    }
+
+    if (!accepted) {
+        sendJsonWithHeaders(c, 503, "{\"error\":\"A login is already in progress\"}",
+                            "Retry-After: 5\r\n");
+        return;
     }
     m_passwordWake.notify_one();
-    return true;
 }
 
 void WebServer::passwordWorkerLoop() {
@@ -967,14 +984,26 @@ void WebServer::passwordWorkerLoop() {
             result = runPasswordJob(job);
         } catch (const std::exception& e) {
             LOG_ERROR("Password check failed: %s", e.what());
+            result.user.reset();
+            result.status = 500;
+            result.error = "Internal error";
+        } catch (...) {
+            LOG_ERROR("Password check failed with an unknown error");
+            result.user.reset();
             result.status = 500;
             result.error = "Internal error";
         }
         result.connectionId = job.connectionId;
         result.clientIp = job.clientIp;
+        result.isLogin = !job.isSetup;
+        result.closeAfterReply = job.closeAfterReply;
         lock.lock();
 
         m_passwordResults.push_back(std::move(result));
+
+        // Ends the web thread's wait for network activity, so it sends this straight away. If the
+        // connection has gone, the next regular poll still picks the result up.
+        mg_wakeup(m_mgr, job.connectionId, "", 0);
     }
 }
 
@@ -1002,7 +1031,6 @@ WebServer::PasswordResult WebServer::runPasswordJob(const PasswordJob& job) {
 
     // A malformed username can't belong to an account, so skip the lookup.
     // That also keeps control characters out of the failure log.
-    result.isLogin = true;
     if (security::UserManager::validateUsername(job.username).empty() &&
         m_userMgr->authenticate(job.username, job.password)) {
         result.user = m_userMgr->getUser(job.username);
@@ -1022,28 +1050,39 @@ void WebServer::sendPasswordResults() {
     }
 
     for (const PasswordResult& result : results) {
-        // Counted even if the client has gone, or hanging up would make guesses free
-        if (result.isLogin && !result.user) {
-            recordLoginFailure(result.clientIp);
-        }
-
-        struct mg_connection* c = m_mgr->conns;
-        while (c && c->id != result.connectionId) {
-            c = c->next;
-        }
-        if (!c || c->is_closing) {
-            continue;
-        }
-
         try {
+            // Counted even if the client has gone, or hanging up would make guesses free
+            if (result.isLogin && !result.user) {
+                recordLoginFailure(result.clientIp);
+            }
+
+            // Only after that's counted, so the next attempt from this IP sees it
+            {
+                std::lock_guard<std::mutex> lock(m_passwordMutex);
+                m_passwordJobsByIp.erase(result.clientIp);
+            }
+
+            struct mg_connection* c = m_mgr->conns;
+            while (c && c->id != result.connectionId) {
+                c = c->next;
+            }
+            if (!c || c->is_closing) {
+                continue;
+            }
+
             if (result.user) {
                 startSession(c, *result.user, result.isLogin ? 200 : 201);
             } else {
                 sendError(c, result.status, result.error);
             }
+            // Mongoose only handles this itself for a reply sent during the request's own event
+            if (result.closeAfterReply) {
+                c->is_draining = 1;
+            }
         } catch (const std::exception& e) {
             LOG_ERROR("Failed to answer a login: %s", e.what());
-            sendError(c, 500, "Internal error");
+        } catch (...) {
+            LOG_ERROR("Failed to answer a login: unknown error");
         }
     }
 }
@@ -1132,6 +1171,7 @@ void WebServer::apiSetup(struct mg_connection* c, struct mg_http_message* hm) {
     job.username = std::move(username);
     job.password = std::move(password);
     job.clientIp = getClientIp(c);
+    job.closeAfterReply = wantsClose(hm);
     queuePasswordJob(c, std::move(job));
 }
 
