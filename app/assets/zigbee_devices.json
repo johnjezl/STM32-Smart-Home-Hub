@@ -50,7 +50,7 @@
       "manufacturer": "LUMI",
       "model": "lumi.sensor_magnet.aq2",
       "displayName": "Aqara Door/Window Sensor",
-      "deviceType": "motion_sensor"
+      "deviceType": "contact_sensor"
     },
     {
       "manufacturer": "LUMI",
@@ -92,7 +92,7 @@
       "manufacturer": "SONOFF",
       "model": "SNZB-04",
       "displayName": "SONOFF Contact Sensor",
-      "deviceType": "motion_sensor"
+      "deviceType": "contact_sensor"
     },
     {
       "manufacturer": "SONOFF",

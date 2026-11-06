@@ -33,7 +33,8 @@ struct ZigbeeDeviceInfo {
     std::string manufacturer;
     std::string model;
     std::string dateCode;
-    std::optional<uint16_t> zoneType; // IAS Zone Type, for a device with that cluster
+    std::optional<uint16_t> zoneType;   // IAS Zone Type, for a device with that cluster
+    std::optional<uint16_t> zoneStatus; // IAS Zone Status when pairing read it
     std::vector<uint8_t> endpoints;
     int failedDescriptors = 0;        // Simple descriptor requests the device has refused
     uint64_t lastSeen = 0;            // Unix timestamp
@@ -192,10 +193,11 @@ public:
     bool requestNetworkAddress(uint64_t ieeeAddr);
 
     /**
-     * Read attributes and wait for the answer. Returns those the device had; empty on no answer.
-     * Waits, so this can't be called from a callback, which runs on the thread that receives it.
+     * Read attributes and wait for the answer. Returns those the device has, or nothing if it
+     * didn't answer. Waits, so this can't be called from a callback, which runs on the thread
+     * that receives the answer.
      */
-    std::vector<ZclAttributeValue> readAttributes(uint16_t nwkAddr, uint8_t endpoint, uint16_t cluster,
+    std::optional<std::vector<ZclAttributeValue>> readAttributes(uint16_t nwkAddr, uint8_t endpoint, uint16_t cluster,
                                                   const std::vector<uint16_t>& attributes,
                                                   int timeoutMs);
 
@@ -204,10 +206,10 @@ public:
 
     /** Record what pairing learned about a device */
     void setDeviceDetails(uint64_t ieeeAddr, const std::string& manufacturer, const std::string& model,
-                          std::optional<uint16_t> zoneType);
+                          std::optional<uint16_t> zoneType, std::optional<uint16_t> zoneStatus);
 
     /**
-     * Tell an IAS zone device it's enrolled. Doesn't wait, so a callback can call this.
+     * Tell an IAS zone device it's enrolled. Waits for the radio, so a callback can't call this.
      */
     bool sendZoneEnrollResponse(uint16_t nwkAddr, uint8_t endpoint, uint8_t zoneId);
 

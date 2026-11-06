@@ -889,7 +889,25 @@ const FakeZigbeeDevice PIR{
 const FakeZigbeeDevice SILENT_ZONE{
     0x8103, 0x00124B0000008103ULL,
     {{1, {zcl::cluster::BASIC, zcl::cluster::IAS_ZONE}}},
-    "", "", std::nullopt, true};
+    "", "", std::nullopt, std::nullopt, true};
+const FakeZigbeeDevice NO_ZONE_TYPE{
+    0x8105, 0x00124B0000008105ULL,
+    {{1, {zcl::cluster::IAS_ZONE}}}};
+const FakeZigbeeDevice LEAK{
+    0x8106, 0x00124B0000008106ULL,
+    {{1, {zcl::cluster::IAS_ZONE}}},
+    "", "", zcl::zone_type::WATER_SENSOR};
+const FakeZigbeeDevice OPEN_DOOR{
+    0x8107, 0x00124B0000008107ULL,
+    {{1, {zcl::cluster::IAS_ZONE}}},
+    "", "", zcl::zone_type::CONTACT_SWITCH, uint16_t{0x0001}};
+const FakeZigbeeDevice CLOSED_DOOR{
+    0x8108, 0x00124B0000008108ULL,
+    {{1, {zcl::cluster::IAS_ZONE}}},
+    "", "", zcl::zone_type::CONTACT_SWITCH, uint16_t{0x0000}};
+const FakeZigbeeDevice MOTION_WITH_TEMPERATURE{
+    0x8109, 0x00124B0000008109ULL,
+    {{1, {zcl::cluster::OCCUPANCY_SENSING, zcl::cluster::TEMPERATURE_MEASUREMENT}}}};
 const FakeZigbeeDevice OCCUPANCY{
     0x8104, 0x00124B0000008104ULL,
     {{1, {zcl::cluster::OCCUPANCY_SENSING}}}};
@@ -919,17 +937,91 @@ TEST_F(ZigbeeHandlerFlowTest, ZoneTypeBeatsTheModelName) {
     EXPECT_EQ(device->type(), DeviceType::MotionSensor);
 }
 
-TEST_F(ZigbeeHandlerFlowTest, DeviceThatDoesNotAnswerReadsStillPairs) {
+TEST_F(ZigbeeHandlerFlowTest, ZoneDeviceThatDoesNotAnswerIsNotAddedAsAGuess) {
     handlerConfig["pairingReadTimeoutMs"] = 100;
     handler->shutdown();
     handler = makeHandler(fake);
     ASSERT_TRUE(handler->initialize());
     fake.addDevice(SILENT_ZONE);
+    watchForPairingErrors();
+    handler->startDiscovery();
 
-    auto device = pair(SILENT_ZONE);
+    fake.announceDevice(SILENT_ZONE);
 
+    EXPECT_TRUE(eventually([&] { return pairingFailed.load(); }));
+    EXPECT_EQ(pendingCount(), 0u);
+    EXPECT_EQ(discoveredCount(), 0u);
+}
+
+TEST_F(ZigbeeHandlerFlowTest, ZoneDeviceWithoutAZoneTypeIsAssumedToBeMotion) {
+    fake.addDevice(NO_ZONE_TYPE);
+    auto device = pair(NO_ZONE_TYPE);
     ASSERT_NE(device, nullptr);
-    EXPECT_EQ(device->type(), DeviceType::MotionSensor) << "the assumption for an unknown zone type";
+    EXPECT_EQ(device->type(), DeviceType::MotionSensor);
+}
+
+TEST_F(ZigbeeHandlerFlowTest, AnnouncingDuringTheReadsStartsThemOver) {
+    handlerConfig["pairingReadTimeoutMs"] = 1000;
+    handler->shutdown();
+    handler = makeHandler(fake);
+    ASSERT_TRUE(handler->initialize());
+    FakeZigbeeDevice oldAddress = DOOR;
+    oldAddress.ignoresReads = true;
+    fake.addDevice(oldAddress);
+    fake.clearSentFrames();
+    fake.announceDevice(oldAddress);
+    ASSERT_TRUE(fake.waitForSent(ZnpSubsystem::AF, cmd::af::DATA_REQUEST, 3));  // Write, enroll, read
+
+    FakeZigbeeDevice moved = DOOR;
+    moved.nwkAddr = 0x8201;
+    fake.addDevice(moved);
+    fake.announceDevice(moved);
+
+    EXPECT_TRUE(eventually([&] { return discoveredCount() == 1; }, 10s));
+    std::lock_guard<std::mutex> lock(mutex);
+    ASSERT_EQ(discovered.size(), 1u);
+    EXPECT_EQ(discovered[0]->type(), DeviceType::ContactSensor);
+}
+
+TEST_F(ZigbeeHandlerFlowTest, AlarmFromAnotherKindOfZoneIsNotMotion) {
+    fake.addDevice(LEAK);
+    ASSERT_NE(pair(LEAK), nullptr);
+
+    fake.clusterCommand(LEAK.nwkAddr, 1, zcl::cluster::IAS_ZONE, 0x00, {0x01, 0x00});
+
+    EXPECT_EQ(waitForState(idOf(LEAK), "alarm"), true);
+    EXPECT_FALSE(stateOf(idOf(LEAK), "motion").has_value());
+}
+
+TEST_F(ZigbeeHandlerFlowTest, AlarmFromAnotherKindOfZoneIsNotMotionAfterARestart) {
+    fake.addDevice(LEAK);
+    auto paired = pair(LEAK);
+    ASSERT_NE(paired, nullptr);
+    handler->forgetDevice(paired->id());
+    handler->restoreDevice(*paired);
+
+    fake.clusterCommand(LEAK.nwkAddr, 1, zcl::cluster::IAS_ZONE, 0x00, {0x01, 0x00});
+
+    EXPECT_EQ(waitForState(idOf(LEAK), "alarm"), true);
+    EXPECT_FALSE(stateOf(idOf(LEAK), "motion").has_value());
+}
+
+TEST_F(ZigbeeHandlerFlowTest, PairingKnowsWhetherADoorIsOpenAlready) {
+    fake.addDevice(OPEN_DOOR);
+    fake.addDevice(CLOSED_DOOR);
+    auto open = pair(OPEN_DOOR);
+    auto closed = pair(CLOSED_DOOR);
+    ASSERT_NE(open, nullptr);
+    ASSERT_NE(closed, nullptr);
+    EXPECT_EQ(open->getProperty("contact"), false);
+    EXPECT_EQ(closed->getProperty("contact"), true);
+}
+
+TEST_F(ZigbeeHandlerFlowTest, OccupancySensorThatAlsoMeasuresTemperatureIsAMotionSensor) {
+    fake.addDevice(MOTION_WITH_TEMPERATURE);
+    auto device = pair(MOTION_WITH_TEMPERATURE);
+    ASSERT_NE(device, nullptr);
+    EXPECT_EQ(device->type(), DeviceType::MotionSensor);
 }
 
 TEST_F(ZigbeeHandlerFlowTest, PairingEnrollsAnIasZone) {
