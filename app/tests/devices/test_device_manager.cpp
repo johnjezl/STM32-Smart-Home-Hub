@@ -47,7 +47,7 @@ protected:
 // protocol's background threads do.
 class JoinsCallbackThreadOnShutdown : public smarthub::testing::MockProtocolHandler {
 public:
-    using MockProtocolHandler::MockProtocolHandler;
+    using smarthub::testing::MockProtocolHandler::MockProtocolHandler;
 
     void shutdown() override {
         std::thread callback([this] {
@@ -63,7 +63,7 @@ public:
 // does if startup fails while a device is joining.
 class JoinsCallbackThreadOnInitialize : public smarthub::testing::MockProtocolHandler {
 public:
-    using MockProtocolHandler::MockProtocolHandler;
+    using smarthub::testing::MockProtocolHandler::MockProtocolHandler;
 
     bool initialize() override {
         std::thread callback([this] {
@@ -874,7 +874,7 @@ namespace {
 // Reports a state change from its own shutdown, as a protocol's last report might
 class ReportsOnShutdown : public smarthub::testing::MockProtocolHandler {
 public:
-    using MockProtocolHandler::MockProtocolHandler;
+    using smarthub::testing::MockProtocolHandler::MockProtocolHandler;
 
     void shutdown() override {
         simulateStateChange("lamp", "on", true);
@@ -950,5 +950,75 @@ TEST(DeviceManagerRooms, FindsDevicesAssignedByRoomIdOrName) {
         EXPECT_EQ(manager.getDevicesByRoom("Living Room").size(), 2u);
         EXPECT_EQ(manager.getDevicesByRoom("Kitchen").size(), 1u) << "a room string with no room row still matches";
     }
+    std::remove(path.c_str());
+}
+
+namespace {
+
+class RecordingProtocol : public smarthub::testing::MockProtocolHandler {
+public:
+    using smarthub::testing::MockProtocolHandler::MockProtocolHandler;
+
+    void restoreDevice(const IDevice& device) override {
+        std::lock_guard<std::mutex> lock(mutex);
+        restored.push_back(device.id());
+    }
+    void forgetDevice(const std::string& deviceId) override {
+        std::lock_guard<std::mutex> lock(mutex);
+        forgotten.push_back(deviceId);
+    }
+    std::mutex mutex;
+    std::vector<std::string> restored;
+    std::vector<std::string> forgotten;
+};
+
+} // namespace
+
+TEST(DeviceManagerRestore, ProtocolLearnsItsDevicesSoTheyWorkAfterARestart) {
+    const std::string path = "/tmp/test_restore_" + std::to_string(getpid()) + ".db";
+    std::remove(path.c_str());
+    EventBus protocolBus;
+    auto protocol = std::make_shared<RecordingProtocol>(protocolBus);
+    ProtocolFactory::instance().registerProtocol("recording",
+        [protocol](EventBus&, const nlohmann::json&) -> ProtocolHandlerPtr { return protocol; });
+
+    {
+        EventBus eventBus;
+        Database database(path);
+        ASSERT_TRUE(database.initialize());
+        DeviceManager manager(eventBus, database);
+        ASSERT_TRUE(manager.initialize());
+
+        auto device = std::make_shared<SwitchDevice>("paired", "Paired", "recording");
+        device->setState("networkAddress", 4660);
+        device->setState("endpoint", 11);
+        ASSERT_TRUE(manager.addDevice(device));
+        ASSERT_TRUE(manager.addDevice(std::make_shared<SwitchDevice>("other", "Other", "local")));
+        manager.shutdown();
+    }
+    {
+        EventBus eventBus;
+        Database database(path);
+        ASSERT_TRUE(database.initialize());
+        DeviceManager manager(eventBus, database);
+        ASSERT_TRUE(manager.initialize());
+
+        auto device = manager.getDevice("paired");
+        ASSERT_NE(device, nullptr);
+        EXPECT_EQ(device->getProperty("networkAddress"), 4660) << "what the handler rebuilds from";
+        EXPECT_EQ(device->getProperty("endpoint"), 11);
+
+        ASSERT_TRUE(manager.loadProtocol("recording", nlohmann::json::object()));
+        EXPECT_EQ(protocol->restored, std::vector<std::string>{"paired"});
+
+        protocol->restored.clear();
+        ASSERT_TRUE(manager.addDevice(std::make_shared<SwitchDevice>("typed", "Typed", "recording")));
+        EXPECT_EQ(protocol->restored, std::vector<std::string>{"typed"}) << "added after the protocol loaded";
+
+        ASSERT_TRUE(manager.removeDevice("typed"));
+        EXPECT_EQ(protocol->forgotten, std::vector<std::string>{"typed"});
+        manager.shutdown();
+    }
+    ProtocolFactory::instance().unregisterProtocol("recording");
     std::remove(path.c_str());
 }

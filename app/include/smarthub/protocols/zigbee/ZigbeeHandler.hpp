@@ -89,6 +89,8 @@ public:
 
     nlohmann::json getStatus() const override;
     std::vector<std::string> getKnownDeviceAddresses() const override;
+    void restoreDevice(const IDevice& device) override;
+    void forgetDevice(const std::string& deviceId) override;
 
     // ========================================================================
     // Zigbee-specific methods
@@ -137,6 +139,8 @@ private:
     // Address conversion
     std::string ieeeToDeviceId(uint64_t ieeeAddr) const;
     std::optional<uint64_t> deviceIdToIeee(const std::string& deviceId) const;
+    std::optional<std::string> savedDeviceId(uint64_t ieeeAddr) const;
+    static std::optional<uint64_t> parseIeeeAddress(std::string text);
 
     // Dependencies
     EventBus& m_eventBus;
@@ -189,6 +193,9 @@ private:
     std::map<uint64_t, std::string> m_ieeeToDeviceId;
     std::map<std::string, uint64_t> m_deviceIdToIeee;
     std::map<uint64_t, uint8_t> m_deviceEndpoints;  // Primary endpoint per device
+    // Devices the hub keeps, IEEE to device id. Announcing again doesn't make one of these new, and
+    // this outlives a leave, because the hub still has the device when it rejoins.
+    std::map<uint64_t, std::string> m_savedDevices;
     mutable std::mutex m_deviceMutex;
 };
 
