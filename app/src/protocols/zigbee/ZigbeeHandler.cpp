@@ -75,27 +75,6 @@ std::vector<uint16_t> clustersFor(DeviceType type) {
 }
 
 /** The endpoint that does the work for this device type, or else the first application one. */
-/** The first application endpoint with each cluster. */
-std::map<uint16_t, uint8_t> clusterEndpointsOf(const ZigbeeDeviceInfo& info) {
-    std::map<uint16_t, uint8_t> endpoints;
-    for (uint8_t endpoint : info.endpoints) {
-        auto clusters = info.inClusters.find(endpoint);
-        if (!isApplicationEndpoint(endpoint) || clusters == info.inClusters.end()) continue;
-        for (uint16_t cluster : clusters->second) {
-            endpoints.emplace(cluster, endpoint);
-        }
-    }
-    return endpoints;
-}
-
-nlohmann::json clusterEndpointsJson(const std::map<uint16_t, uint8_t>& endpoints) {
-    nlohmann::json json = nlohmann::json::object();
-    for (const auto& [cluster, endpoint] : endpoints) {
-        json[std::to_string(cluster)] = endpoint;
-    }
-    return json;
-}
-
 std::optional<uint8_t> primaryEndpoint(const ZigbeeDeviceInfo& info, DeviceType type) {
     for (uint16_t cluster : clustersFor(type)) {
         for (uint8_t endpoint : info.endpoints) {
@@ -111,6 +90,53 @@ std::optional<uint8_t> primaryEndpoint(const ZigbeeDeviceInfo& info, DeviceType 
         if (isApplicationEndpoint(endpoint)) return endpoint;
     }
     return std::nullopt;
+}
+
+using ClusterEndpoints = std::map<uint16_t, std::vector<uint8_t>>;
+
+/** The application endpoints with each cluster. The primary one comes first, as it does the work. */
+ClusterEndpoints clusterEndpointsOf(const ZigbeeDeviceInfo& info, std::optional<uint8_t> primary) {
+    ClusterEndpoints endpoints;
+    const auto add = [&](uint8_t endpoint) {
+        auto clusters = info.inClusters.find(endpoint);
+        if (!isApplicationEndpoint(endpoint) || clusters == info.inClusters.end()) return;
+        for (uint16_t cluster : clusters->second) {
+            auto& list = endpoints[cluster];
+            if (std::find(list.begin(), list.end(), endpoint) == list.end()) {
+                list.push_back(endpoint);
+            }
+        }
+    };
+    if (primary) add(*primary);
+    for (uint8_t endpoint : info.endpoints) add(endpoint);
+    return endpoints;
+}
+
+nlohmann::json clusterEndpointsJson(const ClusterEndpoints& endpoints) {
+    nlohmann::json json = nlohmann::json::object();
+    for (const auto& [cluster, list] : endpoints) {
+        json[std::to_string(cluster)] = list;
+    }
+    return json;
+}
+
+ClusterEndpoints clusterEndpointsFromJson(const nlohmann::json& json) {
+    ClusterEndpoints endpoints;
+    for (const auto& [cluster, list] : json.items()) {
+        char* end = nullptr;
+        const unsigned long id = std::strtoul(cluster.c_str(), &end, 10);
+        if (cluster.empty() || *end != '\0' || id > 0xFFFF || !list.is_array()) continue;
+        std::vector<uint8_t> numbers;
+        for (const auto& endpoint : list) {
+            if (endpoint.is_number_integer() && endpoint.get<int>() >= 1 && endpoint.get<int>() <= 240) {
+                numbers.push_back(static_cast<uint8_t>(endpoint.get<int>()));
+            }
+        }
+        if (!numbers.empty()) {
+            endpoints[static_cast<uint16_t>(id)] = std::move(numbers);
+        }
+    }
+    return endpoints;
 }
 
 /** Reads a time setting in milliseconds, using the default if it's missing or out of range. */
@@ -346,7 +372,7 @@ void ZigbeeHandler::onNetworkAddressFound(uint16_t nwkAddr, uint64_t ieeeAddr, b
     bool endpointKnown = false;
     {
         std::lock_guard<std::mutex> lock(m_deviceMutex);
-        endpointKnown = m_deviceEndpoints.count(ieeeAddr) > 0;
+        endpointKnown = m_deviceEndpoints.count(ieeeAddr) > 0 && m_clusterEndpoints.count(ieeeAddr) > 0;
     }
 
     if (changed) {
@@ -501,27 +527,42 @@ void ZigbeeHandler::eraseMappingLocked(uint64_t ieeeAddr) {
     m_zoneAlarms.erase(ieeeAddr);
 }
 
-uint8_t ZigbeeHandler::endpointFor(uint64_t ieeeAddr, uint16_t cluster) const {
+std::optional<uint8_t> ZigbeeHandler::clusterEndpoint(uint64_t ieeeAddr, uint16_t cluster) const {
     std::lock_guard<std::mutex> lock(m_deviceMutex);
     auto device = m_clusterEndpoints.find(ieeeAddr);
     if (device != m_clusterEndpoints.end()) {
         auto found = device->second.find(cluster);
-        if (found != device->second.end()) {
-            return found->second;
+        if (found != device->second.end() && !found->second.empty()) {
+            return found->second.front();
         }
     }
+    return std::nullopt;
+}
+
+uint8_t ZigbeeHandler::endpointFor(uint64_t ieeeAddr, uint16_t cluster) const {
+    if (const auto endpoint = clusterEndpoint(ieeeAddr, cluster)) {
+        return *endpoint;
+    }
+    std::lock_guard<std::mutex> lock(m_deviceMutex);
     auto primary = m_deviceEndpoints.find(ieeeAddr);
     return primary != m_deviceEndpoints.end() ? primary->second : 1;
 }
 
-bool ZigbeeHandler::isOtherEndpoint(uint64_t ieeeAddr, uint16_t cluster, uint8_t endpoint) const {
+bool ZigbeeHandler::isOtherGang(uint64_t ieeeAddr, uint16_t cluster, uint8_t endpoint) const {
+    // Only what switches something. Two temperature endpoints aren't gangs, and a sensor may well
+    // send from the second. An endpoint only sending this cluster, like a button, isn't listed.
+    if (cluster != zcl::cluster::ON_OFF && cluster != zcl::cluster::LEVEL_CONTROL &&
+        cluster != zcl::cluster::COLOR_CONTROL) {
+        return false;
+    }
     std::lock_guard<std::mutex> lock(m_deviceMutex);
     auto device = m_clusterEndpoints.find(ieeeAddr);
     if (device == m_clusterEndpoints.end()) {
         return false;
     }
     auto found = device->second.find(cluster);
-    return found != device->second.end() && found->second != endpoint;
+    return found != device->second.end() && !found->second.empty() && found->second.front() != endpoint &&
+           std::find(found->second.begin(), found->second.end(), endpoint) != found->second.end();
 }
 
 void ZigbeeHandler::declineLocked(uint64_t ieeeAddr) {
@@ -617,16 +658,7 @@ void ZigbeeHandler::restoreDevice(const IDevice& device) {
             }
         }
         if (state.contains("clusterEndpoints") && state["clusterEndpoints"].is_object()) {
-            auto& endpoints = m_clusterEndpoints[*ieeeAddr];
-            for (const auto& [cluster, endpoint] : state["clusterEndpoints"].items()) {
-                if (!endpoint.is_number_integer()) continue;
-                char* end = nullptr;
-                const unsigned long id = std::strtoul(cluster.c_str(), &end, 10);
-                const int number = endpoint.get<int>();
-                if (*end == '\0' && !cluster.empty() && id <= 0xFFFF && number >= 1 && number <= 240) {
-                    endpoints[static_cast<uint16_t>(id)] = static_cast<uint8_t>(number);
-                }
-            }
+            m_clusterEndpoints[*ieeeAddr] = clusterEndpointsFromJson(state["clusterEndpoints"]);
         }
     }
 
@@ -1074,6 +1106,7 @@ void ZigbeeHandler::finishPairing(uint64_t ieeeAddr) {
     if (const auto savedId = savedDeviceId(ieeeAddr)) {
         const DeviceType savedType = resolveDeviceType(*deviceInfo);
         const std::optional<uint8_t> savedEndpoint = primaryEndpoint(*deviceInfo, savedType);
+        nlohmann::json merged;
         {
             std::lock_guard<std::mutex> lock(m_deviceMutex);
             m_ieeeToDeviceId[ieeeAddr] = *savedId;
@@ -1081,12 +1114,17 @@ void ZigbeeHandler::finishPairing(uint64_t ieeeAddr) {
             if (savedEndpoint) {
                 m_deviceEndpoints[ieeeAddr] = *savedEndpoint;
             }
-            m_clusterEndpoints[ieeeAddr] = clusterEndpointsOf(*deviceInfo);
+            // Merged, as an endpoint that didn't answer this time still has what it had
+            auto& known = m_clusterEndpoints[ieeeAddr];
+            for (auto& [cluster, endpoints] : clusterEndpointsOf(*deviceInfo, savedEndpoint)) {
+                known[cluster] = std::move(endpoints);
+            }
+            merged = clusterEndpointsJson(known);
         }
         if (savedEndpoint) {
             setupReporting(ieeeAddr, deviceInfo->networkAddress, savedType);
             notifyState(*savedId, "endpoint", static_cast<int>(*savedEndpoint));
-            notifyState(*savedId, "clusterEndpoints", clusterEndpointsJson(clusterEndpointsOf(*deviceInfo)));
+            notifyState(*savedId, "clusterEndpoints", merged);
         }
         return;
     }
@@ -1135,11 +1173,12 @@ void ZigbeeHandler::finishPairing(uint64_t ieeeAddr) {
 
     DeviceType type = resolveDeviceType(*deviceInfo);
     std::optional<uint8_t> endpoint = primaryEndpoint(*deviceInfo, type);
+    const ClusterEndpoints clusters = clusterEndpointsOf(*deviceInfo, endpoint);
 
     if (endpoint) {
         // Commands need these after a restart
         device->setState("endpoint", static_cast<int>(*endpoint));
-        device->setState("clusterEndpoints", clusterEndpointsJson(clusterEndpointsOf(*deviceInfo)));
+        device->setState("clusterEndpoints", clusterEndpointsJson(clusters));
     }
     if (deviceInfo->zoneType) {
         device->setState("zoneType", static_cast<int>(*deviceInfo->zoneType));
@@ -1162,7 +1201,7 @@ void ZigbeeHandler::finishPairing(uint64_t ieeeAddr) {
         m_ieeeToDeviceId[ieeeAddr] = deviceId;
         m_deviceIdToIeee[deviceId] = ieeeAddr;
         m_zoneAlarms[ieeeAddr] = zoneAlarmFor(type, deviceInfo->zoneType);
-        m_clusterEndpoints[ieeeAddr] = clusterEndpointsOf(*deviceInfo);
+        m_clusterEndpoints[ieeeAddr] = clusters;
         if (endpoint) {
             m_deviceEndpoints[ieeeAddr] = *endpoint;
         }
@@ -1263,13 +1302,13 @@ void ZigbeeHandler::onAttributeReport(uint16_t nwkAddr, const ZclAttributeValue&
         return;
     }
 
-    // Convert attribute to state update - call callback for each property
     // On a device with several of something, like a two-gang switch, only the first is this device
-    if (isOtherEndpoint(deviceInfo->ieeeAddress, attr.clusterId, attr.endpoint)) {
+    if (isOtherGang(deviceInfo->ieeeAddress, attr.clusterId, attr.endpoint)) {
         LOG_DEBUG("Ignoring report from endpoint %d of %s", attr.endpoint, deviceId.c_str());
         return;
     }
 
+    // Convert attribute to state update - call callback for each property
     switch (attr.clusterId) {
         case zcl::cluster::ON_OFF:
             if (attr.attributeId == zcl::attr::onoff::ON_OFF) {
@@ -1378,7 +1417,7 @@ void ZigbeeHandler::onCommandReceived(uint16_t nwkAddr, uint8_t endpoint,
         return;
     }
 
-    if (isOtherEndpoint(deviceInfo->ieeeAddress, cluster, endpoint)) {
+    if (isOtherGang(deviceInfo->ieeeAddress, cluster, endpoint)) {
         LOG_DEBUG("Ignoring command from endpoint %d of %s", endpoint, deviceId.c_str());
         return;
     }
@@ -1567,21 +1606,14 @@ void ZigbeeHandler::setupReporting(uint64_t ieeeAddr, uint16_t nwkAddr, DeviceTy
     // Configure attribute reporting based on device type
     // Min interval: 1 second, Max interval: 5 minutes
 
-    // A device's clusters can be on different endpoints, and it might not have them all. With no
-    // cluster information, as with a database entry, assume it does, on its primary endpoint.
     const auto report = [&](uint16_t cluster, uint16_t attribute, uint8_t dataType, uint16_t minInterval,
                             const std::vector<uint8_t>& change) {
         if (pairingStopped()) return;  // Each request can block on an unresponsive radio
-        {
-            std::lock_guard<std::mutex> lock(m_deviceMutex);
-            auto device = m_clusterEndpoints.find(ieeeAddr);
-            if (device != m_clusterEndpoints.end() && !device->second.empty() &&
-                device->second.count(cluster) == 0) {
-                return;
-            }
+        const auto endpoint = clusterEndpoint(ieeeAddr, cluster);
+        if (endpoint) {  // It might not have them all
+            m_coordinator->configureReporting(nwkAddr, *endpoint, cluster, attribute, dataType,
+                                              minInterval, 300, change);
         }
-        m_coordinator->configureReporting(nwkAddr, endpointFor(ieeeAddr, cluster), cluster, attribute,
-                                          dataType, minInterval, 300, change);
     };
 
     switch (type) {
@@ -1610,21 +1642,11 @@ void ZigbeeHandler::setupReporting(uint64_t ieeeAddr, uint16_t nwkAddr, DeviceTy
                    zcl::datatype::INT16, 60, {0x32, 0x00});  // 50 = 0.5°C
             break;
 
-        case DeviceType::MotionSensor: {
+        case DeviceType::MotionSensor:
             // IAS Zone status arrives as notifications. An occupancy sensor needs asking to report.
-            bool hasOccupancy = false;
-            {
-                std::lock_guard<std::mutex> lock(m_deviceMutex);
-                auto device = m_clusterEndpoints.find(ieeeAddr);
-                hasOccupancy = device != m_clusterEndpoints.end() &&
-                               device->second.count(zcl::cluster::OCCUPANCY_SENSING) > 0;
-            }
-            if (hasOccupancy) {
-                report(zcl::cluster::OCCUPANCY_SENSING, zcl::attr::occupancy::OCCUPANCY,
-                       zcl::datatype::BITMAP8, 1, {});
-            }
+            report(zcl::cluster::OCCUPANCY_SENSING, zcl::attr::occupancy::OCCUPANCY,
+                   zcl::datatype::BITMAP8, 1, {});
             break;
-        }
 
         default:
             break;
