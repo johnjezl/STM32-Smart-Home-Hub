@@ -297,9 +297,10 @@ std::string validateTrigger(const nlohmann::json& trigger) {
         if (trigger.value("deviceId", trigger.value("device_id", "")).empty()) {
             return type + " trigger needs a device_id";
         }
-        if (trigger.value("property", "").empty()) {
-            return type + " trigger needs a property";
-        }
+        const std::string property = trigger.value("property", "");
+        if (property.empty()) return type + " trigger needs a property";
+        // DeviceManager publishes events like _removed while holding its lock
+        if (property[0] == '_') return "a trigger can't use the internal property " + property;
         if (type == "sensor_threshold") {
             const std::string op = trigger.value("compare_op", "");
             if (op != "eq" && op != "neq" && op != "gt" && op != "gte" && op != "lt" &&
@@ -406,7 +407,9 @@ nlohmann::json triggerList(const nlohmann::json& j) {
 
 }  // namespace
 
-std::string Automation::validateJson(const nlohmann::json& j) {
+namespace {
+
+std::string validateFields(const nlohmann::json& j) {
     if (j.value("name", "").empty()) return "name is required";
 
     // The API addresses automations by id in the URL path
@@ -449,6 +452,16 @@ std::string Automation::validateJson(const nlohmann::json& j) {
         if (!problem.empty()) return problem;
     }
     return "";
+}
+
+}  // namespace
+
+std::string Automation::validateJson(const nlohmann::json& j) {
+    try {
+        return validateFields(j);
+    } catch (const nlohmann::json::type_error&) {
+        return "a field has the wrong type";
+    }
 }
 
 Automation Automation::fromJson(const nlohmann::json& j) {

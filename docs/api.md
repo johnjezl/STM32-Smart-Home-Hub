@@ -618,6 +618,8 @@ Create a new automation.
 
 An action's property has to be one a client can set on that device, such as `on` or `brightness`. An action can also be `{"type": "delay", "delayMs": 500}`. Delays can total at most 60 seconds.
 
+An interval's countdown starts again when the hub restarts or the automation is changed or re-enabled, so an interval longer than the hub stays up won't fire.
+
 `condition` is optional, and must hold for the actions to run:
 
 ```json
@@ -626,11 +628,11 @@ An action's property has to be one a client can set on that device, such as `on`
 
 To combine conditions, use `{"is_group": true, "group_op": "and", "children": [ ... ]}`, where `group_op` is `and` or `or`.
 
-**Response (200 OK):**
+**Response (201 Created):**
 ```json
 {
   "success": true,
-  "id": "auto-abc123"
+  "id": "auto_3f9a1c2d"
 }
 ```
 

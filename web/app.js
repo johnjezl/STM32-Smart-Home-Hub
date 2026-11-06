@@ -664,9 +664,16 @@ class SmartHubApp {
 
         switch (trigger.type) {
             case 'device_state':
-                return `When ${trigger.device_id || 'device'} ${trigger.property} becomes ${trigger.to_value}`;
-            case 'time':
-                return `At ${trigger.hour || 0}:${String(trigger.minute || 0).padStart(2, '0')}`;
+                return trigger.to_value === undefined
+                    ? `When ${trigger.device_id || 'device'} ${trigger.property} changes`
+                    : `When ${trigger.device_id || 'device'} ${trigger.property} becomes ${trigger.to_value}`;
+            case 'time': {
+                const hour = trigger.hour === -1 ? 'every hour' : trigger.hour;
+                const minute = trigger.minute === -1 ? 'every minute' : String(trigger.minute).padStart(2, '0');
+                return trigger.hour === -1 || trigger.minute === -1
+                    ? `At ${hour}, ${minute}`
+                    : `At ${hour}:${minute}`;
+            }
             case 'time_interval':
                 return `Every ${trigger.interval_minutes} minutes`;
             case 'sensor_threshold':

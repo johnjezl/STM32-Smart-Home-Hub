@@ -759,6 +759,9 @@ TEST_F(WebAuthTest, AutomationsThatCouldNeverRunAreRejected) {
          {"trigger", {{"type", "time"}, {"hour", 8}, {"minute", 0}}},
          {"actions", {{{"type", "delay"}, {"delayMs", 1}},
                       {{"type", "delay"}, {"delayMs", 2147483647}}}}},
+        {{"name", "Internal property"},
+         {"trigger", {{"type", "device_state"}, {"device_id", "s"}, {"property", "_removed"}}},
+         {"actions", {action}}},
         {{"name", "Long delay"},
          {"trigger", {{"type", "time"}, {"hour", 8}, {"minute", 0}}},
          {"actions", {{{"type", "delay"}, {"delayMs", 60001}}}}},
@@ -789,6 +792,16 @@ TEST_F(WebAuthTest, AutomationsThatCouldNeverRunAreRejected) {
         EXPECT_EQ(request("POST", "/api/automations", options).status, 400) << body.dump();
     }
     EXPECT_EQ(request("GET", "/api/automations", admin).json().size(), 0u);
+
+    // A field of the wrong type gets a clear message
+    RequestOptions wrongType = admin;
+    wrongType.body = nlohmann::json{{"name", "Null interval"},
+                                    {"trigger", {{"type", "time_interval"},
+                                                 {"interval_minutes", nullptr}}},
+                                    {"actions", {action}}}.dump();
+    const Response wrongTypeResponse = request("POST", "/api/automations", wrongType);
+    EXPECT_EQ(wrongTypeResponse.status, 400);
+    EXPECT_EQ(wrongTypeResponse.json()["error"], "a field has the wrong type");
 
     // Conditions nested too deeply
     nlohmann::json deep = {{"leaf", {{"device_id", "x"}, {"property", "on"}, {"op", "eq"},
