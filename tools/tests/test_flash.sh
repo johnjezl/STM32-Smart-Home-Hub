@@ -40,8 +40,8 @@ esac
 MOCK
 cat > "$MOCKS/findmnt" <<'MOCK'
 #!/bin/bash
-case "$4" in
-    /)    echo "${MOCK_ROOT_SOURCE:-/dev/rootpart} ext4" ;;
+case "${!#}" in
+    /)    [ -z "${MOCK_FINDMNT_BROKEN:-}" ] || exit 1; echo "${MOCK_ROOT_SOURCE:-/dev/rootpart} ext4" ;;
     /var) [ -n "${MOCK_SEPARATE_VAR:-}" ] && echo "/dev/varpart ext4" ;;
     /home) [ -n "${MOCK_NFS_HOME:-}" ] && echo "server:/home nfs4" ;;
     /boot/efi) [ -n "${MOCK_AUTOMOUNT_EFI:-}" ] && printf 'systemd-1 autofs\n/dev/efipart vfat\n' ;;
@@ -132,6 +132,9 @@ check "still sees the root disk when /var is separate" '! wrote && said "holding
 
 echo "$BLOCK" | run MOCK_ROOT_SOURCE="rpool/ROOT/x" "$FLASH" "$BLOCK"
 check "stops if it can't tell which disk is the root" '! wrote && said "Can.t tell"'
+
+echo "$BLOCK" | run MOCK_FINDMNT_BROKEN=1 "$FLASH" "$BLOCK"
+check "stops if findmnt can't see the root" '! wrote && said "Can.t tell"'
 
 echo "$BLOCK" | run MOCK_ROOT_UNKNOWN=1 "$FLASH" "$BLOCK"
 check "stops if lsblk can't say what the root is on" '! wrote && said "Can.t tell"'

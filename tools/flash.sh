@@ -39,6 +39,10 @@ is_removable() {
 # The disks this system is running from, through any partitions, RAID or LVM. Dies if it can't tell.
 system_disks() {
     local mountpoint source fstype ancestors
+    # Most of these can legitimately not be mounts, but / always is. So if findmnt can't see it,
+    # findmnt can't be believed about the rest.
+    [ -n "$(findmnt -nr -o SOURCE / || true)" ] || die "Can't tell which disk holds /"
+
     for mountpoint in / /boot /boot/efi /home /usr /var; do
         while read -r source fstype; do
             case "$fstype" in
