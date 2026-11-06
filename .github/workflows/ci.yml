@@ -28,6 +28,12 @@ jobs:
         with:
           submodules: recursive
 
+      # A stalled mirror connection should fail fast and retry, rather than use up the job's time limit
+      - name: Configure apt retries
+        run: |
+          printf 'Acquire::Retries "5";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' \
+            | sudo tee /etc/apt/apt.conf.d/80-ci-network
+
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -107,6 +113,12 @@ jobs:
         with:
           submodules: recursive
 
+      # A stalled mirror connection should fail fast and retry, rather than use up the job's time limit
+      - name: Configure apt retries
+        run: |
+          printf 'Acquire::Retries "5";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' \
+            | sudo tee /etc/apt/apt.conf.d/80-ci-network
+
       - name: Install cross-compilation toolchain
         run: |
           sudo apt-get update
@@ -177,6 +189,12 @@ jobs:
           path: ~/apt-archives
           key: m4-apt-archives-v1
 
+      # A stalled mirror connection should fail fast and retry, rather than use up the job's time limit
+      - name: Configure apt retries
+        run: |
+          printf 'Acquire::Retries "5";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' \
+            | sudo tee /etc/apt/apt.conf.d/80-ci-network
+
       - name: Install dependencies
         run: |
           mkdir -p ~/apt-archives/partial
@@ -221,6 +239,12 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
+
+      # A stalled mirror connection should fail fast and retry, rather than use up the job's time limit
+      - name: Configure apt retries
+        run: |
+          printf 'Acquire::Retries "5";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' \
+            | sudo tee /etc/apt/apt.conf.d/80-ci-network
 
       - name: Install dependencies
         run: |
@@ -292,6 +316,12 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
+
+      # A stalled mirror connection should fail fast and retry, rather than use up the job's time limit
+      - name: Configure apt retries
+        run: |
+          printf 'Acquire::Retries "5";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' \
+            | sudo tee /etc/apt/apt.conf.d/80-ci-network
 
       - name: Install dependencies
         run: |
