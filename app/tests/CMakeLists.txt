@@ -332,8 +332,9 @@ if(GTEST_AVAILABLE)
     endif()
 
     add_test(NAME AllTests COMMAND smarthub_tests)
-    # These all listen on ports from the same range, so running them together can collide
-    set_tests_properties(AllTests WebServer WebAuth WebAPI PROPERTIES RESOURCE_LOCK web_ports)
+    # AllTests repeats the others, which share ports and fixed database paths, so they can't overlap
+    set_tests_properties(AllTests WebServer WebAuth WebAPI DeviceManager Shutdown
+                         PROPERTIES RESOURCE_LOCK shared_test_resources)
 
     # ==== Code Coverage ====
 

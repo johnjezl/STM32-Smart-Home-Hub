@@ -286,15 +286,24 @@ DevicePtr WifiHandler::createMqttDevice(const MqttDiscoveryConfig& config) {
 void WifiHandler::onDeviceStateUpdate(const std::string& deviceId,
                                        const std::string& property,
                                        const nlohmann::json& value) {
-    std::lock_guard<std::mutex> lock(m_deviceMutex);
-
-    auto it = m_devices.find(deviceId);
-    if (it != m_devices.end() && it->second.device) {
-        it->second.device->setState(property, value);
+    DevicePtr device;
+    DeviceStateCallback callback;
+    {
+        std::lock_guard<std::mutex> lock(m_deviceMutex);
+        auto it = m_devices.find(deviceId);
+        if (it != m_devices.end()) {
+            device = it->second.device;
+        }
+        callback = m_stateCallback;
     }
 
-    if (m_stateCallback) {
-        m_stateCallback(deviceId, property, value);
+    // The callback first. It's often given this same device object, and has to see the change
+    // to save it and tell anyone. Unlocked, because it can lead back into this class.
+    if (callback) {
+        callback(deviceId, property, value);
+    }
+    if (device) {
+        device->setState(property, value);
     }
 }
 

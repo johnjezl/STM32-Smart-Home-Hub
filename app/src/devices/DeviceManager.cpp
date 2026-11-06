@@ -32,7 +32,7 @@ bool DeviceManager::initialize() {
     loadDevicesFromDatabase();
 
     {
-        std::lock_guard<std::mutex> lock(m_stateWriterMutex);
+        std::lock_guard<std::mutex> lock(m_stateWriteMutex);
         m_stateWriterStopping = false;
     }
     if (!m_stateWriter.joinable()) {
@@ -52,9 +52,6 @@ void DeviceManager::shutdown() {
     // Everything's about to be saved, so it doesn't need the regular writes any more
     stopStateWriter();
 
-    // Save device states
-    saveAllDevices();
-
     // Shutdown all protocols, unlocked: they join threads that may be waiting to
     // call back into this class, which takes m_mutex.
     decltype(m_protocols) protocols;
@@ -66,6 +63,9 @@ void DeviceManager::shutdown() {
         LOG_DEBUG("Shutting down protocol: %s", name.c_str());
         protocol->shutdown();
     }
+
+    // After the protocols have stopped, so this includes the last reports
+    saveAllDevices();
 
     std::lock_guard<std::mutex> lock(m_mutex);
     m_devices.clear();
@@ -607,7 +607,8 @@ bool DeviceManager::saveDevice(const DevicePtr& device) {
         stmt->bind(6, device->room());
         // Ensure config is valid JSON object
         const auto config = device->getConfig();
-        stmt->bind(7, config.is_object() ? config.dump() : "{}");
+        constexpr auto kReplaceBadText = nlohmann::json::error_handler_t::replace;
+        stmt->bind(7, config.is_object() ? config.dump(-1, ' ', false, kReplaceBadText) : "{}");
         if (!stmt->execute()) {
             LOG_ERROR("Failed to save device %s", device->id().c_str());
             return false;
@@ -617,7 +618,7 @@ bool DeviceManager::saveDevice(const DevicePtr& device) {
         std::vector<StateRow> rows;
         const nlohmann::json state = device->getState();
         for (const auto& [property, value] : state.items()) {
-            rows.push_back({device->id(), property, value.dump()});
+            rows.push_back({device->id(), property, value.dump(-1, ' ', false, kReplaceBadText)});
         }
         if (!writeStateRows(rows)) {
             return false;
@@ -660,8 +661,10 @@ bool DeviceManager::writeStateRows(const std::vector<StateRow>& rows) {
 
 void DeviceManager::markStateChanged(const std::string& deviceId, const std::string& property,
                                      const nlohmann::json& value) {
+    // Devices can report text that isn't valid UTF-8, which a plain dump throws on
+    std::string text = value.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
     std::lock_guard<std::mutex> lock(m_stateWriteMutex);
-    m_unsavedState[{deviceId, property}] = value.dump();
+    m_unsavedState[{deviceId, property}] = std::move(text);
 }
 
 bool DeviceManager::flushStateChanges() {
@@ -683,10 +686,17 @@ bool DeviceManager::flushStateChanges() {
         // Probably a device removed since it changed, which shouldn't lose the others
         for (const StateRow& row : batch) {
             if (!writeStateRows({row})) {
-                std::lock_guard<std::mutex> lock(m_mutex);
-                if (m_devices.count(row.deviceId) > 0) {
+                bool exists = false;
+                {
+                    std::lock_guard<std::mutex> lock(m_mutex);
+                    exists = m_devices.count(row.deviceId) > 0;
+                }
+                if (exists) {
                     LOG_ERROR("Failed to save %s.%s", row.deviceId.c_str(), row.property.c_str());
                     saved = false;
+                    // Try again next time, unless there's a newer value by then
+                    std::lock_guard<std::mutex> lock(m_stateWriteMutex);
+                    m_unsavedState.emplace(std::make_pair(row.deviceId, row.property), row.value);
                 }
             }
         }
@@ -704,7 +714,7 @@ bool DeviceManager::flushStateChanges() {
 }
 
 void DeviceManager::stateWriterLoop() {
-    std::unique_lock<std::mutex> lock(m_stateWriterMutex);
+    std::unique_lock<std::mutex> lock(m_stateWriteMutex);
     while (!m_stateWriterStopping) {
         m_stateWriterWake.wait_for(lock, std::chrono::seconds(kStateSaveIntervalSeconds),
                                    [this] { return m_stateWriterStopping; });
@@ -723,7 +733,7 @@ void DeviceManager::stateWriterLoop() {
 
 void DeviceManager::stopStateWriter() {
     {
-        std::lock_guard<std::mutex> lock(m_stateWriterMutex);
+        std::lock_guard<std::mutex> lock(m_stateWriteMutex);
         m_stateWriterStopping = true;
     }
     m_stateWriterWake.notify_all();
@@ -913,19 +923,31 @@ bool DeviceManager::addRoom(const std::string& id, const std::string& name) {
     return false;
 }
 
+bool DeviceManager::roomExists(const std::string& id) {
+    auto stmt = m_database.prepare("SELECT 1 FROM rooms WHERE id = ?");
+    if (!stmt || !stmt->isValid()) {
+        return false;
+    }
+    stmt->bind(1, id);
+    return stmt->step();
+}
+
 bool DeviceManager::updateRoom(const std::string& id, const std::string& name) {
     try {
-        auto stmt = m_database.prepare(
-            "UPDATE rooms SET name = ? WHERE id = ? RETURNING id");
+        if (!roomExists(id)) {
+            return false;
+        }
 
+        auto stmt = m_database.prepare("UPDATE rooms SET name = ? WHERE id = ?");
         if (stmt && stmt->isValid()) {
             stmt->bind(1, name);
             stmt->bind(2, id);
-            if (stmt->step()) {  // A row back means the room exists
+            if (stmt->execute()) {
                 LOG_INFO("Updated room: %s -> %s", id.c_str(), name.c_str());
                 return true;
             }
         }
+        LOG_ERROR("Failed to update room %s", id.c_str());
     } catch (const std::exception& e) {
         LOG_ERROR("Failed to update room %s: %s", id.c_str(), e.what());
     }
@@ -937,34 +959,39 @@ bool DeviceManager::deleteRoom(const std::string& id) {
     try {
         std::lock_guard<std::mutex> lock(m_mutex);
 
-        // First, unassign devices from this room
-        auto updateStmt = m_database.prepare(
-            "UPDATE devices SET room = '' WHERE room = ?");
-        if (!updateStmt || !updateStmt->isValid()) {
-            return false;
-        }
-        updateStmt->bind(1, id);
-        if (!updateStmt->execute()) {
+        if (!roomExists(id)) {
             return false;
         }
 
-        // And in memory, or the next save would put them back
+        // The room first, so a failure can't leave devices unassigned from a room that's still there
+        auto stmt = m_database.prepare("DELETE FROM rooms WHERE id = ?");
+        if (!stmt || !stmt->isValid()) {
+            return false;
+        }
+        stmt->bind(1, id);
+        if (!stmt->execute()) {
+            LOG_ERROR("Failed to delete room %s", id.c_str());
+            return false;
+        }
+
+        auto updateStmt = m_database.prepare("UPDATE devices SET room = '' WHERE room = ?");
+        if (updateStmt && updateStmt->isValid()) {
+            updateStmt->bind(1, id);
+            if (!updateStmt->execute()) {
+                LOG_ERROR("Failed to clear room %s from saved devices", id.c_str());
+            }
+        }
+
+        // And in memory, or the next save would put them back. This also corrects the database
+        // on that save if the update above failed.
         for (const auto& [deviceId, device] : m_devices) {
             if (device->room() == id) {
                 device->setRoom("");
             }
         }
 
-        // Delete the room
-        auto stmt = m_database.prepare(
-            "DELETE FROM rooms WHERE id = ? RETURNING id");
-        if (stmt && stmt->isValid()) {
-            stmt->bind(1, id);
-            if (stmt->step()) {  // A row back means the room existed
-                LOG_INFO("Deleted room: %s", id.c_str());
-                return true;
-            }
-        }
+        LOG_INFO("Deleted room: %s", id.c_str());
+        return true;
     } catch (const std::exception& e) {
         LOG_ERROR("Failed to delete room %s: %s", id.c_str(), e.what());
     }

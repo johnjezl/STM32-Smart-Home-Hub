@@ -723,7 +723,7 @@ TEST_F(DeviceManagerTest, OneBadRowDoesNotLoseTheOthers) {
 // ---------- State, history and rooms surviving saves
 
 TEST_F(DeviceManagerTest, FlushedStateSurvivesAnUncleanStop) {
-    auto* manager = new DeviceManager(eventBus, *database);
+    auto manager = std::make_unique<DeviceManager>(eventBus, *database);
     ASSERT_TRUE(manager->initialize());
     ASSERT_TRUE(manager->addDevice(std::make_shared<SwitchDevice>("lamp", "Lamp")));
     ASSERT_TRUE(manager->setDeviceState("lamp", "on", true));
@@ -736,7 +736,6 @@ TEST_F(DeviceManagerTest, FlushedStateSurvivesAnUncleanStop) {
     restarted.shutdown();
 
     manager->shutdown();
-    delete manager;
 }
 
 TEST_F(DeviceManagerTest, UnflushedStateWaitsForTheNextWrite) {
@@ -834,4 +833,94 @@ TEST_F(DeviceManagerTest, RoomChangesReportFailures) {
     EXPECT_TRUE(manager.deleteRoom("den_test"));
     EXPECT_FALSE(manager.deleteRoom("den_test"));
     manager.shutdown();
+}
+
+TEST_F(DeviceManagerTest, DeletingARoomThatDoesNotExistLeavesDevicesAlone) {
+    DeviceManager manager(eventBus, *database);
+    ASSERT_TRUE(manager.initialize());
+    auto device = std::make_shared<SwitchDevice>("lamp", "Lamp");
+    device->setRoom("no_such_room");
+    ASSERT_TRUE(manager.addDevice(device));
+
+    EXPECT_FALSE(manager.deleteRoom("no_such_room"));
+    EXPECT_EQ(manager.getDevice("lamp")->room(), "no_such_room");
+    manager.shutdown();
+}
+
+TEST_F(DeviceManagerTest, FailedStateWritesAreTriedAgain) {
+    DeviceManager manager(eventBus, *database);
+    ASSERT_TRUE(manager.initialize());
+    ASSERT_TRUE(manager.addDevice(std::make_shared<SwitchDevice>("lamp", "Lamp")));
+    ASSERT_TRUE(manager.setDeviceState("lamp", "on", true));
+
+    // Stands in for a write failing: the state row can't be written until this is gone
+    ASSERT_TRUE(database->execute(
+        "CREATE TRIGGER block_state BEFORE UPDATE ON device_state "
+        "BEGIN SELECT RAISE(ABORT, 'blocked'); END"));
+    EXPECT_FALSE(manager.flushStateChanges());
+
+    ASSERT_TRUE(database->execute("DROP TRIGGER block_state"));
+    EXPECT_TRUE(manager.flushStateChanges());
+
+    auto stmt = database->prepare(
+        "SELECT value FROM device_state WHERE device_id = 'lamp' AND property = 'on'");
+    ASSERT_TRUE(stmt->step());
+    EXPECT_EQ(stmt->getString(0), "true");
+    manager.shutdown();
+}
+
+namespace {
+
+// Reports a state change from its own shutdown, as a protocol's last report might
+class ReportsOnShutdown : public smarthub::testing::MockProtocolHandler {
+public:
+    using MockProtocolHandler::MockProtocolHandler;
+
+    void shutdown() override {
+        simulateStateChange("lamp", "on", true);
+        MockProtocolHandler::shutdown();
+    }
+};
+
+}  // namespace
+
+TEST_F(DeviceManagerTest, ReportArrivingDuringShutdownIsSaved) {
+    ProtocolFactory::instance().registerProtocol("reports_on_shutdown",
+        [](EventBus& bus, const nlohmann::json& config) -> ProtocolHandlerPtr {
+            return std::make_shared<ReportsOnShutdown>(bus, config);
+        });
+
+    {
+        DeviceManager manager(eventBus, *database);
+        ASSERT_TRUE(manager.initialize());
+        ASSERT_TRUE(manager.addDevice(std::make_shared<SwitchDevice>("lamp", "Lamp")));
+        ASSERT_TRUE(manager.loadProtocol("reports_on_shutdown", nlohmann::json::object()));
+        manager.shutdown();
+    }
+    ProtocolFactory::instance().unregisterProtocol("reports_on_shutdown");
+
+    auto stmt = database->prepare(
+        "SELECT value FROM device_state WHERE device_id = 'lamp' AND property = 'on'");
+    ASSERT_TRUE(stmt->step());
+    EXPECT_EQ(stmt->getString(0), "true");
+}
+
+TEST_F(DeviceManagerTest, StateWithInvalidTextDoesNotThrow) {
+    ProtocolFactory::instance().registerProtocol("plain_mock",
+        [](EventBus& bus, const nlohmann::json& config) -> ProtocolHandlerPtr {
+            return std::make_shared<smarthub::testing::MockProtocolHandler>(bus, config);
+        });
+
+    DeviceManager manager(eventBus, *database);
+    ASSERT_TRUE(manager.initialize());
+    ASSERT_TRUE(manager.addDevice(std::make_shared<SwitchDevice>("lamp", "Lamp")));
+    ASSERT_TRUE(manager.loadProtocol("plain_mock", nlohmann::json::object()));
+    auto* mock = dynamic_cast<smarthub::testing::MockProtocolHandler*>(manager.getProtocol("plain_mock"));
+    ASSERT_NE(mock, nullptr);
+
+    EXPECT_NO_THROW(mock->simulateStateChange("lamp", "note", std::string("bad\xFF")));
+    EXPECT_TRUE(manager.flushStateChanges());
+
+    manager.shutdown();
+    ProtocolFactory::instance().unregisterProtocol("plain_mock");
 }
