@@ -68,6 +68,8 @@ The request must have the `Content-Type: application/json` header, or it gets `4
 
 **Response (400 Bad Request):** the username or password is missing.
 
+**Response (403 Forbidden):** the request was addressed to a public DNS name. Use the hub's IP address or local name.
+
 **Response (401 Unauthorized):** the same answer for a wrong password, an unknown username and a disabled account.
 ```json
 {
@@ -141,7 +143,7 @@ The request must have the `Content-Type: application/json` header, or it gets `4
 
 **Response (400 Bad Request):** the `error` field says what's wrong with the username or password.
 
-**Response (403 Forbidden):** the request was addressed to a public DNS name. Use the hub's IP address or `.local` name.
+**Response (403 Forbidden):** the request was addressed to a public DNS name. Use the hub's IP address or local name.
 
 **Response (409 Conflict):** an account already exists.
 

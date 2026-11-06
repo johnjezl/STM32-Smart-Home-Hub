@@ -48,16 +48,18 @@ namespace {
 
 constexpr uint64_t kRateLimitWindowMs = 60000;
 constexpr size_t kMaxTrackedClients = 1024;
+constexpr const char* kUseLocalAddress = "Open the hub by its IP address or local name";
 
 uint64_t steadyNowMs() {
     return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now().time_since_epoch()).count());
 }
 
-// Keeps a per-client table from growing without limit.
-void pruneExpired(std::unordered_map<std::string, RateLimitEntry>& entries,
-                  uint64_t nowMs, uint64_t windowMs) {
-    if (entries.size() < kMaxTrackedClients) {
+// Keeps a per-client table from growing without limit, by making room when a
+// client it doesn't know arrives at a full table.
+void makeRoomFor(const std::string& ip, std::unordered_map<std::string, RateLimitEntry>& entries,
+                 uint64_t nowMs, uint64_t windowMs) {
+    if (entries.size() < kMaxTrackedClients || entries.count(ip) > 0) {
         return;
     }
     for (auto it = entries.begin(); it != entries.end();) {
@@ -67,18 +69,22 @@ void pruneExpired(std::unordered_map<std::string, RateLimitEntry>& entries,
             ++it;
         }
     }
-    // Far more clients than a home network has. Forgetting them is better than
-    // growing without limit and rescanning on every request.
     if (entries.size() >= kMaxTrackedClients) {
-        entries.clear();
+        entries.erase(std::min_element(entries.begin(), entries.end(),
+                                       [](const auto& a, const auto& b) {
+                                           return a.second.windowStart < b.second.windowStart;
+                                       }));
     }
 }
 
 // A page on another site can make its domain resolve to the hub (DNS
-// rebinding), and then counts as same-origin. Public DNS names are the only
-// ones it can do that with, so first-run setup refuses them. Other routes don't
-// need this: that page's origin never receives the session cookie.
+// rebinding), and then counts as same-origin. Only names in public DNS can be
+// used for that, so the routes that create a session refuse them. Other routes
+// don't need this, because that page's origin has no session cookie to send.
 bool isLocalHostHeader(struct mg_http_message* hm) {
+    static const std::vector<std::string> kLocalSuffixes = {".local", ".lan", ".home", ".internal",
+                                                            ".home.arpa"};
+
     struct mg_str* header = mg_http_get_header(hm, "Host");
     if (!header) {
         return false;
@@ -96,11 +102,15 @@ bool isLocalHostHeader(struct mg_http_message* hm) {
 
     const bool isIpv4 = host.find_first_not_of("0123456789.") == std::string::npos;
     const bool isSingleLabel = host.find('.') == std::string::npos;
-    static const std::string kMdnsSuffix = ".local";
-    const bool isMdns = host.size() > kMdnsSuffix.size() &&
-                        host.compare(host.size() - kMdnsSuffix.size(), kMdnsSuffix.size(),
-                                     kMdnsSuffix) == 0;
-    return isIpv4 || isSingleLabel || isMdns;
+    if (isIpv4 || isSingleLabel) {
+        return true;
+    }
+    return std::any_of(kLocalSuffixes.begin(), kLocalSuffixes.end(),
+                       [&host](const std::string& suffix) {
+                           return host.size() > suffix.size() &&
+                                  host.compare(host.size() - suffix.size(), suffix.size(),
+                                               suffix) == 0;
+                       });
 }
 
 AuthInfo authInfoFor(const security::User& user, bool isApiToken) {
@@ -337,7 +347,7 @@ AuthInfo WebServer::checkAuth(struct mg_http_message* hm) {
     }
 
     // Both kinds of credential only name a user. The account is looked up each
-    // time, so disabling, removing or changing it takes effect at once.
+    // time, so disabling or removing it, or changing its role, applies at once.
 
     // Check Authorization header for Bearer token (API token)
     struct mg_str* authHeader = mg_http_get_header(hm, "Authorization");
@@ -366,7 +376,11 @@ AuthInfo WebServer::checkAuth(struct mg_http_message* hm) {
                     m_sessionMgr->touchSession(sessionToken);
                     return authInfoFor(*user, false);
                 }
-                m_sessionMgr->destroySession(sessionToken);
+                // No user can also mean a database error, which shouldn't end
+                // a good session. A removed user's session just expires.
+                if (user) {
+                    m_sessionMgr->destroySession(sessionToken);
+                }
             }
         }
     }
@@ -383,7 +397,7 @@ bool WebServer::checkRateLimit(const std::string& ip) {
 
     std::lock_guard<std::mutex> lock(m_rateLimitMutex);
 
-    pruneExpired(m_rateLimits, nowMs, kRateLimitWindowMs);
+    makeRoomFor(ip, m_rateLimits, nowMs, kRateLimitWindowMs);
     auto& entry = m_rateLimits[ip];
 
     // Reset window if expired (1 minute)
@@ -439,7 +453,7 @@ void WebServer::recordLoginFailure(const std::string& ip) {
 
     std::lock_guard<std::mutex> lock(m_rateLimitMutex);
 
-    pruneExpired(m_loginFailures, nowMs, windowMs);
+    makeRoomFor(ip, m_loginFailures, nowMs, windowMs);
     auto& entry = m_loginFailures[ip];
     if (entry.requestCount == 0 || nowMs - entry.windowStart >= windowMs) {
         entry.windowStart = nowMs;
@@ -824,6 +838,11 @@ void WebServer::apiLogin(struct mg_connection* c, struct mg_http_message* hm) {
         return;
     }
 
+    if (!isLocalHostHeader(hm)) {
+        sendError(c, 403, kUseLocalAddress);
+        return;
+    }
+
     // Checked before the password: hashing is slow and blocks this thread
     const std::string clientIp = getClientIp(c);
     const int retryAfter = loginRetryAfterSeconds(clientIp);
@@ -916,7 +935,7 @@ void WebServer::apiSetup(struct mg_connection* c, struct mg_http_message* hm) {
     }
 
     if (!isLocalHostHeader(hm)) {
-        sendError(c, 403, "Open the hub by its IP address or .local name to set it up");
+        sendError(c, 403, kUseLocalAddress);
         return;
     }
 

@@ -107,7 +107,7 @@ sessionMgr.destroySession(token);
 - Sessions are held in memory, so restarting the hub logs everyone out
 - Each authenticated request restarts the idle timeout. An open dashboard polls, so it counts as activity and stays logged in, which suits a wall-mounted tablet
 - Disabling or removing an account, or changing its role, takes effect on that user's next request
-- At most 5 sessions per user; a new login ends the oldest
+- At most 5 sessions per user; a new login ends the least recently used
 - Logout ends only that browser's session
 
 ### API Token Authentication (`ApiTokenManager`)
@@ -173,7 +173,7 @@ Web authentication is always required, including on the local network. A new hub
 
 Setup closes for good as soon as any account exists, even a disabled one. Until then, **anyone who can reach the hub on the network can claim it**, so create the administrator as soon as the hub is on the network. The hub logs a warning at startup while no account exists.
 
-Setup only accepts a request addressed to an IP address, a `.local` name or a name with no dots. This stops a web page on another site from reaching the hub by pointing its own domain at it (DNS rebinding) while you browse.
+Setup and login only accept a request addressed to an IP address, a name with no dots, or a name ending in `.local`, `.lan`, `.home`, `.internal` or `.home.arpa`. This stops a web page on another site from using your browser to reach the hub, by pointing its own domain at it (DNS rebinding).
 
 `SetupManager` is a separate class for a fuller setup that also generates certificates and initializes the credential store. The application doesn't use it yet.
 

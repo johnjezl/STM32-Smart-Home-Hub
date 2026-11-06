@@ -334,9 +334,24 @@ TEST_F(WebAuthTest, SetupRefusesPublicDnsNames) {
     EXPECT_EQ(request("GET", "/api/setup/status").json()["setupRequired"], true);
 }
 
+TEST_F(WebAuthTest, LoginRefusesPublicDnsNames) {
+    startApp();
+    setUpAdmin();
+
+    RequestOptions rebound(credentials(kAdminName, kAdminPassword));
+    rebound.host = "evil.example";
+    const Response response = request("POST", "/api/auth/login", rebound);
+    EXPECT_EQ(response.status, 403);
+    EXPECT_TRUE(response.sessionCookie().empty());
+
+    rebound.host = "smarthub.local";
+    EXPECT_EQ(request("POST", "/api/auth/login", rebound).status, 200);
+}
+
 TEST_F(WebAuthTest, SetupAcceptsLocalNames) {
     for (const char* host : {"192.168.1.5", "192.168.1.5:8443", "smarthub.local",
-                             "SmartHub.LOCAL:443", "smarthub", "localhost:8080", "[fe80::1]:443"}) {
+                             "SmartHub.LOCAL:443", "smarthub", "localhost:8080", "[fe80::1]:443",
+                             "hub.lan", "hub.home", "hub.internal", "hub.home.arpa"}) {
         startApp();
         RequestOptions local(credentials(kAdminName, kAdminPassword));
         local.host = host;

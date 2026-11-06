@@ -408,6 +408,30 @@ TEST_F(SessionManagerTest, ValidateSessionReturnsCorrectInfo) {
     EXPECT_EQ(session->userAgent, "TestAgent");
 }
 
+TEST(SessionManagerLimitTest, EvictsTheLeastRecentlyUsedSession) {
+    SessionManager sessions(60, 2);
+    const std::string active = sessions.createSession(1, "owner", "admin");
+    std::this_thread::sleep_for(std::chrono::milliseconds(1100));
+    const std::string idle = sessions.createSession(1, "owner", "admin");
+    std::this_thread::sleep_for(std::chrono::milliseconds(1100));
+    ASSERT_TRUE(sessions.touchSession(active));
+
+    const std::string newest = sessions.createSession(1, "owner", "admin");
+
+    EXPECT_TRUE(sessions.validateSession(active).has_value());
+    EXPECT_FALSE(sessions.validateSession(idle).has_value());
+    EXPECT_TRUE(sessions.validateSession(newest).has_value());
+}
+
+TEST(SessionManagerLimitTest, ExpiredSessionsDoNotCountTowardTheLimit) {
+    SessionManager sessions(0, 2);  // Sessions expire as they are created
+    for (int i = 0; i < 5; ++i) {
+        sessions.createSession(1, "owner", "admin");
+    }
+    // Each login cleared the ones before it, so nothing builds up
+    EXPECT_EQ(sessions.sessionCount(), 1u);
+}
+
 TEST_F(SessionManagerTest, InvalidTokenReturnsNullopt) {
     auto session = sessionMgr->validateSession("invalid_token");
     EXPECT_FALSE(session.has_value());

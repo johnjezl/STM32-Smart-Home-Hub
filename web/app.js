@@ -199,6 +199,9 @@ class SmartHubApp {
         this.closeAllModals();
         this.devices = [];
         this.sensors = [];
+        this.rooms = [];
+        this.automations = [];
+        this.render();  // The next user on this browser shouldn't see any of it
         document.body.classList.remove('is-admin');
     }
 

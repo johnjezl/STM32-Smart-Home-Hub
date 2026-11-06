@@ -214,21 +214,27 @@ fallback:
 }
 
 void SessionManager::enforceMaxSessions(const std::string& username) {
-    // Count sessions for user
-    std::vector<std::pair<uint64_t, std::string>> userSessions;  // (createdAt, token)
+    const auto now = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count());
 
-    for (const auto& [token, session] : m_sessions) {
-        if (session.username == username) {
-            userSessions.emplace_back(session.createdAt, token);
+    // Expired sessions don't count, and the least recently used go first, so a
+    // long-lived session that's still active isn't the one to lose its login.
+    std::vector<std::pair<uint64_t, std::string>> userSessions;  // (lastActivity, token)
+    for (auto it = m_sessions.begin(); it != m_sessions.end();) {
+        if (it->second.username != username) {
+            ++it;
+        } else if (now >= it->second.expiresAt) {
+            it = m_sessions.erase(it);
+        } else {
+            userSessions.emplace_back(it->second.lastActivity, it->first);
+            ++it;
         }
     }
 
-    // If over limit, remove oldest sessions
     if (static_cast<int>(userSessions.size()) >= m_maxSessionsPerUser) {
-        // Sort by creation time (oldest first)
         std::sort(userSessions.begin(), userSessions.end());
 
-        // Remove oldest sessions to make room
+        // Remove sessions to make room
         int toRemove = static_cast<int>(userSessions.size()) - m_maxSessionsPerUser + 1;
         for (int i = 0; i < toRemove; i++) {
             m_sessions.erase(userSessions[static_cast<size_t>(i)].second);
