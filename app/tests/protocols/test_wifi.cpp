@@ -673,17 +673,23 @@ TEST_F(WifiHandlerTest, AddedDeviceIsKnownByItsId) {
     ASSERT_EQ(known.size(), 1u);
     EXPECT_FALSE(known[0].empty());
 
+    std::vector<std::pair<std::string, DeviceAvailability>> reported;
+    std::mutex mutex;
+    handler.setDeviceAvailabilityCallback([&](const std::string& id, DeviceAvailability availability) {
+        std::lock_guard<std::mutex> lock(mutex);
+        reported.emplace_back(id, availability);
+    });
+
     // Adding it again replaces it, which disconnects the first, and used to deadlock
     ASSERT_TRUE(handler.addTuyaDevice(device));
     EXPECT_EQ(handler.getKnownDeviceAddresses().size(), 1u);
-
-    // What it reports is under the same id
-    std::vector<std::string> reported;
-    std::mutex mutex;
-    handler.setDeviceAvailabilityCallback([&](const std::string& id, DeviceAvailability) {
+    {
         std::lock_guard<std::mutex> lock(mutex);
-        reported.push_back(id);
-    });
+        ASSERT_FALSE(reported.empty());
+        EXPECT_EQ(reported.back().first, known[0]) << "under the same id it's known by";
+        EXPECT_EQ(reported.back().second, DeviceAvailability::Online) << "the new one is connected";
+        reported.clear();
+    }
 
     // This has to finish too: it used to deadlock with a Tuya device connected
     handler.shutdown();
@@ -691,7 +697,7 @@ TEST_F(WifiHandlerTest, AddedDeviceIsKnownByItsId) {
 
     std::lock_guard<std::mutex> lock(mutex);
     ASSERT_EQ(reported.size(), 1u) << "once, though the destructor disconnects too";
-    EXPECT_EQ(reported[0], known[0]);
+    EXPECT_EQ(reported[0].second, DeviceAvailability::Offline);
 }
 
 TEST_F(WifiHandlerTest, GetKnownDevicesEmptyInitially) {
