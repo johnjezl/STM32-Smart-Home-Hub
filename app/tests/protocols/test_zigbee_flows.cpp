@@ -1513,6 +1513,36 @@ TEST_F(ZigbeeHandlerFlowTest, DeviceSavedWithoutClusterEndpointsIsAskedAboutThem
     EXPECT_FALSE(waitForState(idOf(SPLIT_LIGHT), "clusterEndpoints").is_null());
 }
 
+TEST_F(ZigbeeHandlerFlowTest, RepairingWithAGangSilentKeepsTheGangs) {
+    fake.addDevice(TWO_GANG);
+    auto paired = pair(TWO_GANG);
+    ASSERT_NE(paired, nullptr);
+    handler->restoreDevice(*paired);
+
+    FakeZigbeeDevice onlySecond = TWO_GANG;
+    onlySecond.inClusters = {{2, {zcl::cluster::ON_OFF}}};
+    fake.addDevice(onlySecond);
+    fake.announceDevice(onlySecond);
+    EXPECT_FALSE(waitForState(idOf(TWO_GANG), "clusterEndpoints").is_null());
+
+    fake.clearSentFrames();
+    ASSERT_TRUE(handler->sendCommand(idOf(TWO_GANG), "on", {{"on", true}}));
+    auto frames = airFrames(fake);
+    ASSERT_GE(frames.size(), 1u);
+    EXPECT_EQ(frames.back().endpoint, 1) << "still the first gang";
+}
+
+TEST_F(ZigbeeHandlerFlowTest, DeviceSavedWithUnusableClusterEndpointsIsAskedAboutThem) {
+    fake.addDevice(SPLIT_LIGHT);
+    auto saved = savedDevice(SPLIT_LIGHT, 1);
+    saved->setState("clusterEndpoints", nlohmann::json{{"6", {0}}});
+    handler->restoreDevice(*saved);
+
+    handler->poll();
+
+    EXPECT_FALSE(waitForState(idOf(SPLIT_LIGHT), "clusterEndpoints").is_null());
+}
+
 TEST_F(ZigbeeHandlerFlowTest, TwoGangSwitchIsOneDeviceUsingTheFirstGang) {
     fake.addDevice(TWO_GANG);
     ASSERT_NE(pair(TWO_GANG), nullptr);

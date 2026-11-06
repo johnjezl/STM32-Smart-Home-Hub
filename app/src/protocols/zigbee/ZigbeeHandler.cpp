@@ -372,7 +372,9 @@ void ZigbeeHandler::onNetworkAddressFound(uint16_t nwkAddr, uint64_t ieeeAddr, b
     bool endpointKnown = false;
     {
         std::lock_guard<std::mutex> lock(m_deviceMutex);
-        endpointKnown = m_deviceEndpoints.count(ieeeAddr) > 0 && m_clusterEndpoints.count(ieeeAddr) > 0;
+        auto clusters = m_clusterEndpoints.find(ieeeAddr);
+        endpointKnown = m_deviceEndpoints.count(ieeeAddr) > 0 && clusters != m_clusterEndpoints.end() &&
+                        !clusters->second.empty();
     }
 
     if (changed) {
@@ -1116,8 +1118,13 @@ void ZigbeeHandler::finishPairing(uint64_t ieeeAddr) {
             }
             // Merged, as an endpoint that didn't answer this time still has what it had
             auto& known = m_clusterEndpoints[ieeeAddr];
-            for (auto& [cluster, endpoints] : clusterEndpointsOf(*deviceInfo, savedEndpoint)) {
-                known[cluster] = std::move(endpoints);
+            for (const auto& [cluster, endpoints] : clusterEndpointsOf(*deviceInfo, savedEndpoint)) {
+                auto& list = known[cluster];
+                for (uint8_t endpoint : endpoints) {
+                    if (std::find(list.begin(), list.end(), endpoint) == list.end()) {
+                        list.push_back(endpoint);
+                    }
+                }
             }
             merged = clusterEndpointsJson(known);
         }
