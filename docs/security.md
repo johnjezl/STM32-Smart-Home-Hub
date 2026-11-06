@@ -331,9 +331,7 @@ SmartHub is designed for **local network deployment**, but doesn't treat that ne
 - Password guessing (failed login limit)
 - XSS/Clickjacking (security headers)
 
-**Known gaps**, tracked in [#13](https://github.com/johnjezl/STM32-Smart-Home-Hub/issues/13):
-- Plain HTTP is still served on port 4321, so logins sent there can be read on the network
-- If the certificate can't be read, the hub falls back to plain HTTP instead of refusing to start
+**TLS:** the hub creates a self-signed certificate on first boot if neither the certificate nor the key exists. If they exist but can't be used, it refuses to start rather than falling back to plain HTTP. Setting both paths to empty in the config is the only way to run without TLS.
 
 **Not in scope**:
 - Network-level attacks (use firewall)

@@ -44,6 +44,18 @@ public:
     CertManager& operator=(const CertManager&) = delete;
 
     /**
+     * Whether these files hold a certificate and the private key that goes with it
+     */
+    static bool isUsablePair(const std::string& certPath, const std::string& keyPath);
+
+    /**
+     * Create a self-signed certificate and key at these paths, creating folders if needed.
+     * @return true if both were written
+     */
+    static bool createSelfSigned(const std::string& certPath, const std::string& keyPath,
+                                 const std::string& hostname);
+
+    /**
      * Initialize certificate manager
      * Checks for existing certificates or generates new ones
      * @return true if certificates are ready for use

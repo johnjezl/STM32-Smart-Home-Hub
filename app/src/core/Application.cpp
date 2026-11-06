@@ -13,6 +13,7 @@
 #include <smarthub/protocols/mqtt/MqttClient.hpp>
 #include <smarthub/rpmsg/RpmsgClient.hpp>
 #include <smarthub/security/ApiTokenManager.hpp>
+#include <smarthub/security/CertManager.hpp>
 #include <smarthub/security/SessionManager.hpp>
 #include <smarthub/security/UserManager.hpp>
 #include <nlohmann/json.hpp>
@@ -21,8 +22,11 @@
 #include <smarthub/ui/UIManager.hpp>
 #endif
 
-#include <thread>
 #include <chrono>
+#include <filesystem>
+#include <thread>
+
+namespace fs = std::filesystem;
 
 namespace smarthub {
 
@@ -307,6 +311,39 @@ bool Application::initializeSecurity() {
     return true;
 }
 
+bool Application::configureTls() {
+    const std::string certPath = m_config->tlsCertPath();
+    const std::string keyPath = m_config->tlsKeyPath();
+
+    // Empty paths are how a config turns TLS off
+    if (certPath.empty() && keyPath.empty()) {
+        return true;
+    }
+    if (certPath.empty() || keyPath.empty()) {
+        LOG_ERROR("TLS needs both a certificate and a key path");
+        return false;
+    }
+
+    // First boot. Files that exist but don't work are left alone, because they could be someone's
+    // real certificate and regenerating would hide what's wrong with it.
+    if (!fs::exists(certPath) && !fs::exists(keyPath)) {
+        LOG_INFO("Creating a self-signed TLS certificate at %s", certPath.c_str());
+        if (!security::CertManager::createSelfSigned(certPath, keyPath, "smarthub.local")) {
+            LOG_ERROR("Failed to create a TLS certificate at %s", certPath.c_str());
+            return false;
+        }
+    }
+
+    if (!security::CertManager::isUsablePair(certPath, keyPath)) {
+        LOG_ERROR("TLS certificate %s and key %s can't be used", certPath.c_str(), keyPath.c_str());
+        return false;
+    }
+
+    m_webServer->setTlsCert(certPath, keyPath);
+    m_webServer->setHttpRedirect(true, 80);  // Redirect HTTP to HTTPS
+    return true;
+}
+
 bool Application::initializeWebServer() {
     m_webServer = std::make_unique<WebServer>(
         *m_eventBus,
@@ -315,12 +352,8 @@ bool Application::initializeWebServer() {
         m_config->webRoot()
     );
 
-    // Configure TLS if cert and key paths are set
-    std::string certPath = m_config->tlsCertPath();
-    std::string keyPath = m_config->tlsKeyPath();
-    if (!certPath.empty() && !keyPath.empty()) {
-        m_webServer->setTlsCert(certPath, keyPath);
-        m_webServer->setHttpRedirect(true, 80);  // Redirect HTTP to HTTPS
+    if (!configureTls()) {
+        return false;
     }
 
     m_webServer->setSecurityManagers(m_sessionManager.get(), m_apiTokenManager.get(),

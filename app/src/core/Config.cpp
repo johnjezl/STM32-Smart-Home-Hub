@@ -359,8 +359,8 @@ void Config::setDefaults() {
     m_webPort = 443;
     m_webHttpPort = 80;
     m_webRoot = "/opt/smarthub/www";
-    m_tlsCertPath = "/etc/smarthub/cert.pem";
-    m_tlsKeyPath = "/etc/smarthub/key.pem";
+    m_tlsCertPath = "/etc/smarthub/certs/server.crt";
+    m_tlsKeyPath = "/etc/smarthub/certs/server.key";
     m_displayDevice = "/dev/fb0";
     m_touchDevice = "/dev/input/event0";
     m_displayBrightness = 100;

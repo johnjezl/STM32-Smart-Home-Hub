@@ -90,6 +90,7 @@ if(GTEST_AVAILABLE)
         ${CMAKE_SOURCE_DIR}/third_party
     )
     target_link_libraries(smarthub_lib PUBLIC Threads::Threads)
+    target_compile_definitions(smarthub_lib PUBLIC MG_TLS=2)  # MG_TLS_OPENSSL, as the program uses
 
     # Link external libraries to test library
     if(SQLite3_FOUND)

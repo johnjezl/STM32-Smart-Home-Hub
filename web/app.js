@@ -454,16 +454,16 @@ class SmartHubApp {
             const card = document.createElement('div');
             card.className = 'room-card';
             card.innerHTML = `
-                <button class="room-card-menu admin-only" data-room-id="${room.id}">⋮</button>
+                <button class="room-card-menu admin-only" data-room-id="${this.escapeHtml(room.id)}">⋮</button>
                 <div class="room-header">
-                    <div class="room-name">${room.name}</div>
-                    <div class="room-temp">${temp ? `${temp}°` : ''}</div>
+                    <div class="room-name">${this.escapeHtml(room.name)}</div>
+                    <div class="room-temp">${temp ? `${this.escapeHtml(temp)}°` : ''}</div>
                 </div>
                 <div class="room-devices">
                     ${roomDevices.slice(0, 6).map(d => `
                         <div class="room-device ${d.state?.on ? 'on' : ''}">
                             ${this.getDeviceIcon(d.type)}
-                            <span>${d.name.split(' ').slice(-1)[0]}</span>
+                            <span>${this.escapeHtml(d.name.split(' ').slice(-1)[0])}</span>
                         </div>
                     `).join('')}
                     ${roomDevices.length > 6 ? `<div class="room-device">+${roomDevices.length - 6}</div>` : ''}
@@ -509,23 +509,23 @@ class SmartHubApp {
                         ${this.getDeviceIcon(device.type)}
                     </div>
                     <div class="device-details">
-                        <h3>${device.name}</h3>
-                        <div class="device-meta">${device.room || 'No room'} • ${device.type}</div>
+                        <h3>${this.escapeHtml(device.name)}</h3>
+                        <div class="device-meta">${this.escapeHtml(device.room || 'No room')} • ${this.escapeHtml(device.type)}</div>
                     </div>
                 </div>
                 <div class="device-controls">
                     ${hasBrightness ? `
                         <div class="brightness-control">
                             <input type="range" class="brightness-slider"
-                                min="0" max="100" value="${brightness ?? 100}"
-                                data-device-id="${device.id}">
-                            <span class="brightness-value">${brightness ?? 100}%</span>
+                                min="0" max="100" value="${this.escapeHtml(brightness ?? 100)}"
+                                data-device-id="${this.escapeHtml(device.id)}">
+                            <span class="brightness-value">${this.escapeHtml(brightness ?? 100)}%</span>
                         </div>
                     ` : ''}
-                    <button class="device-edit-btn admin-only" data-device-id="${device.id}" title="Edit">✏️</button>
+                    <button class="device-edit-btn admin-only" data-device-id="${this.escapeHtml(device.id)}" title="Edit">✏️</button>
                     <label class="toggle">
                         <input type="checkbox" ${isOn ? 'checked' : ''}
-                            data-device-id="${device.id}">
+                            data-device-id="${this.escapeHtml(device.id)}">
                         <span class="toggle-slider"></span>
                     </label>
                 </div>
@@ -578,12 +578,12 @@ class SmartHubApp {
             card.innerHTML = `
                 <div class="sensor-header">
                     <div>
-                        <div class="sensor-name">${sensor.name}</div>
-                        <div class="sensor-room">${sensor.room || 'No room'}</div>
+                        <div class="sensor-name">${this.escapeHtml(sensor.name)}</div>
+                        <div class="sensor-room">${this.escapeHtml(sensor.room || 'No room')}</div>
                     </div>
                     <div>${this.getSensorIcon(sensor.type)}</div>
                 </div>
-                <div class="sensor-value ${colorClass}">${displayValue}${unit}</div>
+                <div class="sensor-value ${colorClass}">${this.escapeHtml(displayValue)}${unit}</div>
                 <div class="sensor-updated">Updated just now</div>
             `;
 
@@ -966,19 +966,19 @@ class SmartHubApp {
         summary.innerHTML = `
             <div class="device-summary-row">
                 <span class="device-summary-label">Type</span>
-                <span>${this.deviceWizard.type}</span>
+                <span>${this.escapeHtml(this.deviceWizard.type)}</span>
             </div>
             <div class="device-summary-row">
                 <span class="device-summary-label">Name</span>
-                <span>${this.deviceWizard.name}</span>
+                <span>${this.escapeHtml(this.deviceWizard.name)}</span>
             </div>
             <div class="device-summary-row">
                 <span class="device-summary-label">Protocol</span>
-                <span>${this.deviceWizard.protocol}</span>
+                <span>${this.escapeHtml(this.deviceWizard.protocol)}</span>
             </div>
             <div class="device-summary-row">
                 <span class="device-summary-label">Room</span>
-                <span>${this.deviceWizard.room || 'None'}</span>
+                <span>${this.escapeHtml(this.deviceWizard.room || 'None')}</span>
             </div>
         `;
     }
@@ -1506,7 +1506,7 @@ class SmartHubApp {
         }
 
         if (type.includes('temperature')) {
-            return { displayValue: value.toFixed(1), unit: '°F', colorClass: 'temperature' };
+            return { displayValue: Number(value).toFixed(1), unit: '°F', colorClass: 'temperature' };
         }
         if (type.includes('humidity')) {
             return { displayValue: Math.round(value), unit: '%', colorClass: 'humidity' };
