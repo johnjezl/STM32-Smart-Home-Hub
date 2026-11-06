@@ -382,11 +382,21 @@ void AutomationManager::executeAutomation(const Automation& automation,
     }
 
     // Execute actions sequentially
+    int64_t delayBudgetMs = Automation::kMaxTotalDelayMs;
     for (const auto& action : automation.actions) {
         if (action.type == ActionType::Delay) {
-            // Older saved automations could have a longer delay than validation allows
-            const auto delayMs = std::min<int64_t>(action.delayMs, Automation::kMaxTotalDelayMs);
+            // Older saved automations could have longer delays than validation allows
+            const auto delayMs = std::min<int64_t>(action.delayMs, delayBudgetMs);
+            delayBudgetMs -= delayMs;
             std::this_thread::sleep_for(std::chrono::milliseconds(delayMs));
+
+            // It could have been turned off or removed during the wait
+            std::lock_guard<std::mutex> lock(m_mutex);
+            const auto stored = m_automations.find(automation.id);
+            if (stored == m_automations.end() || !stored->second->enabled) {
+                LOG_INFO("Automation %s stopped during a delay", automation.name.c_str());
+                return;
+            }
         } else {
             executeAction(action);
         }
