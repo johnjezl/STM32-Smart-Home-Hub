@@ -432,7 +432,7 @@ void AddAutomationScreen::createStep3_Actions() {
     lv_obj_add_flag(m_step3Container, LV_OBJ_FLAG_HIDDEN);
 
     lv_obj_t* label = lv_label_create(m_step3Container);
-    lv_label_set_text(label, "Actions");
+    lv_label_set_text(label, "Action");
     lv_obj_set_style_text_color(label, m_theme.textPrimary(), 0);
     lv_obj_align(label, LV_ALIGN_TOP_LEFT, 0, 0);
 
@@ -476,15 +476,6 @@ void AddAutomationScreen::createStep3_Actions() {
     if (lv_group_get_default()) {
         lv_group_add_obj(lv_group_get_default(), m_actionValueInput);
     }
-
-    // Action list
-    m_actionList = lv_obj_create(m_step3Container);
-    lv_obj_set_size(m_actionList, LV_PCT(100), 150);
-    lv_obj_align(m_actionList, LV_ALIGN_TOP_LEFT, 0, 110);
-    lv_obj_set_style_bg_opa(m_actionList, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(m_actionList, 0, 0);
-    lv_obj_set_flex_flow(m_actionList, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_row(m_actionList, ThemeManager::SPACING_SM, 0);
 }
 
 void AddAutomationScreen::showStep(int step) {

@@ -11,6 +11,7 @@
 #include <cmath>
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace smarthub {
@@ -296,7 +297,28 @@ constexpr int kMaxIntervalMinutes = 525600;
 int64_t wholeNumber(const nlohmann::json& j, const char* key, int64_t fallback) {
     if (!j.contains(key)) return fallback;
     const auto& value = j[key];
-    return value.is_number_integer() ? value.get<int64_t>() : -1000;
+    if (!value.is_number_integer()) return -1000;
+    // Values too big for the signed type would wrap, possibly to the -1 wildcard
+    if (value.is_number_unsigned() && value.get<uint64_t>() > INT64_MAX) return -1000;
+    return value.get<int64_t>();
+}
+
+// JSON values are copied and written out recursively, so a request can't be allowed to nest
+// them deeply. This has to be checked without recursing.
+bool nestedTooDeeply(const nlohmann::json& root) {
+    constexpr int kMaxDepth = 32;
+    std::vector<std::pair<const nlohmann::json*, int>> pending = {{&root, 0}};
+    while (!pending.empty()) {
+        const auto [value, depth] = pending.back();
+        pending.pop_back();
+        if (depth > kMaxDepth) return true;
+        if (value->is_structured()) {
+            for (const auto& child : *value) {
+                pending.emplace_back(&child, depth + 1);
+            }
+        }
+    }
+    return false;
 }
 
 bool isCompareOp(const std::string& op) {
@@ -425,6 +447,7 @@ nlohmann::json triggerList(const nlohmann::json& j) {
 }
 
 std::string validateFields(const nlohmann::json& j) {
+    if (nestedTooDeeply(j)) return "the request is nested too deeply";
     if (j.value("name", "").empty()) return "name is required";
     if (j.contains("enabled") && !j["enabled"].is_boolean()) return "enabled must be true or false";
     if (j.contains("description") && !j["description"].is_string()) {
