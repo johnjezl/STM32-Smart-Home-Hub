@@ -1488,13 +1488,16 @@ TEST_F(ZigbeeHandlerFlowTest, RepairingWithAnEndpointSilentKeepsWhatItKnew) {
     fake.addDevice(SPLIT_LIGHT);
     auto paired = pair(SPLIT_LIGHT);
     ASSERT_NE(paired, nullptr);
+
+    // A restart, so the radio's copy of what it answered is gone too
+    handlerConfig["pairingEndpointTimeoutMs"] = 100;
+    handler->shutdown();
+    handler = makeHandler(fake);
+    ASSERT_TRUE(handler->initialize());
     handler->restoreDevice(*paired);
 
-    // It rejoins, and this time endpoint 2 doesn't answer
-    FakeZigbeeDevice partial = SPLIT_LIGHT;
-    partial.inClusters = {{1, {zcl::cluster::ON_OFF, zcl::cluster::LEVEL_CONTROL}}};
-    fake.addDevice(partial);
-    fake.announceDevice(partial);
+    fake.holdDescriptor(SPLIT_LIGHT.nwkAddr, 2);
+    fake.announceDevice(SPLIT_LIGHT);
     EXPECT_FALSE(waitForState(idOf(SPLIT_LIGHT), "clusterEndpoints").is_null());
 
     fake.clearSentFrames();
@@ -1502,6 +1505,24 @@ TEST_F(ZigbeeHandlerFlowTest, RepairingWithAnEndpointSilentKeepsWhatItKnew) {
     auto frames = airFrames(fake);
     ASSERT_GE(frames.size(), 1u);
     EXPECT_EQ(frames.back().endpoint, 2);
+    fake.releaseDescriptors();
+}
+
+TEST_F(ZigbeeHandlerFlowTest, RepairingWithEveryEndpointAnsweringReplacesWhatItKnew) {
+    // Endpoint 1 didn't answer when this was saved
+    auto saved = savedDevice(TWO_GANG, 2);
+    saved->setState("clusterEndpoints", nlohmann::json{{std::to_string(zcl::cluster::ON_OFF), {2}}});
+    fake.addDevice(TWO_GANG);
+    handler->restoreDevice(*saved);
+
+    fake.announceDevice(TWO_GANG);
+    EXPECT_FALSE(waitForState(idOf(TWO_GANG), "clusterEndpoints").is_null());
+
+    fake.clearSentFrames();
+    ASSERT_TRUE(handler->sendCommand(idOf(TWO_GANG), "on", {{"on", true}}));
+    auto frames = airFrames(fake);
+    ASSERT_GE(frames.size(), 1u);
+    EXPECT_EQ(frames.back().endpoint, 1);
 }
 
 TEST_F(ZigbeeHandlerFlowTest, DeviceSavedWithoutClusterEndpointsIsAskedAboutThem) {
@@ -1517,12 +1538,15 @@ TEST_F(ZigbeeHandlerFlowTest, RepairingWithAGangSilentKeepsTheGangs) {
     fake.addDevice(TWO_GANG);
     auto paired = pair(TWO_GANG);
     ASSERT_NE(paired, nullptr);
+
+    handlerConfig["pairingEndpointTimeoutMs"] = 100;
+    handler->shutdown();
+    handler = makeHandler(fake);
+    ASSERT_TRUE(handler->initialize());
     handler->restoreDevice(*paired);
 
-    FakeZigbeeDevice onlySecond = TWO_GANG;
-    onlySecond.inClusters = {{2, {zcl::cluster::ON_OFF}}};
-    fake.addDevice(onlySecond);
-    fake.announceDevice(onlySecond);
+    fake.holdDescriptor(TWO_GANG.nwkAddr, 1);
+    fake.announceDevice(TWO_GANG);
     EXPECT_FALSE(waitForState(idOf(TWO_GANG), "clusterEndpoints").is_null());
 
     fake.clearSentFrames();
@@ -1530,6 +1554,7 @@ TEST_F(ZigbeeHandlerFlowTest, RepairingWithAGangSilentKeepsTheGangs) {
     auto frames = airFrames(fake);
     ASSERT_GE(frames.size(), 1u);
     EXPECT_EQ(frames.back().endpoint, 1) << "still the first gang";
+    fake.releaseDescriptors();
 }
 
 TEST_F(ZigbeeHandlerFlowTest, DeviceSavedWithUnusableClusterEndpointsIsAskedAboutThem) {
