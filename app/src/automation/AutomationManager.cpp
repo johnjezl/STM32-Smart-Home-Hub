@@ -390,7 +390,8 @@ void AutomationManager::executeAutomation(const Automation& automation,
             delayBudgetMs -= delayMs;
             std::this_thread::sleep_for(std::chrono::milliseconds(delayMs));
 
-            // It could have been turned off or removed during the wait
+            // It could have been turned off or removed during the wait. An edit doesn't stop
+            // this run, which finishes the actions it started with.
             std::lock_guard<std::mutex> lock(m_mutex);
             const auto stored = m_automations.find(automation.id);
             if (stored == m_automations.end() || !stored->second->enabled) {
