@@ -43,11 +43,14 @@ private:
 #ifdef SMARTHUB_ENABLE_LVGL
     void createHeader();
     void createContent();
+    void createSensorPanel();
+    lv_obj_t* createSensorSection(const char* title, lv_obj_t** valueLabel);
+    void refreshSensorPanel();
     void refreshDeviceList();
 
     lv_obj_t* createDeviceRow(lv_obj_t* parent, const std::string& deviceId,
                                const std::string& name, const std::string& type,
-                               bool isOn);
+                               bool canSwitch, bool isOn);
 
     bool onDeviceToggle(const std::string& deviceId, bool newState);  // False if it failed
     void onDeviceClicked(const std::string& deviceId);
@@ -67,6 +70,18 @@ private:
     lv_obj_t* m_editBtn = nullptr;
     lv_obj_t* m_titleLabel = nullptr;
     lv_obj_t* m_content = nullptr;
+
+    // Sensor summary; each section shows only if the room has that kind of sensor
+    lv_obj_t* m_sensorPanel = nullptr;
+    lv_obj_t* m_tempSection = nullptr;
+    lv_obj_t* m_tempValueLabel = nullptr;
+    lv_obj_t* m_humiditySection = nullptr;
+    lv_obj_t* m_humidityValueLabel = nullptr;
+    lv_obj_t* m_motionSection = nullptr;
+    lv_obj_t* m_motionValueLabel = nullptr;
+    uint32_t m_sensorUpdateMs = 0;
+    static constexpr uint32_t SENSOR_UPDATE_INTERVAL = 5000;
+
     lv_obj_t* m_deviceList = nullptr;
     lv_obj_t* m_emptyLabel = nullptr;
 #endif

@@ -5,6 +5,10 @@
  * or using Node.js with jsdom for headless testing.
  */
 
+const SensorDisplayApi = typeof module !== 'undefined' && module.exports
+    ? require('../sensors.js')
+    : window.SensorDisplay;
+
 // Simple test framework
 const TestRunner = {
     tests: [],
@@ -103,7 +107,7 @@ const mockDevices = [
         type: 'temperature_sensor',
         room: 'Living Room',
         online: true,
-        state: { value: 72.5 }
+        state: { temperature: 22.5 }
     },
     {
         id: 'humidity-bath',
@@ -111,7 +115,7 @@ const mockDevices = [
         type: 'humidity_sensor',
         room: 'Bathroom',
         online: true,
-        state: { value: 65 }
+        state: { humidity: 65 }
     }
 ];
 
@@ -225,10 +229,10 @@ TestRunner.describe('Device State', () => {
 
     TestRunner.it('should read sensor values', () => {
         const temp = mockDevices.find(d => d.id === 'temp-living');
-        TestRunner.assertEqual(temp.state.value, 72.5);
+        TestRunner.assertEqual(temp.state.temperature, 22.5);
 
         const humidity = mockDevices.find(d => d.id === 'humidity-bath');
-        TestRunner.assertEqual(humidity.state.value, 65);
+        TestRunner.assertEqual(humidity.state.humidity, 65);
     });
 
     TestRunner.it('should count active devices', () => {
@@ -282,58 +286,77 @@ TestRunner.describe('Icon Mapping', () => {
 // ============================================================================
 
 TestRunner.describe('Sensor Value Formatting', () => {
-    const formatSensorValue = (type, value) => {
-        if (value === undefined || value === null) {
-            return { displayValue: '--', unit: '', colorClass: '' };
-        }
-        if (type.includes('temperature')) {
-            return { displayValue: value.toFixed(1), unit: '°F', colorClass: 'temperature' };
-        }
-        if (type.includes('humidity')) {
-            return { displayValue: Math.round(value), unit: '%', colorClass: 'humidity' };
-        }
-        if (type.includes('motion')) {
-            return { displayValue: value ? 'Motion' : 'Clear', unit: '', colorClass: 'motion' };
-        }
-        if (type.includes('contact')) {
-            return { displayValue: value ? 'Closed' : 'Open', unit: '', colorClass: '' };
-        }
-        return { displayValue: value, unit: '', colorClass: '' };
-    };
+    const { sensorValue, roomSensors, roomClimateText } = SensorDisplayApi;
 
-    TestRunner.it('should format temperature values', () => {
-        const result = formatSensorValue('temperature_sensor', 72.5);
-        TestRunner.assertEqual(result.displayValue, '72.5');
-        TestRunner.assertEqual(result.unit, '°F');
+    TestRunner.it('should convert temperature from the Celsius sensors report', () => {
+        const result = sensorValue({ type: 'temperature_sensor', state: { temperature: 22.5 } });
+        TestRunner.assertEqual(result.text, '72.5°F');
         TestRunner.assertEqual(result.colorClass, 'temperature');
     });
 
+    TestRunner.it('should show a real 0°C rather than treat it as no reading', () => {
+        TestRunner.assertEqual(sensorValue({ type: 'temperature_sensor', state: { temperature: 0 } }).text, '32.0°F');
+    });
+
+    TestRunner.it('should show no reading before a sensor first reports', () => {
+        ['temperature_sensor', 'multi_sensor', 'humidity_sensor', 'motion_sensor', 'contact_sensor'].forEach(type => {
+            TestRunner.assertEqual(sensorValue({ type, state: {} }).text, '--');
+        });
+        TestRunner.assertEqual(sensorValue({ type: 'temperature_sensor' }).text, '--');
+    });
+
+    TestRunner.it('should show temperature and humidity from a combined sensor', () => {
+        TestRunner.assertEqual(
+            sensorValue({ type: 'multi_sensor', state: { temperature: 20, humidity: 45.4 } }).text, '68.0°F / 45%');
+        TestRunner.assertEqual(sensorValue({ type: 'multi_sensor', state: { humidity: 45 } }).text, '--°F / 45%');
+    });
+
     TestRunner.it('should format humidity values', () => {
-        const result = formatSensorValue('humidity_sensor', 65.7);
-        TestRunner.assertEqual(result.displayValue, 66);
-        TestRunner.assertEqual(result.unit, '%');
+        const result = sensorValue({ type: 'humidity_sensor', state: { humidity: 65.7 } });
+        TestRunner.assertEqual(result.text, '66%');
         TestRunner.assertEqual(result.colorClass, 'humidity');
     });
 
-    TestRunner.it('should format motion sensor values', () => {
-        const motionDetected = formatSensorValue('motion_sensor', true);
-        TestRunner.assertEqual(motionDetected.displayValue, 'Motion');
-
-        const noMotion = formatSensorValue('motion_sensor', false);
-        TestRunner.assertEqual(noMotion.displayValue, 'Clear');
+    TestRunner.it('should read motion from the motion property', () => {
+        TestRunner.assertEqual(sensorValue({ type: 'motion_sensor', state: { motion: true } }).text, 'Motion');
+        TestRunner.assertEqual(sensorValue({ type: 'motion_sensor', state: { motion: false } }).text, 'Clear');
     });
 
-    TestRunner.it('should format contact sensor values', () => {
-        const closed = formatSensorValue('contact_sensor', true);
-        TestRunner.assertEqual(closed.displayValue, 'Closed');
-
-        const open = formatSensorValue('contact_sensor', false);
-        TestRunner.assertEqual(open.displayValue, 'Open');
+    TestRunner.it('should read contact from the contact property', () => {
+        TestRunner.assertEqual(sensorValue({ type: 'contact_sensor', state: { contact: true } }).text, 'Closed');
+        TestRunner.assertEqual(sensorValue({ type: 'contact_sensor', state: { contact: false } }).text, 'Open');
     });
 
-    TestRunner.it('should handle null values', () => {
-        const result = formatSensorValue('temperature_sensor', null);
-        TestRunner.assertEqual(result.displayValue, '--');
+    TestRunner.it('should show nothing on a room card without sensors', () => {
+        const room = roomSensors([{ type: 'switch', state: { on: true } }]);
+        TestRunner.assertEqual(roomClimateText(room), '');
+    });
+
+    TestRunner.it('should show a sensor that has not reported as no reading on a room card', () => {
+        TestRunner.assertEqual(roomClimateText(roomSensors([{ type: 'temperature_sensor', state: {} }])), '--°F');
+    });
+
+    TestRunner.it('should show a humidity-only room without a temperature', () => {
+        const room = roomSensors([{ type: 'humidity_sensor', state: { humidity: 50 } }]);
+        TestRunner.assertFalse(room.hasTemperatureSensor);
+        TestRunner.assertEqual(roomClimateText(room), '50%');
+    });
+
+    TestRunner.it('should use the sensor with a reading when a room has several', () => {
+        const room = roomSensors([
+            { type: 'temperature_sensor', state: {} },
+            { type: 'temperature_sensor', state: { temperature: 20 } }
+        ]);
+        TestRunner.assertEqual(roomClimateText(room), '68°F');
+    });
+
+    TestRunner.it('should detect motion from any sensor in a room', () => {
+        const room = roomSensors([
+            { type: 'motion_sensor', state: { motion: false } },
+            { type: 'motion_sensor', state: { motion: true } }
+        ]);
+        TestRunner.assertTrue(room.hasMotionSensor);
+        TestRunner.assertTrue(room.motionDetected);
     });
 });
 

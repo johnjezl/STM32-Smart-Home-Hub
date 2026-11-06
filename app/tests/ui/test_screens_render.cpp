@@ -194,6 +194,47 @@ TEST_F(ScreenRenderTest, RoomDetail) {
     EXPECT_GE(test::countText(root, "Reading Lamp"), 1);
 }
 
+TEST_F(ScreenRenderTest, RoomDetailShowsTheSensorsOfEachRoom) {
+    auto motion = std::make_shared<MotionSensor>("detail-motion", "Hall Motion");
+    motion->setRoom("detail-a");
+    auto temp = std::make_shared<TemperatureSensor>("detail-temp", "Hall Temp");
+    temp->setRoom("detail-a");
+    temp->setTemperature(20.0);
+    auto silent = std::make_shared<TemperatureSensor>("detail-silent", "Attic Temp");
+    silent->setRoom("detail-b");
+    ASSERT_TRUE(deviceManager->addDevice(motion));
+    ASSERT_TRUE(deviceManager->addDevice(temp));
+    ASSERT_TRUE(deviceManager->addDevice(silent));
+
+    auto* root = showAndRender("room_detail", std::make_unique<RoomDetailScreen>(
+        *screenManager, *themeManager, *deviceManager),
+        [](Screen& screen) {
+            static_cast<RoomDetailScreen&>(screen).setRoom("detail-a", "Hall");
+        });
+    auto* screen = static_cast<RoomDetailScreen*>(screenManager->getScreen("room_detail"));
+
+    const auto visible = [&](const char* text) { return test::countText(root, text, true); };
+    EXPECT_EQ(visible("68°F"), 1);
+    EXPECT_EQ(visible("Clear"), 1);
+    EXPECT_EQ(visible("Humidity"), 0);
+
+    screen->setRoom("detail-b", "Attic");
+    screen->onShow();
+    test::render();
+    EXPECT_EQ(visible("--°F"), 1) << "a sensor that hasn't reported, not 32°F";
+    EXPECT_EQ(visible("Clear"), 0) << "no motion sensor here";
+
+    screen->setRoom("detail-a", "Hall");
+    screen->onShow();
+    test::render();
+    EXPECT_EQ(visible("Clear"), 1) << "the section has to come back for the next room";
+
+    screen->setRoom("empty-room", "Empty");
+    screen->onShow();
+    test::render();
+    EXPECT_EQ(visible("Temperature"), 0) << "no panel for a room without sensors";
+}
+
 TEST_F(ScreenRenderTest, LightControl) {
     auto* root = showAndRender("light_control", std::make_unique<LightControlScreen>(
         *screenManager, *themeManager, *deviceManager),

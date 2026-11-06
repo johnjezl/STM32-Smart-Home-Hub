@@ -118,6 +118,7 @@ web/
 ├── index.html      # Main dashboard HTML
 ├── styles.css      # CSS styles (dark theme)
 ├── app.js          # JavaScript application logic
+├── sensors.js      # Turns sensor state into what the dashboard shows
 └── tests/
     ├── test_app.js       # Frontend unit tests
     └── test_runner.html  # Browser test runner
@@ -168,6 +169,7 @@ define SMARTHUB_INSTALL_TARGET_CMDS
     $(INSTALL) -D -m 0644 $(@D)/web/index.html $(TARGET_DIR)/opt/smarthub/www/index.html
     $(INSTALL) -D -m 0644 $(@D)/web/styles.css $(TARGET_DIR)/opt/smarthub/www/styles.css
     $(INSTALL) -D -m 0644 $(@D)/web/app.js $(TARGET_DIR)/opt/smarthub/www/app.js
+    $(INSTALL) -D -m 0644 $(@D)/web/sensors.js $(TARGET_DIR)/opt/smarthub/www/sensors.js
 endef
 ```
 

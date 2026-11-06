@@ -11,6 +11,7 @@
 #include "smarthub/ui/widgets/NavBar.hpp"
 #include "smarthub/ui/widgets/RoomCard.hpp"
 #include "smarthub/devices/DeviceManager.hpp"
+#include "smarthub/devices/SensorDisplay.hpp"
 #include "smarthub/core/Logger.hpp"
 
 #include <ctime>
@@ -55,6 +56,7 @@ void DashboardScreen::onShow() {
     updateRoomCards();
     updateClock();
     m_clockUpdateMs = 0;
+    m_roomUpdateMs = 0;
 
     LOG_DEBUG("DashboardScreen shown");
 #endif
@@ -63,6 +65,18 @@ void DashboardScreen::onShow() {
 void DashboardScreen::onUpdate(uint32_t deltaMs) {
 #ifdef SMARTHUB_ENABLE_LVGL
     m_clockUpdateMs += deltaMs;
+    m_roomUpdateMs += deltaMs;
+
+    // Readings change without anything on this screen being touched
+    if (m_roomUpdateMs >= ROOM_UPDATE_INTERVAL) {
+        for (auto& card : m_roomCards) {
+            auto name = m_roomNames.find(card->roomId());
+            if (name != m_roomNames.end()) {
+                card->setRoomData(roomData(name->first, name->second));
+            }
+        }
+        m_roomUpdateMs = 0;
+    }
 
     // Update clock every minute
     if (m_clockUpdateMs >= CLOCK_UPDATE_INTERVAL) {
@@ -142,6 +156,26 @@ void DashboardScreen::createNavBar() {
     });
 }
 
+RoomData DashboardScreen::roomData(const std::string& roomId, const std::string& roomName) const {
+    RoomData data;
+    data.id = roomId;
+    data.name = roomName;
+
+    const auto devices = m_deviceManager.getDevicesByRoom(roomId);
+    for (const auto& device : devices) {
+        if (!device) continue;
+        const auto state = device->getState();
+        if (state.contains("on") && state["on"].is_boolean() && state["on"].get<bool>()) {
+            data.activeDevices++;
+        }
+    }
+
+    const RoomSensors sensors = summarizeRoomSensors(devices);
+    data.climate = roomClimateText(sensors);
+    data.motionDetected = sensors.motionDetected;
+    return data;
+}
+
 void DashboardScreen::createRoomCards() {
     // Clear the room names map
     m_roomNames.clear();
@@ -174,24 +208,7 @@ void DashboardScreen::createRoomCards() {
         m_roomNames[roomId] = roomName;
         auto card = std::make_unique<RoomCard>(m_content, m_theme);
 
-        RoomData data;
-        data.id = roomId;
-        data.name = roomName;
-        data.hasTemperature = false;
-        data.activeDevices = 0;
-
-        // Count active devices in this room
-        auto devices = m_deviceManager.getDevicesByRoom(roomId);
-        for (const auto& device : devices) {
-            if (device) {
-                // Check if device is on via state JSON
-                auto state = device->getState();
-                if (state.contains("on") && state["on"].get<bool>()) {
-                    data.activeDevices++;
-                }
-            }
-            // TODO: Get temperature from sensor devices
-        }
+        RoomData data = roomData(roomId, roomName);
 
         card->setRoomData(data);
         card->onClick([this](const std::string& id) {

@@ -30,11 +30,7 @@ TemperatureSensor::TemperatureSensor(const std::string& id,
 
     TemperatureSensor::setConfig(nlohmann::json::object());
 
-    // Initialize state
-    setStateInternal("temperature", 0.0);
-    if (hasHumidity) {
-        setStateInternal("humidity", 0.0);
-    }
+    // Temperature and humidity stay unset until the first report: 0 would read as a real 32°F
     if (hasBattery) {
         setStateInternal("battery", 100);
     }

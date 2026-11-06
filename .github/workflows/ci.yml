@@ -356,6 +356,9 @@ jobs:
             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
             -DSMARTHUB_BUILD_TESTS=OFF
 
+      - name: Run dashboard tests
+        run: node web/tests/test_app.js
+
       - name: Check for log calls using {} placeholders
         run: |
           # The compiler catches placeholders with arguments, but not a call with none, such as

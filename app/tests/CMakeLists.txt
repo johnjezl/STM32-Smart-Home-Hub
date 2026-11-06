@@ -43,6 +43,7 @@ if(GTEST_AVAILABLE)
         ${CMAKE_SOURCE_DIR}/src/database/Database.cpp
         ${CMAKE_SOURCE_DIR}/src/devices/Device.cpp
         ${CMAKE_SOURCE_DIR}/src/devices/DeviceManager.cpp
+        ${CMAKE_SOURCE_DIR}/src/devices/SensorDisplay.cpp
         ${CMAKE_SOURCE_DIR}/src/devices/DeviceTypeRegistry.cpp
         ${CMAKE_SOURCE_DIR}/src/devices/Room.cpp
         ${CMAKE_SOURCE_DIR}/src/devices/DeviceGroup.cpp

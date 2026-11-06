@@ -55,6 +55,7 @@ private:
     void createHeader();
     void createContent();
     void createNavBar();
+    RoomData roomData(const std::string& roomId, const std::string& roomName) const;
     void createRoomCards();
     void updateRoomCards();
     void updateClock();
@@ -79,6 +80,8 @@ private:
 
     uint32_t m_clockUpdateMs = 0;
     static constexpr uint32_t CLOCK_UPDATE_INTERVAL = 60000;  // 1 minute
+    uint32_t m_roomUpdateMs = 0;
+    static constexpr uint32_t ROOM_UPDATE_INTERVAL = 5000;
 };
 
 } // namespace ui
