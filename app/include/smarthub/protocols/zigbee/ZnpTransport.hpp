@@ -157,7 +157,10 @@ private:
     std::mutex m_writeMutex;
 
     // Synchronous request/response handling. One request at a time.
-    std::timed_mutex m_requestSerialMutex;
+    // Whether a request is in progress, since only one can wait for a response at a time
+    std::mutex m_requestSlotMutex;
+    std::condition_variable m_requestSlotFreed;
+    bool m_requestInProgress = false;
     std::mutex m_requestMutex;
     std::condition_variable m_responseCv;
     std::optional<ZnpFrame> m_pendingResponse;

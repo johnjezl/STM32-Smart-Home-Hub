@@ -338,7 +338,7 @@ std::string validateTrigger(const nlohmann::json& trigger) {
         }
         const std::string property = trigger.value("property", "");
         if (property.empty()) return type + " trigger needs a property";
-        // DeviceManager publishes events like _removed while holding its lock
+        // Events like _removed aren't changes to a device
         if (property[0] == '_') return "a trigger can't use the internal property " + property;
         if (type == "sensor_threshold") {
             const std::string op = trigger.value("compare_op", "");

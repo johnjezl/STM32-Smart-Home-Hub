@@ -330,17 +330,22 @@ bool DeviceManager::isDiscovering() const {
 }
 
 void DeviceManager::setPendingDeviceCallback(const std::string& protocol, DeviceDiscoveredCallback callback) {
-    std::lock_guard<std::mutex> lock(m_mutex);
+    ProtocolHandlerPtr handler;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
 
-    auto it = m_protocols.find(protocol);
-    if (it == m_protocols.end()) {
-        LOG_WARN("Protocol %s not loaded", protocol.c_str());
-        return;
+        auto it = m_protocols.find(protocol);
+        if (it == m_protocols.end()) {
+            LOG_WARN("Protocol %s not loaded", protocol.c_str());
+            return;
+        }
+        handler = it->second;
     }
 
-    // For Zigbee protocol, use the pending device callback mechanism
+    // For Zigbee protocol, use the pending device callback mechanism. Unlocked, because this
+    // waits for a call in progress, which could be calling back into this class.
     if (protocol == "zigbee") {
-        auto* zigbee = dynamic_cast<zigbee::ZigbeeHandler*>(it->second.get());
+        auto* zigbee = dynamic_cast<zigbee::ZigbeeHandler*>(handler.get());
         if (zigbee) {
             zigbee->setPendingDeviceCallback(std::move(callback));
             LOG_DEBUG("Set pending device callback for Zigbee");

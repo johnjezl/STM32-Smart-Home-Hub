@@ -143,7 +143,7 @@ struct Automation {
     uint64_t lastTriggeredAt = 0;
 
     nlohmann::json toJson() const;
-    // Delays run on the thread that fired the automation, so a long total stalls that thread
+    // A run in a delay is held in memory, so a restart loses it. That makes long delays unreliable.
     static constexpr int kMaxTotalDelayMs = 60000;
 
     static Automation fromJson(const nlohmann::json& j);

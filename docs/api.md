@@ -616,6 +616,8 @@ Create a new automation.
 
 `compare_op` is one of `eq`, `neq`, `gt`, `gte`, `lt` or `lte`. In a `time` trigger, an `hour` or `minute` of -1 means any. An automation with several triggers uses a `triggers` array instead of `trigger`.
 
+Actions run shortly after the trigger, on their own thread, one automation's actions at a time. A new trigger restarts an automation that's waiting in a delay, so "light on, delay 60 s, light off" stays on until 60 seconds after the last trigger. A trigger that fires more often than the delay never reaches the actions after it.
+
 An action's property has to be one a client can set on that device, such as `on` or `brightness`. An action can also be `{"type": "delay", "delayMs": 500}`. Delays can total at most 60 seconds.
 
 An interval's countdown starts again when the hub restarts or the automation is changed or re-enabled, so an interval longer than the hub stays up won't fire.

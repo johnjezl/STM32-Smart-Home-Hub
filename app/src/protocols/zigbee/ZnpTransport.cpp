@@ -255,16 +255,27 @@ std::optional<ZnpFrame> ZnpTransport::request(const ZnpFrame& frame, int timeout
         return std::nullopt;
     }
 
-    // The timeout covers waiting behind other requests too, so these can't pile up
-    auto deadline = std::chrono::steady_clock::now() +
-                    std::chrono::milliseconds(timeoutMs);
-
-    // A second caller would overwrite the response this one is waiting for
-    std::unique_lock<std::timed_mutex> serialLock(m_requestSerialMutex, deadline);
-    if (!serialLock.owns_lock()) {
-        LOG_WARN("Timeout waiting for an earlier request before {}", frame.toString());
-        return std::nullopt;
+    // A second caller would overwrite the response this one is waiting for. Waiting has a limit,
+    // so requests can't pile up behind an unresponsive radio.
+    {
+        std::unique_lock<std::mutex> slotLock(m_requestSlotMutex);
+        if (!m_requestSlotFreed.wait_for(slotLock, std::chrono::milliseconds(timeoutMs),
+                                         [this] { return !m_requestInProgress; })) {
+            LOG_WARN("Timeout waiting for an earlier request before {}", frame.toString());
+            return std::nullopt;
+        }
+        m_requestInProgress = true;
     }
+    struct ReleaseSlot {
+        ZnpTransport& transport;
+        ~ReleaseSlot() {
+            {
+                std::lock_guard<std::mutex> slotLock(transport.m_requestSlotMutex);
+                transport.m_requestInProgress = false;
+            }
+            transport.m_requestSlotFreed.notify_one();
+        }
+    } releaseSlot{*this};
 
     std::unique_lock<std::mutex> lock(m_requestMutex);
 
@@ -282,7 +293,9 @@ std::optional<ZnpFrame> ZnpTransport::request(const ZnpFrame& frame, int timeout
         return std::nullopt;
     }
 
-    // Wait for response
+    // Wait for response. This gets the full timeout, because the radio is acting on the request
+    // from here on, so giving up early would report failure for something that happened.
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
     while (m_running && !m_pendingResponse) {
         if (m_responseCv.wait_until(lock, deadline) == std::cv_status::timeout) {
             LOG_WARN("Timeout waiting for response to {}", frame.toString());
