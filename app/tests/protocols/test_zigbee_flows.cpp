@@ -1427,13 +1427,90 @@ TEST_F(ZigbeeHandlerFlowTest, DeviceSavedWithoutClusterEndpointsUsesItsEndpoint)
 
 TEST_F(ZigbeeHandlerFlowTest, BadSavedClusterEndpointsAreIgnored) {
     auto saved = savedDevice(LIGHT, 1);
-    saved->setState("clusterEndpoints", nlohmann::json{{"6", 0}, {"notanumber", 3}, {"99999", 3}, {"8", "two"}});
+    saved->setState("clusterEndpoints", nlohmann::json{
+        {"6", {0}}, {"notanumber", {3}}, {"99999", {3}}, {"8", "two"}, {"768", {300}}});
     handler->restoreDevice(*saved);
     fake.clearSentFrames();
     ASSERT_TRUE(handler->sendCommand(idOf(LIGHT), "on", {{"on", true}}));
     auto frames = airFrames(fake);
     ASSERT_EQ(frames.size(), 1u);
     EXPECT_EQ(frames[0].endpoint, 1);
+}
+
+TEST_F(ZigbeeHandlerFlowTest, EndpointThatDoesTheWorkComesBeforeAnEarlierOneWithTheCluster) {
+    const FakeZigbeeDevice light{
+        0x8404, 0x00124B0000008404ULL,
+        {{1, {zcl::cluster::ON_OFF}},
+         {11, {zcl::cluster::ON_OFF, zcl::cluster::LEVEL_CONTROL}}}};
+    fake.addDevice(light);
+    ASSERT_NE(pair(light), nullptr);
+    fake.clearSentFrames();
+
+    ASSERT_TRUE(handler->sendCommand(idOf(light), "on", {{"on", true}}));
+
+    auto frames = airFrames(fake);
+    ASSERT_EQ(frames.size(), 1u);
+    EXPECT_EQ(frames[0].endpoint, 11);
+
+    fake.reportAttribute(light.nwkAddr, 11, zcl::cluster::ON_OFF, zcl::attr::onoff::ON_OFF,
+                         zcl::datatype::BOOLEAN, {0x01});
+    EXPECT_EQ(waitForState(idOf(light), "on"), true);
+}
+
+TEST_F(ZigbeeHandlerFlowTest, ButtonOnAnEndpointThatOnlySendsStillCounts) {
+    const FakeZigbeeDevice wallSwitch{
+        0x8405, 0x00124B0000008405ULL,
+        {{1, {zcl::cluster::ON_OFF}},
+         {2, {zcl::cluster::BASIC}}}};  // The button: on/off is only an output cluster here
+    fake.addDevice(wallSwitch);
+    ASSERT_NE(pair(wallSwitch), nullptr);
+
+    fake.clusterCommand(wallSwitch.nwkAddr, 2, zcl::cluster::ON_OFF, zcl::cmd::onoff::ON, {});
+
+    EXPECT_EQ(waitForState(idOf(wallSwitch), "on"), true);
+}
+
+TEST_F(ZigbeeHandlerFlowTest, SensorReportingFromItsSecondEndpointStillCounts) {
+    const FakeZigbeeDevice probe{
+        0x8406, 0x00124B0000008406ULL,
+        {{1, {zcl::cluster::TEMPERATURE_MEASUREMENT}},
+         {2, {zcl::cluster::TEMPERATURE_MEASUREMENT}}}};
+    fake.addDevice(probe);
+    ASSERT_NE(pair(probe), nullptr);
+
+    fake.reportAttribute(probe.nwkAddr, 2, zcl::cluster::TEMPERATURE_MEASUREMENT,
+                         zcl::attr::temperature::MEASURED_VALUE, zcl::datatype::INT16, {0x34, 0x08});
+
+    EXPECT_DOUBLE_EQ(waitForState(idOf(probe), "temperature").get<double>(), 21.0);
+}
+
+TEST_F(ZigbeeHandlerFlowTest, RepairingWithAnEndpointSilentKeepsWhatItKnew) {
+    fake.addDevice(SPLIT_LIGHT);
+    auto paired = pair(SPLIT_LIGHT);
+    ASSERT_NE(paired, nullptr);
+    handler->restoreDevice(*paired);
+
+    // It rejoins, and this time endpoint 2 doesn't answer
+    FakeZigbeeDevice partial = SPLIT_LIGHT;
+    partial.inClusters = {{1, {zcl::cluster::ON_OFF, zcl::cluster::LEVEL_CONTROL}}};
+    fake.addDevice(partial);
+    fake.announceDevice(partial);
+    EXPECT_FALSE(waitForState(idOf(SPLIT_LIGHT), "clusterEndpoints").is_null());
+
+    fake.clearSentFrames();
+    ASSERT_TRUE(handler->sendCommand(idOf(SPLIT_LIGHT), "colorTemp", {{"colorTemp", 300}}));
+    auto frames = airFrames(fake);
+    ASSERT_GE(frames.size(), 1u);
+    EXPECT_EQ(frames.back().endpoint, 2);
+}
+
+TEST_F(ZigbeeHandlerFlowTest, DeviceSavedWithoutClusterEndpointsIsAskedAboutThem) {
+    fake.addDevice(SPLIT_LIGHT);
+    handler->restoreDevice(*savedDevice(SPLIT_LIGHT, 1));
+
+    handler->poll();
+
+    EXPECT_FALSE(waitForState(idOf(SPLIT_LIGHT), "clusterEndpoints").is_null());
 }
 
 TEST_F(ZigbeeHandlerFlowTest, TwoGangSwitchIsOneDeviceUsingTheFirstGang) {
