@@ -471,6 +471,55 @@ TEST_F(AutomationManagerTest, ProblemWithChecksWhatTheDeviceCanDo) {
     EXPECT_NE(automationManager->problemWith(automation), "");
 }
 
+TEST_F(AutomationManagerTest, OrderingConditionOnAMissingValueDoesNotHold) {
+    automationManager->initialize();
+    auto source = std::make_shared<SwitchDevice>("source", "Source");
+    auto light = std::make_shared<SwitchDevice>("light_001", "Light");
+    deviceManager->addDevice(source);
+    deviceManager->addDevice(light);
+
+    Trigger trigger;
+    trigger.type = TriggerType::DeviceState;
+    trigger.deviceId = "source";
+    trigger.property = "on";
+    Automation automation = lightOnWhen(trigger);
+
+    Condition condition;
+    condition.leaf.deviceId = "source";
+    condition.leaf.property = "temperature";  // A switch has none
+    condition.leaf.op = CompareOp::GreaterThan;
+    condition.leaf.value = 30;
+    automation.condition = condition;
+    ASSERT_TRUE(automationManager->addAutomation(automation));
+
+    ASSERT_TRUE(deviceManager->setDeviceState("source", "on", true));
+    EXPECT_NE(light->getProperty("on"), true);
+}
+
+TEST(AutomationTest, SavedDelayWithoutATypeLoadsAsADelay) {
+    const Action action = Action::fromJson({{"delayMs", 500}});
+    EXPECT_EQ(action.type, ActionType::Delay);
+    EXPECT_EQ(action.delayMs, 500);
+}
+
+TEST_F(AutomationManagerTest, ReEnablingAnEnabledAutomationKeepsItsCountdown) {
+    automationManager->initialize();
+    auto light = std::make_shared<SwitchDevice>("light_001", "Light");
+    deviceManager->addDevice(light);
+
+    Trigger trigger;
+    trigger.type = TriggerType::TimeInterval;
+    trigger.intervalMinutes = 60;
+    const Automation automation = lightOnWhen(trigger);
+    ASSERT_TRUE(automationManager->addAutomation(automation));
+
+    const uint64_t minute = 60 * 1000;
+    automationManager->poll(1);
+    ASSERT_TRUE(automationManager->setEnabled(automation.id, true));
+    automationManager->poll(1 + 61 * minute);
+    EXPECT_EQ(light->getProperty("on"), true);
+}
+
 TEST_F(AutomationManagerTest, ReturnedAutomationsAreCopies) {
     automationManager->initialize();
     ASSERT_TRUE(automationManager->addAutomation(createTestAutomation()));

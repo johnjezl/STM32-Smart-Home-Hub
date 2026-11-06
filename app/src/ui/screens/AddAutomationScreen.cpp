@@ -59,6 +59,7 @@ void AddAutomationScreen::onShow() {
             m_devices.push_back({device->id(), device->name()});
         }
     }
+    populateDeviceDropdown(m_actionDeviceDropdown);
 
     showStep(1);
     LOG_DEBUG("AddAutomationScreen shown");
@@ -507,11 +508,7 @@ void AddAutomationScreen::showStep(int step) {
             lv_obj_clear_flag(m_step2Container, LV_OBJ_FLAG_HIDDEN);
             showTriggerConfig(m_selectedTriggerType);
             break;
-        case 3:
-            // Devices are loaded each time the screen opens, after the widgets are created
-            populateDeviceDropdown(m_actionDeviceDropdown);
-            lv_obj_clear_flag(m_step3Container, LV_OBJ_FLAG_HIDDEN);
-            break;
+        case 3: lv_obj_clear_flag(m_step3Container, LV_OBJ_FLAG_HIDDEN); break;
     }
 
     updateNavigationButtons();
@@ -660,9 +657,11 @@ void AddAutomationScreen::onCreateAutomation() {
             if (m_triggerIntervalInput) {
                 const char* interval = lv_textarea_get_text(m_triggerIntervalInput);
                 if (interval && strlen(interval) > 0) {
-                    // A value too long to parse is left at 0, which validation rejects
+                    // A value that can't be read is left at 0, which validation rejects
                     try {
-                        trigger.intervalMinutes = std::stoi(interval);
+                        size_t used = 0;
+                        const int minutes = std::stoi(interval, &used);
+                        trigger.intervalMinutes = used == strlen(interval) ? minutes : 0;
                     } catch (const std::exception&) {
                         trigger.intervalMinutes = 0;
                     }
@@ -763,11 +762,11 @@ void AddAutomationScreen::resetForm() {
     m_automationName.clear();
     m_automationDescription.clear();
     m_selectedTriggerType = TriggerType::DeviceState;
-    m_triggers.clear();
-    m_actions.clear();
 
     if (m_nameInput) lv_textarea_set_text(m_nameInput, "");
     if (m_descInput) lv_textarea_set_text(m_descInput, "");
+    if (m_triggerTypeList) lv_dropdown_set_selected(m_triggerTypeList, 0);
+    if (m_actionValueInput) lv_textarea_set_text(m_actionValueInput, "");
 }
 
 void AddAutomationScreen::populateDeviceDropdown(lv_obj_t* dropdown) {
@@ -814,14 +813,6 @@ void AddAutomationScreen::styleDropdown(lv_obj_t* dropdown) {
             }
         }
     }, LV_EVENT_READY, this);
-}
-
-void AddAutomationScreen::populatePropertyDropdown(lv_obj_t* dropdown, const std::string& deviceId) {
-    (void)deviceId;  // Could be used to get device-specific properties
-    if (!dropdown) return;
-
-    // Default properties for now
-    lv_dropdown_set_options(dropdown, "on\nbrightness\ntemperature\nhumidity\nmotion");
 }
 
 #endif // SMARTHUB_ENABLE_LVGL

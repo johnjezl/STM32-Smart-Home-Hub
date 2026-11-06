@@ -316,10 +316,10 @@ void EditAutomationScreen::onSaveClicked() {
         automation->enabled = lv_obj_has_state(m_enabledSwitch, LV_STATE_CHECKED);
     }
 
-    const std::string problem = m_automationManager.problemWith(*automation);
-    if (!problem.empty()) {
-        LOG_WARN("Can't save automation: %s", problem.c_str());
-        lv_msgbox_create(nullptr, "Can't save automation", problem.c_str(), nullptr, true);
+    // This screen only changes these fields, so an older automation can still be renamed
+    if (automation->name.empty()) {
+        LOG_WARN("Can't save automation without a name");
+        lv_msgbox_create(nullptr, "Can't save automation", "The name is required.", nullptr, true);
         return;
     }
 

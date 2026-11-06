@@ -39,6 +39,12 @@ bool AutomationManager::initialize() {
     loadFromDatabase();
     setupEventHandlers();
 
+    // Start from this minute, so a restart doesn't run a time trigger that already ran in it
+    const std::time_t startTime = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+    std::tm startTm{};
+    localtime_r(&startTime, &startTm);
+    m_lastCheckedMinute = startTm.tm_min;
+
     m_initialized = true;
 
     LOG_INFO("Automation manager initialized with %zu automations",
@@ -285,6 +291,12 @@ bool AutomationManager::evaluateConditionLeaf(const ConditionLeaf& leaf) const {
 bool AutomationManager::compareValues(const nlohmann::json& actual,
                                        CompareOp op,
                                        const nlohmann::json& expected) const {
+    // Only numbers can be ordered, so an ordering test on anything else hasn't held
+    const bool ordering = op != CompareOp::Equal && op != CompareOp::NotEqual;
+    if (ordering && !(actual.is_number() && expected.is_number())) {
+        return false;
+    }
+
     // Handle null cases
     if (actual.is_null() || expected.is_null()) {
         return (op == CompareOp::Equal) ? (actual == expected)
@@ -521,11 +533,11 @@ bool AutomationManager::setEnabled(const std::string& id, bool enabled) {
         return false;
     }
 
-    it->second->enabled = enabled;
-    it->second->updatedAt = getCurrentTimestamp();
-    if (enabled) {
+    if (enabled && !it->second->enabled) {
         clearIntervalTimers(id);  // It wasn't counting while it was off
     }
+    it->second->enabled = enabled;
+    it->second->updatedAt = getCurrentTimestamp();
     return saveToDatabase(*it->second);
 }
 

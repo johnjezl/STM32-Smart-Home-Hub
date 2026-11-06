@@ -77,7 +77,6 @@ private:
     void onCreateAutomation();
     void resetForm();
     void populateDeviceDropdown(lv_obj_t* dropdown);
-    void populatePropertyDropdown(lv_obj_t* dropdown, const std::string& deviceId);
     void styleDropdown(lv_obj_t* dropdown);
 
     lv_obj_t* m_header = nullptr;
@@ -127,8 +126,6 @@ private:
     std::string m_automationName;
     std::string m_automationDescription;
     TriggerType m_selectedTriggerType = TriggerType::DeviceState;
-    std::vector<Trigger> m_triggers;
-    std::vector<Action> m_actions;
 
     std::vector<std::pair<std::string, std::string>> m_devices;  // id, name
 
