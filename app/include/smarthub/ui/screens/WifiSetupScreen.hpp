@@ -134,7 +134,8 @@ private:
     std::vector<network::WifiNetwork> m_networks;
     std::string m_selectedSsid;
     bool m_scanning = false;
-    int m_networkOperation = 0;  // Which scan or connect is the latest
+    int m_latestScan = 0;
+    int m_latestConnect = 0;
 
     uint32_t m_refreshMs = 0;
     static constexpr uint32_t AUTO_REFRESH_INTERVAL = 30000;  // 30 seconds

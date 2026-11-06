@@ -1615,6 +1615,28 @@ TEST_F(ScreenTest, WifiSetupScreenIgnoresAnOutOfDateScan) {
     EXPECT_FALSE(ScreenTestAccess::isScanning(*screen));
 }
 
+TEST_F(ScreenTest, WifiSetupScreenStillShowsAFailedConnectionAfterAScanStarts) {
+    createScreenManager();
+    auto wifi = std::make_unique<WifiSetupScreen>(*screenManager, *themeManager, *networkManager);
+    WifiSetupScreen* screen = wifi.get();
+    screenManager->registerScreen("wifi_setup", std::move(wifi));
+    screenManager->showScreen("wifi_setup");
+    screenManager->update(16);
+
+    network::ConnectionResult result;
+    result.success = false;
+    result.error = "Failed during a scan";
+    const auto connect = ScreenTestAccess::connectCallback(*screen);
+    const auto scan = ScreenTestAccess::scanCallback(*screen);
+
+    connect(result);
+    screenManager->update(16);
+    EXPECT_GE(test::countText(lv_layer_top(), "Failed during a scan"), 1);
+
+    scan({});
+    screenManager->update(16);
+}
+
 TEST_F(ScreenTest, WifiSetupScreenShowsAFailedConnection) {
     createScreenManager();
     auto wifi = std::make_unique<WifiSetupScreen>(*screenManager, *themeManager, *networkManager);
