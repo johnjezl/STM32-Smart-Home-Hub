@@ -228,6 +228,18 @@ constexpr int kMaxRunDepth = 8;
 }  // namespace
 
 void AutomationManager::enqueueRuns(std::vector<std::pair<Automation, std::string>> runs) {
+    // Conditions are about when the trigger fired. One that doesn't hold ignores the trigger,
+    // and mustn't restart a run that's waiting to finish, such as to turn a light back off.
+    runs.erase(std::remove_if(runs.begin(), runs.end(), [this](const auto& entry) {
+        const Automation& automation = entry.first;
+        if (!automation.enabled ||
+            (automation.condition.has_value() && !evaluateCondition(*automation.condition))) {
+            LOG_DEBUG("Automation '%s' condition not met, skipping", automation.name.c_str());
+            return true;
+        }
+        return false;
+    }), runs.end());
+
     if (runs.empty()) {
         return;
     }
@@ -268,8 +280,10 @@ void AutomationManager::workerLoop() {
         }
 
         const auto next = m_runQueue.begin();
-        if (next->first > std::chrono::steady_clock::now()) {
-            m_queueChanged.wait_until(lock, next->first);
+        // A copy, because a restart can remove this entry during the wait
+        const auto due = next->first;
+        if (due > std::chrono::steady_clock::now()) {
+            m_queueChanged.wait_until(lock, due);
             continue;
         }
 
@@ -284,6 +298,8 @@ void AutomationManager::workerLoop() {
             continueRun(std::move(run));
         } catch (const std::exception& e) {
             LOG_ERROR("Automation run failed: %s", e.what());
+        } catch (...) {
+            LOG_ERROR("Automation run failed with an unknown error");
         }
         lock.lock();
 
@@ -454,11 +470,6 @@ void AutomationManager::continueRun(Run run) {
     }
 
     if (run.nextAction == 0) {
-        if (automation.condition.has_value() && !evaluateCondition(*automation.condition)) {
-            LOG_DEBUG("Automation '%s' condition not met, skipping", automation.name.c_str());
-            return;
-        }
-
         LOG_INFO("Executing automation: %s (trigger: %s)",
                  automation.name.c_str(), run.triggerInfo.c_str());
 
@@ -483,7 +494,15 @@ void AutomationManager::continueRun(Run run) {
         ++run.nextAction;
 
         if (action.type != ActionType::Delay) {
-            executeAction(action);
+            // One failing mustn't lose the rest, which might be turning something back off
+            try {
+                executeAction(action);
+            } catch (const std::exception& e) {
+                LOG_ERROR("Automation %s: action failed: %s", automation.name.c_str(), e.what());
+            } catch (...) {
+                LOG_ERROR("Automation %s: action failed with an unknown error",
+                          automation.name.c_str());
+            }
             continue;
         }
 
