@@ -854,8 +854,8 @@ TEST_F(WebServerAutomationApiTest, CreateAutomation_IntervalTrigger) {
         "name": "Periodic Check",
         "enabled": true,
         "trigger": {
-            "type": "interval",
-            "intervalMinutes": 15
+            "type": "time_interval",
+            "interval_minutes": 15
         },
         "actions": [
             {"deviceId": "test-light", "property": "on", "value": false}

@@ -19,6 +19,7 @@ class DeviceManager;
 class WebServer;
 class MqttClient;
 class RpmsgClient;
+class AutomationManager;
 
 namespace security {
 class UserManager;
@@ -89,6 +90,7 @@ private:
     bool initializeConfig();
     bool initializeDatabase();
     bool initializeDeviceManager();
+    bool initializeAutomation();
     bool initializeMqtt();
     bool initializeRpmsg();
     bool initializeSecurity();
@@ -107,6 +109,7 @@ private:
     std::unique_ptr<EventBus> m_eventBus;
     std::unique_ptr<Database> m_database;
     std::unique_ptr<DeviceManager> m_deviceManager;
+    std::unique_ptr<AutomationManager> m_automationManager;
     std::unique_ptr<MqttClient> m_mqttClient;
     std::unique_ptr<RpmsgClient> m_rpmsgClient;
     std::unique_ptr<security::UserManager> m_userManager;

@@ -144,6 +144,12 @@ struct Automation {
 
     nlohmann::json toJson() const;
     static Automation fromJson(const nlohmann::json& j);
+
+    /**
+     * Check a request body before fromJson, which falls back to defaults for unknown values
+     * @return A description of the problem, or an empty string if it's valid
+     */
+    static std::string validateJson(const nlohmann::json& j);
 };
 
 using AutomationPtr = std::shared_ptr<Automation>;

@@ -482,13 +482,14 @@ void DeviceManager::applyStateChange(const DevicePtr& device, const std::string&
                                      const nlohmann::json& value) {
     // Only publish real changes. A device's report confirming a command isn't news, and an
     // automation shouldn't keep re-triggering itself.
-    const bool changed = device->getProperty(property) != value;
+    const nlohmann::json previous = device->getProperty(property);
     device->setState(property, value);
-    if (changed) {
+    if (previous != value) {
         DeviceStateEvent event;
         event.deviceId = device->id();
         event.property = property;
         event.value = value;
+        event.previousValue = previous;
         m_eventBus.publish(event);
     }
 }

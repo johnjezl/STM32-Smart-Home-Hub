@@ -7,6 +7,7 @@
 
 #include <gtest/gtest.h>
 
+#include <smarthub/devices/types/DimmerDevice.hpp>
 #include <smarthub/devices/types/SwitchDevice.hpp>
 #include <smarthub/automation/Automation.hpp>
 #include <smarthub/automation/AutomationManager.hpp>
@@ -246,6 +247,147 @@ TEST_F(AutomationManagerTest, ActionThatChangesADeviceDoesNotDeadlock) {
     ASSERT_TRUE(automationManager->triggerAutomation(automation.id));
 
     EXPECT_EQ(light->getProperty("on"), true);
+}
+
+namespace {
+
+// Turns light_001 on when the trigger fires
+Automation lightOnWhen(const Trigger& trigger) {
+    Automation automation;
+    automation.id = "runs_action";
+    automation.name = "Runs Action";
+    automation.enabled = true;
+    automation.triggers.push_back(trigger);
+
+    Action action;
+    action.type = ActionType::SetDeviceState;
+    action.deviceId = "light_001";
+    action.property = "on";
+    action.value = true;
+    automation.actions.push_back(action);
+    return automation;
+}
+
+}  // namespace
+
+TEST_F(AutomationManagerTest, DeviceStateChangeWithToValueRunsTheAction) {
+    automationManager->initialize();
+    auto source = std::make_shared<SwitchDevice>("source", "Source");
+    auto light = std::make_shared<SwitchDevice>("light_001", "Light");
+    deviceManager->addDevice(source);
+    deviceManager->addDevice(light);
+
+    Trigger trigger;
+    trigger.type = TriggerType::DeviceState;
+    trigger.deviceId = "source";
+    trigger.property = "on";
+    trigger.toValue = true;
+    ASSERT_TRUE(automationManager->addAutomation(lightOnWhen(trigger)));
+
+    EXPECT_NE(light->getProperty("on"), true);
+    ASSERT_TRUE(deviceManager->setDeviceState("source", "on", true));
+    EXPECT_EQ(light->getProperty("on"), true);
+}
+
+TEST_F(AutomationManagerTest, ToValueThatDoesNotMatchDoesNotRunTheAction) {
+    automationManager->initialize();
+    auto source = std::make_shared<SwitchDevice>("source", "Source");
+    auto light = std::make_shared<SwitchDevice>("light_001", "Light");
+    deviceManager->addDevice(source);
+    deviceManager->addDevice(light);
+    ASSERT_TRUE(deviceManager->setDeviceState("source", "on", true));
+
+    Trigger trigger;
+    trigger.type = TriggerType::DeviceState;
+    trigger.deviceId = "source";
+    trigger.property = "on";
+    trigger.toValue = true;
+    ASSERT_TRUE(automationManager->addAutomation(lightOnWhen(trigger)));
+
+    ASSERT_TRUE(deviceManager->setDeviceState("source", "on", false));
+    EXPECT_NE(light->getProperty("on"), true);
+}
+
+TEST_F(AutomationManagerTest, FromValueMatchesThePreviousValue) {
+    automationManager->initialize();
+    auto source = std::make_shared<DimmerDevice>("source", "Source");
+    auto light = std::make_shared<SwitchDevice>("light_001", "Light");
+    deviceManager->addDevice(source);
+    deviceManager->addDevice(light);
+    ASSERT_TRUE(deviceManager->setDeviceState("source", "brightness", 10));
+
+    Trigger trigger;
+    trigger.type = TriggerType::DeviceState;
+    trigger.deviceId = "source";
+    trigger.property = "brightness";
+    trigger.fromValue = 20;
+    ASSERT_TRUE(automationManager->addAutomation(lightOnWhen(trigger)));
+
+    // From 10, which doesn't match
+    ASSERT_TRUE(deviceManager->setDeviceState("source", "brightness", 20));
+    EXPECT_NE(light->getProperty("on"), true);
+
+    // From 20, which does
+    ASSERT_TRUE(deviceManager->setDeviceState("source", "brightness", 30));
+    EXPECT_EQ(light->getProperty("on"), true);
+}
+
+TEST_F(AutomationManagerTest, ThresholdTriggerUsesTheNewValue) {
+    automationManager->initialize();
+    auto source = std::make_shared<DimmerDevice>("source", "Source");
+    auto light = std::make_shared<SwitchDevice>("light_001", "Light");
+    deviceManager->addDevice(source);
+    deviceManager->addDevice(light);
+
+    Trigger trigger;
+    trigger.type = TriggerType::SensorThreshold;
+    trigger.deviceId = "source";
+    trigger.property = "brightness";
+    trigger.compareOp = CompareOp::GreaterThan;
+    trigger.threshold = 50.0;
+    ASSERT_TRUE(automationManager->addAutomation(lightOnWhen(trigger)));
+
+    ASSERT_TRUE(deviceManager->setDeviceState("source", "brightness", 40));
+    EXPECT_NE(light->getProperty("on"), true);
+
+    ASSERT_TRUE(deviceManager->setDeviceState("source", "brightness", 60));
+    EXPECT_EQ(light->getProperty("on"), true);
+}
+
+TEST(AutomationTest, JsonRoundTripKeepsEveryPart) {
+    Automation automation;
+    automation.id = "round_trip";
+    automation.name = "Round Trip";
+
+    Trigger first;
+    first.type = TriggerType::DeviceState;
+    first.deviceId = "a";
+    first.property = "on";
+    automation.triggers.push_back(first);
+    Trigger second;
+    second.type = TriggerType::TimeInterval;
+    second.intervalMinutes = 5;
+    automation.triggers.push_back(second);
+
+    Condition condition;
+    condition.leaf.deviceId = "a";
+    condition.leaf.property = "on";
+    condition.leaf.value = true;
+    automation.condition = condition;
+
+    Action delay;
+    delay.type = ActionType::Delay;
+    delay.delayMs = 250;
+    automation.actions.push_back(delay);
+
+    const Automation copy = Automation::fromJson(automation.toJson());
+    ASSERT_EQ(copy.triggers.size(), 2u);
+    EXPECT_EQ(copy.triggers[1].intervalMinutes, 5);
+    ASSERT_TRUE(copy.condition.has_value());
+    EXPECT_EQ(copy.condition->leaf.deviceId, "a");
+    ASSERT_EQ(copy.actions.size(), 1u);
+    EXPECT_EQ(copy.actions[0].type, ActionType::Delay);
+    EXPECT_EQ(copy.actions[0].delayMs, 250);
 }
 
 TEST_F(AutomationManagerTest, AutomationsTriggeringEachOtherStopAtTheDepthLimit) {

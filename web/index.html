@@ -388,7 +388,7 @@
                         <select id="trigger-type">
                             <option value="device_state">Device state changes</option>
                             <option value="time">At a specific time</option>
-                            <option value="interval">Every X minutes</option>
+                            <option value="time_interval">Every X minutes</option>
                             <option value="sensor_threshold">Sensor reaches threshold</option>
                         </select>
                     </div>
@@ -454,15 +454,22 @@
                             <label for="trigger-sensor-device">Sensor</label>
                             <select id="trigger-sensor-device"></select>
                         </div>
+                        <div class="form-group">
+                            <label for="trigger-sensor-property">Reading</label>
+                            <select id="trigger-sensor-property">
+                                <option value="temperature">Temperature</option>
+                                <option value="humidity">Humidity</option>
+                            </select>
+                        </div>
                         <div class="form-row">
                             <div class="form-group">
                                 <label for="trigger-operator">Condition</label>
                                 <select id="trigger-operator">
-                                    <option value=">">Greater than</option>
-                                    <option value=">=">Greater or equal</option>
-                                    <option value="<">Less than</option>
-                                    <option value="<=">Less or equal</option>
-                                    <option value="=">Equals</option>
+                                    <option value="gt">Greater than</option>
+                                    <option value="gte">Greater or equal</option>
+                                    <option value="lt">Less than</option>
+                                    <option value="lte">Less or equal</option>
+                                    <option value="eq">Equals</option>
                                 </select>
                             </div>
                             <div class="form-group">

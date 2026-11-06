@@ -107,7 +107,7 @@ void AddAutomationScreen::createHeader() {
 
     // Title
     m_titleLabel = lv_label_create(m_header);
-    lv_label_set_text(m_titleLabel, "Add Automation (Step 1/4)");
+    lv_label_set_text(m_titleLabel, "Add Automation (Step 1/3)");
     lv_obj_set_style_text_color(m_titleLabel, m_theme.textPrimary(), 0);
     lv_obj_align(m_titleLabel, LV_ALIGN_CENTER, 0, 0);
 }
@@ -127,8 +127,7 @@ void AddAutomationScreen::createContent() {
     // Create all step containers (hidden by default)
     createStep1_BasicInfo();
     createStep2_Triggers();
-    createStep3_Conditions();
-    createStep4_Actions();
+    createStep3_Actions();
 }
 
 void AddAutomationScreen::createNavigationButtons() {
@@ -409,7 +408,7 @@ void AddAutomationScreen::createSensorThresholdTrigger() {
     }
 }
 
-void AddAutomationScreen::createStep3_Conditions() {
+void AddAutomationScreen::createStep3_Actions() {
     m_step3Container = lv_obj_create(m_content);
     lv_obj_set_size(m_step3Container, LV_PCT(100), LV_PCT(100));
     lv_obj_set_style_bg_opa(m_step3Container, LV_OPA_TRANSP, 0);
@@ -419,77 +418,41 @@ void AddAutomationScreen::createStep3_Conditions() {
     lv_obj_add_flag(m_step3Container, LV_OBJ_FLAG_HIDDEN);
 
     lv_obj_t* label = lv_label_create(m_step3Container);
-    lv_label_set_text(label, "Conditions (Optional)");
-    lv_obj_set_style_text_color(label, m_theme.textPrimary(), 0);
-    lv_obj_align(label, LV_ALIGN_TOP_LEFT, 0, 0);
-
-    lv_obj_t* helpText = lv_label_create(m_step3Container);
-    lv_label_set_text(helpText, "Add conditions that must be true for the automation to run.\n"
-                                "Skip this step to run the automation whenever the trigger fires.");
-    lv_obj_set_style_text_color(helpText, m_theme.textSecondary(), 0);
-    lv_obj_align(helpText, LV_ALIGN_TOP_LEFT, 0, 25);
-    lv_label_set_long_mode(helpText, LV_LABEL_LONG_WRAP);
-    lv_obj_set_width(helpText, 700);
-
-    m_conditionList = lv_obj_create(m_step3Container);
-    lv_obj_set_size(m_conditionList, LV_PCT(100), 180);
-    lv_obj_align(m_conditionList, LV_ALIGN_TOP_LEFT, 0, 80);
-    lv_obj_set_style_bg_opa(m_conditionList, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(m_conditionList, 0, 0);
-    lv_obj_set_flex_flow(m_conditionList, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_row(m_conditionList, ThemeManager::SPACING_SM, 0);
-
-    // Skip conditions for now - just show a note
-    lv_obj_t* skipNote = lv_label_create(m_conditionList);
-    lv_label_set_text(skipNote, "No conditions added. Automation will always run when triggered.");
-    lv_obj_set_style_text_color(skipNote, m_theme.textSecondary(), 0);
-}
-
-void AddAutomationScreen::createStep4_Actions() {
-    m_step4Container = lv_obj_create(m_content);
-    lv_obj_set_size(m_step4Container, LV_PCT(100), LV_PCT(100));
-    lv_obj_set_style_bg_opa(m_step4Container, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(m_step4Container, 0, 0);
-    lv_obj_set_style_pad_all(m_step4Container, 0, 0);
-    lv_obj_clear_flag(m_step4Container, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_add_flag(m_step4Container, LV_OBJ_FLAG_HIDDEN);
-
-    lv_obj_t* label = lv_label_create(m_step4Container);
     lv_label_set_text(label, "Actions");
     lv_obj_set_style_text_color(label, m_theme.textPrimary(), 0);
     lv_obj_align(label, LV_ALIGN_TOP_LEFT, 0, 0);
 
     // Device dropdown
-    lv_obj_t* deviceLabel = lv_label_create(m_step4Container);
+    lv_obj_t* deviceLabel = lv_label_create(m_step3Container);
     lv_label_set_text(deviceLabel, "Device");
     lv_obj_set_style_text_color(deviceLabel, m_theme.textPrimary(), 0);
     lv_obj_align(deviceLabel, LV_ALIGN_TOP_LEFT, 0, 30);
 
-    m_actionDeviceDropdown = lv_dropdown_create(m_step4Container);
+    m_actionDeviceDropdown = lv_dropdown_create(m_step3Container);
     lv_obj_set_size(m_actionDeviceDropdown, 300, 40);
     lv_obj_align(m_actionDeviceDropdown, LV_ALIGN_TOP_LEFT, 0, 52);
     populateDeviceDropdown(m_actionDeviceDropdown);
     styleDropdown(m_actionDeviceDropdown);
 
     // Property dropdown
-    lv_obj_t* propLabel = lv_label_create(m_step4Container);
+    lv_obj_t* propLabel = lv_label_create(m_step3Container);
     lv_label_set_text(propLabel, "Property");
     lv_obj_set_style_text_color(propLabel, m_theme.textPrimary(), 0);
     lv_obj_align(propLabel, LV_ALIGN_TOP_LEFT, 320, 30);
 
-    m_actionPropertyDropdown = lv_dropdown_create(m_step4Container);
+    m_actionPropertyDropdown = lv_dropdown_create(m_step3Container);
     lv_obj_set_size(m_actionPropertyDropdown, 150, 40);
     lv_obj_align(m_actionPropertyDropdown, LV_ALIGN_TOP_LEFT, 320, 52);
     lv_dropdown_set_options(m_actionPropertyDropdown, "on\nbrightness\ncolor");
     styleDropdown(m_actionPropertyDropdown);
 
     // Value input
-    lv_obj_t* valueLabel = lv_label_create(m_step4Container);
+    lv_obj_t* valueLabel = lv_label_create(m_step3Container);
     lv_label_set_text(valueLabel, "Set to value");
     lv_obj_set_style_text_color(valueLabel, m_theme.textPrimary(), 0);
     lv_obj_align(valueLabel, LV_ALIGN_TOP_LEFT, 490, 30);
 
-    m_actionValueInput = lv_textarea_create(m_step4Container);
+    m_actionValueInput = lv_textarea_create(m_step3Container);
     lv_obj_set_size(m_actionValueInput, 150, 40);
     lv_obj_align(m_actionValueInput, LV_ALIGN_TOP_LEFT, 490, 52);
     lv_textarea_set_placeholder_text(m_actionValueInput, "true");
@@ -501,7 +464,7 @@ void AddAutomationScreen::createStep4_Actions() {
     }
 
     // Action list
-    m_actionList = lv_obj_create(m_step4Container);
+    m_actionList = lv_obj_create(m_step3Container);
     lv_obj_set_size(m_actionList, LV_PCT(100), 150);
     lv_obj_align(m_actionList, LV_ALIGN_TOP_LEFT, 0, 110);
     lv_obj_set_style_bg_opa(m_actionList, LV_OPA_TRANSP, 0);
@@ -523,7 +486,6 @@ void AddAutomationScreen::showStep(int step) {
     lv_obj_add_flag(m_step1Container, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(m_step2Container, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(m_step3Container, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(m_step4Container, LV_OBJ_FLAG_HIDDEN);
 
     // Show current step
     switch (step) {
@@ -533,7 +495,6 @@ void AddAutomationScreen::showStep(int step) {
             showTriggerConfig(m_selectedTriggerType);
             break;
         case 3: lv_obj_clear_flag(m_step3Container, LV_OBJ_FLAG_HIDDEN); break;
-        case 4: lv_obj_clear_flag(m_step4Container, LV_OBJ_FLAG_HIDDEN); break;
     }
 
     updateNavigationButtons();
@@ -762,7 +723,6 @@ void AddAutomationScreen::resetForm() {
     m_automationDescription.clear();
     m_selectedTriggerType = TriggerType::DeviceState;
     m_triggers.clear();
-    m_condition.reset();
     m_actions.clear();
 
     if (m_nameInput) lv_textarea_set_text(m_nameInput, "");
@@ -821,14 +781,6 @@ void AddAutomationScreen::populatePropertyDropdown(lv_obj_t* dropdown, const std
 
     // Default properties for now
     lv_dropdown_set_options(dropdown, "on\nbrightness\ncolor\ntemperature\nmotion");
-}
-
-void AddAutomationScreen::addCondition() {
-    // TODO: Implement condition adding UI
-}
-
-void AddAutomationScreen::addAction() {
-    // TODO: Implement multiple actions
 }
 
 #endif // SMARTHUB_ENABLE_LVGL

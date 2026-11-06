@@ -27,12 +27,11 @@ class ThemeManager;
  * Steps:
  * 1. Name and description
  * 2. Trigger configuration
- * 3. Conditions (optional)
- * 4. Actions
+ * 3. Action
  */
 class AddAutomationScreen : public Screen {
 public:
-    static constexpr int TOTAL_STEPS = 4;
+    static constexpr int TOTAL_STEPS = 3;
 
     using AutomationAddedCallback = std::function<void(AutomationPtr)>;
 
@@ -72,13 +71,8 @@ private:
     void createIntervalTrigger();
     void createSensorThresholdTrigger();
 
-    // Step 3: Conditions
-    void createStep3_Conditions();
-    void addCondition();
-
-    // Step 4: Actions
-    void createStep4_Actions();
-    void addAction();
+    // Step 3: Action
+    void createStep3_Actions();
 
     void onCreateAutomation();
     void resetForm();
@@ -94,7 +88,6 @@ private:
     lv_obj_t* m_step1Container = nullptr;
     lv_obj_t* m_step2Container = nullptr;
     lv_obj_t* m_step3Container = nullptr;
-    lv_obj_t* m_step4Container = nullptr;
 
     lv_obj_t* m_prevBtn = nullptr;
     lv_obj_t* m_nextBtn = nullptr;
@@ -116,9 +109,6 @@ private:
     lv_obj_t* m_triggerThresholdInput = nullptr;
 
     // Step 3 widgets
-    lv_obj_t* m_conditionList = nullptr;
-
-    // Step 4 widgets
     lv_obj_t* m_actionList = nullptr;
     lv_obj_t* m_actionDeviceDropdown = nullptr;
     lv_obj_t* m_actionPropertyDropdown = nullptr;
@@ -138,7 +128,6 @@ private:
     std::string m_automationDescription;
     TriggerType m_selectedTriggerType = TriggerType::DeviceState;
     std::vector<Trigger> m_triggers;
-    std::optional<Condition> m_condition;
     std::vector<Action> m_actions;
 
     std::vector<std::pair<std::string, std::string>> m_devices;  // id, name

@@ -52,7 +52,12 @@ void popModalFocusGroup();
  */
 class UIManager {
 public:
-    UIManager(EventBus& eventBus, DeviceManager& deviceManager, Database& database);
+    /**
+     * @param automationManager Owned by the caller, and must outlive this object.
+     *                          Without one, the automation screens aren't available.
+     */
+    UIManager(EventBus& eventBus, DeviceManager& deviceManager, Database& database,
+              AutomationManager* automationManager = nullptr);
     ~UIManager();
 
     // Non-copyable
@@ -110,6 +115,7 @@ private:
     EventBus& m_eventBus;
     DeviceManager& m_deviceManager;
     Database& m_database;
+    AutomationManager* m_automationManager = nullptr;
 
     std::string m_fbDevice;
     std::string m_touchDevice;
@@ -123,7 +129,6 @@ private:
     std::unique_ptr<ui::ThemeManager> m_themeManager;
     std::unique_ptr<ui::ScreenManager> m_screenManager;
     std::unique_ptr<network::NetworkManager> m_networkManager;
-    std::unique_ptr<AutomationManager> m_automationManager;
 };
 
 } // namespace smarthub

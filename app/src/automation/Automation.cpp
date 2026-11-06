@@ -111,7 +111,7 @@ Trigger Trigger::fromJson(const nlohmann::json& j) {
 
     switch (t.type) {
         case TriggerType::DeviceState:
-            t.deviceId = j.value("device_id", "");
+            t.deviceId = j.value("deviceId", j.value("device_id", ""));
             t.property = j.value("property", "");
             if (j.contains("from_value")) t.fromValue = j["from_value"];
             if (j.contains("to_value")) t.toValue = j["to_value"];
@@ -130,7 +130,7 @@ Trigger Trigger::fromJson(const nlohmann::json& j) {
             break;
 
         case TriggerType::SensorThreshold:
-            t.deviceId = j.value("device_id", "");
+            t.deviceId = j.value("deviceId", j.value("device_id", ""));
             t.property = j.value("property", "");
             t.compareOp = stringToCompareOp(j.value("compare_op", "eq"));
             t.threshold = j.value("threshold", 0.0);
@@ -201,6 +201,7 @@ Condition Condition::fromJson(const nlohmann::json& j) {
 // Action serialization
 nlohmann::json Action::toJson() const {
     nlohmann::json j;
+    j["type"] = actionTypeToString(type);
 
     switch (type) {
         case ActionType::SetDeviceState:
@@ -245,13 +246,19 @@ nlohmann::json Automation::toJson() const {
     j["description"] = description;
     j["enabled"] = enabled;
 
-    // Output single trigger for API compatibility
-    if (!triggers.empty()) {
+    // Clients normally see the single "trigger", and fromJson accepts both forms
+    if (triggers.size() == 1) {
         j["trigger"] = triggers[0].toJson();
+    } else if (triggers.size() > 1) {
+        nlohmann::json triggersArray = nlohmann::json::array();
+        for (const auto& trigger : triggers) {
+            triggersArray.push_back(trigger.toJson());
+        }
+        j["triggers"] = triggersArray;
     }
 
     if (condition.has_value()) {
-        j["conditions"] = nlohmann::json::array({condition->toJson()});
+        j["condition"] = condition->toJson();
     }
 
     nlohmann::json actionsArray = nlohmann::json::array();
@@ -263,6 +270,51 @@ nlohmann::json Automation::toJson() const {
     j["lastTriggered"] = lastTriggeredAt;
 
     return j;
+}
+
+std::string Automation::validateJson(const nlohmann::json& j) {
+    nlohmann::json triggers = nlohmann::json::array();
+    if (j.contains("trigger")) {
+        triggers.push_back(j["trigger"]);
+    } else if (j.contains("triggers") && j["triggers"].is_array()) {
+        triggers = j["triggers"];
+    }
+    if (triggers.empty()) return "at least one trigger is required";
+
+    for (const auto& trigger : triggers) {
+        if (!trigger.is_object()) return "a trigger must be an object";
+
+        const std::string type = trigger.value("type", "device_state");
+        if (type == "device_state" || type == "sensor_threshold") {
+            if (trigger.value("deviceId", trigger.value("device_id", "")).empty()) {
+                return type + " trigger needs a device_id";
+            }
+            if (trigger.value("property", "").empty()) {
+                return type + " trigger needs a property";
+            }
+            if (type == "sensor_threshold") {
+                const std::string op = trigger.value("compare_op", "");
+                if (op != "eq" && op != "neq" && op != "gt" && op != "gte" && op != "lt" &&
+                    op != "lte") {
+                    return "unknown compare_op: " + op;
+                }
+                if (!trigger.contains("threshold") || !trigger["threshold"].is_number()) {
+                    return "sensor_threshold trigger needs a numeric threshold";
+                }
+            }
+        } else if (type == "time_interval") {
+            if (trigger.value("interval_minutes", 0) <= 0) {
+                return "time_interval trigger needs a positive interval_minutes";
+            }
+        } else if (type != "time") {
+            return "unknown trigger type: " + type;
+        }
+    }
+
+    if (!j.contains("actions") || !j["actions"].is_array() || j["actions"].empty()) {
+        return "at least one action is required";
+    }
+    return "";
 }
 
 Automation Automation::fromJson(const nlohmann::json& j) {
