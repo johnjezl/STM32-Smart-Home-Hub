@@ -127,6 +127,20 @@ bool DeviceManager::loadProtocol(const std::string& name, const nlohmann::json& 
         return false;
     }
 
+    // Devices loaded from the database were here before their protocol
+    std::vector<DevicePtr> saved;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        for (const auto& [id, device] : m_devices) {
+            if (device->protocol() == name) {
+                saved.push_back(device);
+            }
+        }
+    }
+    for (const auto& device : saved) {
+        protocol->restoreDevice(*device);
+    }
+
     LOG_INFO("Loaded protocol: %s v%s", name.c_str(), protocol->version().c_str());
 
     return true;
@@ -192,6 +206,10 @@ bool DeviceManager::addDevice(DevicePtr device) {
     }
 
     // Unlocked, because handlers can call back into this class
+    if (auto protocol = getProtocol(device->protocol())) {
+        protocol->restoreDevice(*device);
+    }
+
     try {
         DeviceStateEvent event;
         event.deviceId = deviceId;
@@ -208,6 +226,7 @@ bool DeviceManager::addDevice(DevicePtr device) {
 }
 
 bool DeviceManager::removeDevice(const std::string& id) {
+    std::string protocolName;
     {
         std::lock_guard<std::mutex> lock(m_mutex);
 
@@ -217,6 +236,7 @@ bool DeviceManager::removeDevice(const std::string& id) {
         }
 
         LOG_INFO("Removing device: %s", id.c_str());
+        protocolName = it->second->protocol();
 
         {
             std::lock_guard<std::mutex> stateLock(m_stateWriteMutex);
@@ -230,6 +250,10 @@ bool DeviceManager::removeDevice(const std::string& id) {
     }
 
     // Unlocked, because handlers can call back into this class
+    if (auto protocol = getProtocol(protocolName)) {
+        protocol->forgetDevice(id);
+    }
+
     try {
         DeviceStateEvent event;
         event.deviceId = id;

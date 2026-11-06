@@ -365,6 +365,19 @@ private:
             rsp.appendByte(0);      // StartIndex
             rsp.appendByte(0);      // NumAssocDev
             queueFrame(rsp);
+        } else if (req.command() == cmd::zdo::NWK_ADDR_REQ) {
+            const uint64_t ieeeAddr = req.getQWord(0);
+            for (const auto& [nwkAddr, device] : m_devices) {
+                if (device.ieeeAddr != ieeeAddr) continue;
+                ZnpFrame rsp(ZnpType::AREQ, ZnpSubsystem::ZDO, cmd::zdo::NWK_ADDR_RSP);
+                rsp.appendByte(0);      // Status
+                rsp.appendQWord(ieeeAddr);
+                rsp.appendWord(nwkAddr);
+                rsp.appendByte(0);      // StartIndex
+                rsp.appendByte(0);      // NumAssocDev
+                queueFrame(rsp);
+                return;
+            }
         } else if (req.command() == cmd::zdo::ACTIVE_EP_REQ) {
             auto device = m_devices.find(req.getWord(0));
             if (device == m_devices.end()) return;

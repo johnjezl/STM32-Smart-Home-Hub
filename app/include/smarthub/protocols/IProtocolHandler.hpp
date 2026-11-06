@@ -94,6 +94,13 @@ public:
     // Status and diagnostics
     virtual nlohmann::json getStatus() const = 0;
     virtual std::vector<std::string> getKnownDeviceAddresses() const = 0;
+
+    // A device the hub keeps: loaded from the database at startup, or just added. A protocol
+    // that holds its own addressing rebuilds it from this, so the device works at once.
+    virtual void restoreDevice(const IDevice& device) { (void)device; }
+
+    // The hub no longer keeps this device
+    virtual void forgetDevice(const std::string& deviceId) { (void)deviceId; }
 };
 
 using ProtocolHandlerPtr = std::shared_ptr<IProtocolHandler>;

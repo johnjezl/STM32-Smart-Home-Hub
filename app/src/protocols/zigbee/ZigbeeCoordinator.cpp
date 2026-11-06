@@ -507,6 +507,25 @@ bool ZigbeeCoordinator::setHueSat(uint16_t nwkAddr, uint8_t endpoint,
                        zcl::cmd::color::MOVE_TO_HUE_SAT, payload);
 }
 
+bool ZigbeeCoordinator::requestNetworkAddress(uint64_t ieeeAddr) {
+    ZnpFrame req(ZnpType::SREQ, ZnpSubsystem::ZDO, cmd::zdo::NWK_ADDR_REQ);
+    req.appendQWord(ieeeAddr);
+    req.appendByte(0);  // Request type: single device
+    req.appendByte(0);  // Start index
+    return m_transport->send(req);
+}
+
+void ZigbeeCoordinator::restoreDevice(uint64_t ieeeAddr, uint16_t nwkAddr) {
+    std::lock_guard<std::mutex> lock(m_deviceMutex);
+    if (m_devices.count(ieeeAddr) > 0) {
+        return;
+    }
+    ZigbeeDeviceInfo& device = m_devices[ieeeAddr];
+    device.ieeeAddress = ieeeAddr;
+    device.networkAddress = nwkAddr;
+    m_nwkToIeee.emplace(nwkAddr, ieeeAddr);  // A device heard from at this address keeps it
+}
+
 bool ZigbeeCoordinator::requestDeviceInfo(uint16_t nwkAddr) {
     // Request IEEE address
     ZnpFrame ieeeReq(ZnpType::SREQ, ZnpSubsystem::ZDO, cmd::zdo::IEEE_ADDR_REQ);
@@ -653,6 +672,9 @@ void ZigbeeCoordinator::handleIndication(const ZnpFrame& frame) {
                 case cmd::zdo::SIMPLE_DESC_RSP:
                     handleSimpleDescRsp(frame);
                     break;
+                case cmd::zdo::NWK_ADDR_RSP:
+                    handleNwkAddrRsp(frame);
+                    break;
                 default:
                     LOG_DEBUG("Unhandled ZDO indication: 0x%02X", frame.command());
                     break;
@@ -767,6 +789,32 @@ void ZigbeeCoordinator::handleTcDeviceInd(const ZnpFrame& frame) {
 
     LOG_INFO("New device joining: NWK=%04X, IEEE=%016" PRIX64 ", parent=%04X",
              nwkAddr, ieeeAddr, parentAddr);
+}
+
+void ZigbeeCoordinator::handleNwkAddrRsp(const ZnpFrame& frame) {
+    // NWK_ADDR_RSP format:
+    // Status(1) + IEEEAddr(8) + NwkAddr(2) + StartIndex(1) + NumAssocDev(1) + AssocDevList(N)
+    if (frame.payload().size() < 11) return;
+
+    const uint8_t status = frame.getByte(0);
+    const uint64_t ieeeAddr = frame.getQWord(1);
+    const uint16_t nwkAddr = frame.getWord(9);
+    if (status != 0) {
+        LOG_DEBUG("Network address of %016" PRIX64 " not found: status 0x%02X", ieeeAddr, status);
+        return;
+    }
+
+    std::lock_guard<std::mutex> lock(m_deviceMutex);
+    auto& device = m_devices[ieeeAddr];
+    if (device.networkAddress != nwkAddr) {
+        forgetAddress(device.networkAddress, ieeeAddr);
+    }
+    device.ieeeAddress = ieeeAddr;
+    device.networkAddress = nwkAddr;
+    device.lastSeen = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    device.available = true;
+    m_nwkToIeee[nwkAddr] = ieeeAddr;
 }
 
 void ZigbeeCoordinator::handleActiveEpRsp(const ZnpFrame& frame) {

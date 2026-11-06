@@ -11,6 +11,8 @@
 #include <smarthub/devices/types/TemperatureSensor.hpp>
 #include <smarthub/devices/types/MotionSensor.hpp>
 #include <cinttypes>
+#include <cctype>
+#include <algorithm>
 #include <algorithm>
 #include <cmath>
 #include <iomanip>
@@ -245,6 +247,7 @@ void ZigbeeHandler::shutdown() {
         m_ieeeToDeviceId.clear();
         m_deviceIdToIeee.clear();
         m_deviceEndpoints.clear();
+        m_savedDevices.clear();
     }
 
     m_initialized = false;
@@ -317,6 +320,8 @@ bool ZigbeeHandler::sendCommand(const std::string& deviceAddress,
     // Get device info from coordinator
     auto deviceInfo = m_coordinator->getDevice(ieeeAddr);
     if (!deviceInfo) {
+        // Its network address isn't known yet. Ask again, so a later try can work.
+        m_coordinator->requestNetworkAddress(ieeeAddr);
         fail("Device " + deviceAddress + " not found in coordinator");
         return false;
     }
@@ -437,6 +442,73 @@ std::vector<std::string> ZigbeeHandler::getKnownDeviceAddresses() const {
     return addresses;
 }
 
+void ZigbeeHandler::restoreDevice(const IDevice& device) {
+    const nlohmann::json state = device.getState();
+
+    // Typed in by hand, or set when it paired, or part of the id when it paired on an older build
+    std::optional<uint64_t> ieeeAddr = parseIeeeAddress(device.protocolAddress());
+    if (!ieeeAddr && state.contains("ieeeAddress") && state["ieeeAddress"].is_string()) {
+        ieeeAddr = parseIeeeAddress(state["ieeeAddress"].get<std::string>());
+    }
+    if (!ieeeAddr) {
+        ieeeAddr = parseIeeeAddress(device.id());
+    }
+    if (!ieeeAddr) {
+        LOG_WARN("Zigbee device %s has no usable address", device.id().c_str());
+        return;
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(m_deviceMutex);
+        m_ieeeToDeviceId[*ieeeAddr] = device.id();
+        m_deviceIdToIeee[device.id()] = *ieeeAddr;
+        m_savedDevices[*ieeeAddr] = device.id();
+        if (state.contains("endpoint") && state["endpoint"].is_number_integer()) {
+            const int endpoint = state["endpoint"].get<int>();
+            if (endpoint >= 1 && endpoint <= 240) {
+                m_deviceEndpoints[*ieeeAddr] = static_cast<uint8_t>(endpoint);
+            }
+        }
+    }
+
+    std::shared_lock<std::shared_mutex> coordinatorLock(m_coordinatorMutex);
+    if (!m_coordinator) {
+        return;
+    }
+
+    int nwkAddr = 0;
+    if (state.contains("networkAddress") && state["networkAddress"].is_number_integer()) {
+        nwkAddr = state["networkAddress"].get<int>();
+    }
+    if (nwkAddr > 0 && nwkAddr <= 0xFFF7) {
+        m_coordinator->restoreDevice(*ieeeAddr, static_cast<uint16_t>(nwkAddr));
+    } else if (!m_coordinator->getDevice(*ieeeAddr)) {
+        m_coordinator->requestNetworkAddress(*ieeeAddr);
+    }
+}
+
+void ZigbeeHandler::forgetDevice(const std::string& deviceId) {
+    std::lock_guard<std::mutex> lock(m_deviceMutex);
+    auto it = m_deviceIdToIeee.find(deviceId);
+    if (it == m_deviceIdToIeee.end()) {
+        return;
+    }
+    const uint64_t ieeeAddr = it->second;
+    m_deviceIdToIeee.erase(it);
+    m_ieeeToDeviceId.erase(ieeeAddr);
+    m_deviceEndpoints.erase(ieeeAddr);
+    m_savedDevices.erase(ieeeAddr);
+}
+
+std::optional<std::string> ZigbeeHandler::savedDeviceId(uint64_t ieeeAddr) const {
+    std::lock_guard<std::mutex> lock(m_deviceMutex);
+    auto it = m_savedDevices.find(ieeeAddr);
+    if (it == m_savedDevices.end()) {
+        return std::nullopt;
+    }
+    return it->second;
+}
+
 // ============================================================================
 // Zigbee-specific Methods
 // ============================================================================
@@ -452,8 +524,14 @@ bool ZigbeeHandler::loadDeviceDatabase(const std::string& path) {
 void ZigbeeHandler::onDeviceAnnounced(uint16_t nwkAddr, uint64_t ieeeAddr) {
     LOG_INFO("Zigbee device announced: nwk=0x%04X, ieee=0x%016" PRIX64, nwkAddr, ieeeAddr);
 
+    // Devices announce when they power up, so this one may be nothing new
+    const std::optional<std::string> savedId = savedDeviceId(ieeeAddr);
+    if (savedId) {
+        notifyState(*savedId, "networkAddress", static_cast<int>(nwkAddr));  // It may have moved
+    }
+
     // Publish event to notify UI that a device was detected
-    if (m_discovering) {
+    if (m_discovering && !savedId) {
         DeviceStateEvent detectEvent;
         detectEvent.deviceId = ieeeToDeviceId(ieeeAddr);
         detectEvent.property = "_detecting";
@@ -630,7 +708,7 @@ uint64_t ZigbeeHandler::pairDevice(uint64_t ieeeAddr) {
 
 void ZigbeeHandler::reportPairingFailure(uint64_t ieeeAddr, const std::string& message) {
     LOG_ERROR("Pairing 0x%016" PRIX64 " failed: %s", ieeeAddr, message.c_str());
-    if (m_discovering) {
+    if (m_discovering && !savedDeviceId(ieeeAddr)) {  // Nobody is adding a device the hub has
         DeviceStateEvent errorEvent;
         errorEvent.deviceId = ieeeToDeviceId(ieeeAddr);
         errorEvent.property = "_pairing_error";
@@ -651,6 +729,25 @@ void ZigbeeHandler::finishPairing(uint64_t ieeeAddr) {
         return;
     }
 
+    // A device the hub already has only needs its details brought up to date
+    if (const auto savedId = savedDeviceId(ieeeAddr)) {
+        const DeviceType savedType = resolveDeviceType(*deviceInfo);
+        const std::optional<uint8_t> savedEndpoint = primaryEndpoint(*deviceInfo, savedType);
+        {
+            std::lock_guard<std::mutex> lock(m_deviceMutex);
+            m_ieeeToDeviceId[ieeeAddr] = *savedId;
+            m_deviceIdToIeee[*savedId] = ieeeAddr;
+            if (savedEndpoint) {
+                m_deviceEndpoints[ieeeAddr] = *savedEndpoint;
+            }
+        }
+        if (savedEndpoint) {
+            setupReporting(deviceInfo->networkAddress, *savedEndpoint, savedType);
+            notifyState(*savedId, "endpoint", static_cast<int>(*savedEndpoint));
+        }
+        return;
+    }
+
     // Create SmartHub device from Zigbee device info
     auto device = createDeviceFromInfo(*deviceInfo);
     if (!device) {
@@ -660,6 +757,10 @@ void ZigbeeHandler::finishPairing(uint64_t ieeeAddr) {
 
     DeviceType type = resolveDeviceType(*deviceInfo);
     std::optional<uint8_t> endpoint = primaryEndpoint(*deviceInfo, type);
+
+    if (endpoint) {
+        device->setState("endpoint", static_cast<int>(*endpoint));  // Commands need it after a restart
+    }
 
     // Store mapping
     std::string deviceId = device->id();
@@ -1114,6 +1215,21 @@ std::string ZigbeeHandler::ieeeToDeviceId(uint64_t ieeeAddr) const {
     std::ostringstream oss;
     oss << "zigbee_" << std::hex << std::setfill('0') << std::setw(16) << ieeeAddr;
     return oss.str();
+}
+
+std::optional<uint64_t> ZigbeeHandler::parseIeeeAddress(std::string text) {
+    if (text.rfind("zigbee_", 0) == 0) {
+        text.erase(0, 7);
+    } else if (text.rfind("0x", 0) == 0 || text.rfind("0X", 0) == 0) {
+        text.erase(0, 2);
+    }
+    text.erase(std::remove(text.begin(), text.end(), ':'), text.end());
+
+    if (text.size() != 16 ||
+        !std::all_of(text.begin(), text.end(), [](unsigned char c) { return std::isxdigit(c) != 0; })) {
+        return std::nullopt;
+    }
+    return std::stoull(text, nullptr, 16);
 }
 
 std::optional<uint64_t> ZigbeeHandler::deviceIdToIeee(const std::string& deviceId) const {

@@ -181,6 +181,17 @@ public:
     bool requestDeviceInfo(uint16_t nwkAddr);
 
     /**
+     * Ask the network for a device's address. The answer arrives later and is applied by itself.
+     */
+    bool requestNetworkAddress(uint64_t ieeeAddr);
+
+    /**
+     * Make a saved device addressable after a restart. Does nothing if the device has already
+     * been heard from, since that address is newer. It isn't marked available.
+     */
+    void restoreDevice(uint64_t ieeeAddr, uint16_t nwkAddr);
+
+    /**
      * Ask a device to describe an endpoint. The answer arrives in the device's
      * inClusters, or as an increase in failedDescriptors.
      */
@@ -271,6 +282,7 @@ private:
     void handleTcDeviceInd(const ZnpFrame& frame);
     void handleActiveEpRsp(const ZnpFrame& frame);
     void handleSimpleDescRsp(const ZnpFrame& frame);
+    void handleNwkAddrRsp(const ZnpFrame& frame);
 
     // Internal helpers
     bool registerEndpoint(uint8_t endpoint, uint16_t profileId, uint16_t deviceId,
