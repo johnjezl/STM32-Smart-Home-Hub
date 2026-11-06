@@ -782,6 +782,9 @@ TEST_F(WebAuthTest, AutomationsThatCouldNeverRunAreRejected) {
         {{"name", "Enabled as text"}, {"enabled", "yes"},
          {"trigger", {{"type", "time"}, {"hour", 8}, {"minute", 0}}},
          {"actions", {action}}},
+        {{"name", "Wrapping hour"},
+         {"trigger", {{"type", "time"}, {"hour", 18446744073709551615ULL}, {"minute", 0}}},
+         {"actions", {action}}},
         {{"name", "Internal property"},
          {"trigger", {{"type", "device_state"}, {"device_id", "s"}, {"property", "_removed"}}},
          {"actions", {action}}},
@@ -815,6 +818,15 @@ TEST_F(WebAuthTest, AutomationsThatCouldNeverRunAreRejected) {
         EXPECT_EQ(request("POST", "/api/automations", options).status, 400) << body.dump();
     }
     EXPECT_EQ(request("GET", "/api/automations", admin).json().size(), 0u);
+
+    // A value nested deeply enough to overflow the stack if it were copied
+    std::string nestedValue(50000, '[');
+    nestedValue += std::string(50000, ']');
+    RequestOptions deepValue = admin;
+    deepValue.body = R"({"name":"Deep value","trigger":{"type":"device_state","device_id":"x",)"
+                     R"("property":"on","to_value":)" + nestedValue +
+                     R"(},"actions":[{"deviceId":"light","property":"on","value":true}]})";
+    EXPECT_EQ(request("POST", "/api/automations", deepValue).status, 400);
 
     // A field of the wrong type gets a clear message
     RequestOptions wrongType = admin;

@@ -108,7 +108,6 @@ private:
     lv_obj_t* m_triggerThresholdInput = nullptr;
 
     // Step 3 widgets
-    lv_obj_t* m_actionList = nullptr;
     lv_obj_t* m_actionDeviceDropdown = nullptr;
     lv_obj_t* m_actionPropertyDropdown = nullptr;
     lv_obj_t* m_actionValueInput = nullptr;

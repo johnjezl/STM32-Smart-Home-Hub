@@ -647,6 +647,12 @@ void AutomationManager::loadFromDatabase() {
                 automation.lastTriggeredAt = static_cast<uint64_t>(stmt->getInt64(9));
             }
 
+            // Older versions could save automations that can't run. Say so, and keep them.
+            const std::string problem = problemWith(automation);
+            if (!problem.empty()) {
+                LOG_WARN("Automation '%s' may not run: %s", automation.name.c_str(), problem.c_str());
+            }
+
             m_automations[automation.id] = std::make_shared<Automation>(automation);
 
         } catch (const std::exception& e) {
