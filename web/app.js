@@ -658,13 +658,13 @@ class SmartHubApp {
 
         switch (trigger.type) {
             case 'device_state':
-                return `When ${trigger.deviceId || 'device'} ${trigger.property} becomes ${trigger.value}`;
+                return `When ${trigger.device_id || 'device'} ${trigger.property} becomes ${trigger.to_value}`;
             case 'time':
                 return `At ${trigger.hour || 0}:${String(trigger.minute || 0).padStart(2, '0')}`;
-            case 'interval':
-                return `Every ${trigger.intervalMinutes || 15} minutes`;
+            case 'time_interval':
+                return `Every ${trigger.interval_minutes} minutes`;
             case 'sensor_threshold':
-                return `When ${trigger.deviceId || 'sensor'} ${trigger.operator} ${trigger.threshold}`;
+                return `When ${trigger.device_id || 'sensor'} ${trigger.property} ${trigger.compare_op} ${trigger.threshold}`;
             default:
                 return trigger.type || 'Unknown trigger';
         }
@@ -1241,7 +1241,7 @@ class SmartHubApp {
         const configId = {
             'device_state': 'trigger-device-state',
             'time': 'trigger-time',
-            'interval': 'trigger-interval',
+            'time_interval': 'trigger-interval',
             'sensor_threshold': 'trigger-sensor'
         }[type];
 
@@ -1290,20 +1290,21 @@ class SmartHubApp {
 
         switch (type) {
             case 'device_state':
-                trigger.deviceId = document.getElementById('trigger-device').value;
+                trigger.device_id = document.getElementById('trigger-device').value;
                 trigger.property = document.getElementById('trigger-property').value;
-                trigger.value = document.getElementById('trigger-value').value === 'true';
+                trigger.to_value = document.getElementById('trigger-value').value === 'true';
                 break;
             case 'time':
                 trigger.hour = parseInt(document.getElementById('trigger-hour').value);
                 trigger.minute = parseInt(document.getElementById('trigger-minute').value);
                 break;
-            case 'interval':
-                trigger.intervalMinutes = parseInt(document.getElementById('trigger-interval-mins').value);
+            case 'time_interval':
+                trigger.interval_minutes = parseInt(document.getElementById('trigger-interval-mins').value);
                 break;
             case 'sensor_threshold':
-                trigger.deviceId = document.getElementById('trigger-sensor-device').value;
-                trigger.operator = document.getElementById('trigger-operator').value;
+                trigger.device_id = document.getElementById('trigger-sensor-device').value;
+                trigger.property = document.getElementById('trigger-sensor-property').value;
+                trigger.compare_op = document.getElementById('trigger-operator').value;
                 trigger.threshold = parseFloat(document.getElementById('trigger-threshold').value);
                 break;
         }

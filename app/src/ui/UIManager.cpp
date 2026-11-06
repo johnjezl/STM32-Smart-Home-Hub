@@ -543,10 +543,12 @@ static void drm_destroy_buffer(int fd, DrmBuffer* buf) {
     }
 }
 
-UIManager::UIManager(EventBus& eventBus, DeviceManager& deviceManager, Database& database)
+UIManager::UIManager(EventBus& eventBus, DeviceManager& deviceManager, Database& database,
+                     AutomationManager* automationManager)
     : m_eventBus(eventBus)
     , m_deviceManager(deviceManager)
     , m_database(database)
+    , m_automationManager(automationManager)
 {
 }
 
@@ -916,11 +918,6 @@ void UIManager::update() {
         m_screenManager->update(elapsed);
     }
 
-    // Poll automation manager for time-based triggers
-    if (m_automationManager) {
-        m_automationManager->poll(currentTick);
-    }
-
     // Handle LVGL tasks
     lv_timer_handler();
 
@@ -989,7 +986,6 @@ void UIManager::shutdown() {
     // Clean up screen manager before LVGL buffers
     m_screenManager.reset();
     m_themeManager.reset();
-    m_automationManager.reset();
 
     // Free LVGL buffers
     delete[] s_lvgl_buf1;
@@ -1008,11 +1004,6 @@ void UIManager::setupScreens() {
     // Create network manager for WiFi setup
     m_networkManager = std::make_unique<network::NetworkManager>();
     m_networkManager->initialize();
-
-    // Create automation manager
-    m_automationManager = std::make_unique<AutomationManager>(
-        m_eventBus, m_database, m_deviceManager);
-    m_automationManager->initialize();
 
     // Create screen manager
     m_screenManager = std::make_unique<ui::ScreenManager>(*this);
@@ -1054,15 +1045,17 @@ void UIManager::setupScreens() {
     m_screenManager->registerScreen("notifications",
         std::make_unique<ui::NotificationScreen>(*m_screenManager, *m_themeManager, m_deviceManager));
 
-    m_screenManager->registerScreen("automations",
-        std::make_unique<ui::AutomationListScreen>(*m_screenManager, *m_themeManager, *m_automationManager));
+    if (m_automationManager) {
+        m_screenManager->registerScreen("automations",
+            std::make_unique<ui::AutomationListScreen>(*m_screenManager, *m_themeManager, *m_automationManager));
 
-    m_screenManager->registerScreen("add_automation",
-        std::make_unique<ui::AddAutomationScreen>(*m_screenManager, *m_themeManager,
-            *m_automationManager, m_deviceManager));
+        m_screenManager->registerScreen("add_automation",
+            std::make_unique<ui::AddAutomationScreen>(*m_screenManager, *m_themeManager,
+                *m_automationManager, m_deviceManager));
 
-    m_screenManager->registerScreen("edit_automation",
-        std::make_unique<ui::EditAutomationScreen>(*m_screenManager, *m_themeManager, *m_automationManager));
+        m_screenManager->registerScreen("edit_automation",
+            std::make_unique<ui::EditAutomationScreen>(*m_screenManager, *m_themeManager, *m_automationManager));
+    }
 
     // Set home screen and show it
     m_screenManager->setHomeScreen("dashboard");

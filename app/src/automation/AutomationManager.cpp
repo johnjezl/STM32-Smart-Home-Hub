@@ -59,46 +59,31 @@ void AutomationManager::shutdown() {
     m_initialized = false;
 }
 
+namespace {
+
+// DeviceManager publishes JSON values, and other publishers use plain types
+nlohmann::json eventValueToJson(const std::any& value) {
+    if (!value.has_value()) return nullptr;
+    if (const auto* json = std::any_cast<nlohmann::json>(&value)) return *json;
+    if (const auto* flag = std::any_cast<bool>(&value)) return *flag;
+    if (const auto* number = std::any_cast<int>(&value)) return *number;
+    if (const auto* number = std::any_cast<double>(&value)) return *number;
+    if (const auto* text = std::any_cast<std::string>(&value)) return *text;
+    if (const auto* text = std::any_cast<const char*>(&value)) return std::string(*text);
+    return nullptr;
+}
+
+} // namespace
+
 void AutomationManager::setupEventHandlers() {
     // Subscribe to device state changes
     m_eventSubscription = m_eventBus.subscribe("device.state",
         [this](const Event& event) {
             const auto& stateEvent = static_cast<const DeviceStateEvent&>(event);
 
-            // Convert std::any to nlohmann::json
-            nlohmann::json value;
-            nlohmann::json prevValue;
-
-            try {
-                if (stateEvent.value.has_value()) {
-                    if (stateEvent.value.type() == typeid(bool)) {
-                        value = std::any_cast<bool>(stateEvent.value);
-                    } else if (stateEvent.value.type() == typeid(int)) {
-                        value = std::any_cast<int>(stateEvent.value);
-                    } else if (stateEvent.value.type() == typeid(double)) {
-                        value = std::any_cast<double>(stateEvent.value);
-                    } else if (stateEvent.value.type() == typeid(std::string)) {
-                        value = std::any_cast<std::string>(stateEvent.value);
-                    }
-                }
-
-                if (stateEvent.previousValue.has_value()) {
-                    if (stateEvent.previousValue.type() == typeid(bool)) {
-                        prevValue = std::any_cast<bool>(stateEvent.previousValue);
-                    } else if (stateEvent.previousValue.type() == typeid(int)) {
-                        prevValue = std::any_cast<int>(stateEvent.previousValue);
-                    } else if (stateEvent.previousValue.type() == typeid(double)) {
-                        prevValue = std::any_cast<double>(stateEvent.previousValue);
-                    } else if (stateEvent.previousValue.type() == typeid(std::string)) {
-                        prevValue = std::any_cast<std::string>(stateEvent.previousValue);
-                    }
-                }
-            } catch (const std::bad_any_cast&) {
-                // Ignore conversion errors
-            }
-
             onDeviceStateChanged(stateEvent.deviceId, stateEvent.property,
-                                value, prevValue);
+                                 eventValueToJson(stateEvent.value),
+                                 eventValueToJson(stateEvent.previousValue));
         });
 }
 

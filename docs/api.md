@@ -592,8 +592,8 @@ Create a new automation.
   "trigger": {
     "type": "device_state",
     "deviceId": "motion-sensor-1",
-    "property": "value",
-    "value": true
+    "property": "motion",
+    "to_value": true
   },
   "actions": [
     {
@@ -609,10 +609,12 @@ Create a new automation.
 
 | Type | Fields | Description |
 |------|--------|-------------|
-| device_state | deviceId, property, value | Triggers when device state changes |
-| time | hour, minute | Triggers at specific time |
-| interval | intervalMinutes | Triggers every N minutes |
-| sensor_threshold | deviceId, operator, threshold | Triggers when sensor crosses threshold |
+| device_state | deviceId, property, from_value (optional), to_value (optional) | Triggers when the property changes, matching the old and new values if given |
+| time | hour, minute, days_of_week (optional) | Triggers at a specific time |
+| time_interval | interval_minutes | Triggers every N minutes |
+| sensor_threshold | deviceId, property, compare_op, threshold | Triggers on each change where the value meets the threshold |
+
+`compare_op` is one of `eq`, `neq`, `gt`, `gte`, `lt` or `lte`. An action can also be `{"type": "delay", "delayMs": 500}`, and `condition` is an optional object that must hold for the actions to run.
 
 **Response (200 OK):**
 ```json
@@ -639,7 +641,7 @@ Get details for a specific automation.
   "description": "Turn on light when motion detected",
   "enabled": true,
   "trigger": { ... },
-  "conditions": [],
+  "condition": { ... },
   "actions": [ ... ],
   "lastTriggered": 1705500000
 }

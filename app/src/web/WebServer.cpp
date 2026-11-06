@@ -1399,6 +1399,12 @@ void WebServer::apiCreateAutomation(struct mg_connection* c, struct mg_http_mess
             return;
         }
 
+        const std::string problem = Automation::validateJson(data);
+        if (!problem.empty()) {
+            sendError(c, 400, problem);
+            return;
+        }
+
         Automation automation = Automation::fromJson(data);
 
         // Generate ID if not provided
@@ -1407,8 +1413,7 @@ void WebServer::apiCreateAutomation(struct mg_connection* c, struct mg_http_mess
         }
 
         if (m_automationMgr->addAutomation(automation)) {
-            std::string json = "{\"success\":true,\"id\":\"" + automation.id + "\"}";
-            sendJson(c, 201, json);
+            sendJson(c, 201, nlohmann::json{{"success", true}, {"id", automation.id}}.dump());
         } else {
             sendError(c, 500, "Failed to create automation");
         }
@@ -1451,6 +1456,12 @@ void WebServer::apiUpdateAutomation(struct mg_connection* c, const std::string& 
 
     try {
         auto data = nlohmann::json::parse(body);
+        const std::string problem = Automation::validateJson(data);
+        if (!problem.empty()) {
+            sendError(c, 400, problem);
+            return;
+        }
+
         Automation automation = Automation::fromJson(data);
         automation.id = id;  // Ensure ID matches URL
 

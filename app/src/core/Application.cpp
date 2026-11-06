@@ -3,6 +3,7 @@
  */
 
 #include <smarthub/core/Application.hpp>
+#include <smarthub/automation/AutomationManager.hpp>
 #include <smarthub/core/Config.hpp>
 #include <smarthub/core/EventBus.hpp>
 #include <smarthub/core/Logger.hpp>
@@ -95,6 +96,11 @@ bool Application::initialize() {
         return false;
     }
 
+    if (!initializeAutomation()) {
+        LOG_ERROR("Failed to initialize automations");
+        return false;
+    }
+
     if (!initializeWebServer()) {
         LOG_ERROR("Failed to initialize web server");
         return false;
@@ -172,6 +178,12 @@ void Application::mainLoop() {
             m_rpmsgClient->poll();
         }
 
+        // Run time-based automations
+        if (m_automationManager) {
+            m_automationManager->poll(static_cast<uint64_t>(
+                duration_cast<milliseconds>(frameStart.time_since_epoch()).count()));
+        }
+
         // Sleep to maintain frame rate
         auto frameEnd = steady_clock::now();
         auto elapsed = duration_cast<milliseconds>(frameEnd - frameStart);
@@ -220,6 +232,18 @@ bool Application::initializeDeviceManager() {
     }
 
     LOG_INFO("Device manager initialized");
+    return true;
+}
+
+bool Application::initializeAutomation() {
+    m_automationManager = std::make_unique<AutomationManager>(
+        *m_eventBus, *m_database, *m_deviceManager);
+
+    if (!m_automationManager->initialize()) {
+        return false;
+    }
+
+    LOG_INFO("Automation manager initialized");
     return true;
 }
 
@@ -293,6 +317,7 @@ bool Application::initializeWebServer() {
 
     m_webServer->setSecurityManagers(m_sessionManager.get(), m_apiTokenManager.get(),
                                      m_userManager.get());
+    m_webServer->setAutomationManager(m_automationManager.get());
     m_webServer->setRateLimit(m_config->rateLimitPerMinute());
     int loginWindow = m_config->loginFailureWindowSeconds();
     if (loginWindow <= 0) {
@@ -313,7 +338,8 @@ bool Application::initializeWebServer() {
 
 bool Application::initializeUI() {
 #ifdef SMARTHUB_ENABLE_LVGL
-    m_uiManager = std::make_unique<UIManager>(*m_eventBus, *m_deviceManager, *m_database);
+    m_uiManager = std::make_unique<UIManager>(*m_eventBus, *m_deviceManager, *m_database,
+                                              m_automationManager.get());
 
     if (!m_uiManager->initialize()) {
         return false;
@@ -340,6 +366,11 @@ void Application::shutdownSubsystems() {
     if (m_webServer) {
         m_webServer->stop();
         m_webServer.reset();
+    }
+
+    if (m_automationManager) {
+        m_automationManager->shutdown();
+        m_automationManager.reset();
     }
 
     m_apiTokenManager.reset();
