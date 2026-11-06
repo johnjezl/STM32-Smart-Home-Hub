@@ -90,6 +90,7 @@ private:
     bool initializeRpmsg();
     bool initializeSecurity();
     bool initializeWebServer();
+    bool configureTls();
     bool initializeUI();
 
     void mainLoop(const std::atomic<bool>& stopRequested);

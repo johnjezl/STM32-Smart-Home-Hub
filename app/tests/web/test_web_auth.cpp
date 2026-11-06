@@ -13,6 +13,7 @@
 #include <smarthub/database/Database.hpp>
 #include <smarthub/devices/DeviceManager.hpp>
 #include <smarthub/security/ApiTokenManager.hpp>
+#include <smarthub/security/CertManager.hpp>
 #include <smarthub/security/SessionManager.hpp>
 #include <smarthub/security/UserManager.hpp>
 #include <smarthub/web/WebServer.hpp>
@@ -73,6 +74,7 @@ struct RequestOptions {
     std::string bearer;
     std::string host;
     std::string contentType = "application/json";
+    bool https = false;
 };
 
 std::string shellQuote(const std::string& value) {
@@ -88,6 +90,19 @@ std::string shellQuote(const std::string& value) {
 }
 
 }  // namespace
+
+std::string shellOutput(const std::string& command) {
+    std::string output;
+    FILE* pipe = popen(command.c_str(), "r");
+    if (pipe) {
+        char buffer[256];
+        while (fgets(buffer, sizeof(buffer), pipe)) {
+            output += buffer;
+        }
+        pclose(pipe);
+    }
+    return output;
+}
 
 class WebAuthTest : public ::testing::Test {
 protected:
@@ -106,7 +121,13 @@ protected:
         fs::remove_all(m_dir);
     }
 
-    void startApp(const std::string& securitySection = "", const std::string& certPath = "") {
+    void startApp(const std::string& securitySection = "", const std::string& certPath = "",
+                  const std::string& keyPath = "") {
+        ASSERT_TRUE(tryStartApp(securitySection, certPath, keyPath.empty() ? certPath : keyPath));
+    }
+
+    bool tryStartApp(const std::string& securitySection, const std::string& certPath,
+                     const std::string& keyPath) {
         const fs::path configPath = m_dir / "config.yaml";
         std::ofstream config(configPath);
         config << "database:\n  path: " << (m_dir / "hub.db").string() << "\n"
@@ -114,7 +135,7 @@ protected:
                << "web:\n  port: " << s_port << "\n"
                << "  root: " << (m_dir / "www").string() << "\n"
                << "  tls:\n    cert: \"" << certPath << "\"\n"
-               << "    key: \"" << certPath << "\"\n"
+               << "    key: \"" << keyPath << "\"\n"
                << "rpmsg:\n  device: " << (m_dir / "no-rpmsg").string() << "\n"
                << "zigbee:\n  enabled: false\n"
                << "logging:\n  level: error\n  file: " << (m_dir / "hub.log").string() << "\n"
@@ -122,8 +143,11 @@ protected:
         config.close();
 
         m_app = std::make_unique<Application>(configPath.string());
-        ASSERT_TRUE(m_app->initialize());
+        if (!m_app->initialize()) {
+            return false;
+        }
         std::this_thread::sleep_for(std::chrono::milliseconds(150));
+        return true;
     }
 
     void stopApp() {
@@ -135,7 +159,7 @@ protected:
     Response request(const std::string& method, const std::string& path,
                      const RequestOptions& options = {}) const {
         const fs::path headersFile = m_dir / "response-headers";
-        std::string command = "curl -s --max-time 10 -o - -D " +
+        std::string command = std::string("curl -s ") + (options.https ? "-k " : "") + "--max-time 10 -o - -D " +
                               shellQuote(headersFile.string()) + " -X " + method;
         // Always send a body, as a browser does: Mongoose answers 411 to a POST
         // with no Content-Length.
@@ -152,7 +176,8 @@ protected:
         if (!options.bearer.empty()) {
             command += " -H " + shellQuote("Authorization: Bearer " + options.bearer);
         }
-        command += " " + shellQuote("http://127.0.0.1:" + std::to_string(s_port) + path) +
+        command += " " + shellQuote(std::string(options.https ? "https" : "http") + "://127.0.0.1:" +
+                                    std::to_string(s_port) + path) +
                    " 2>/dev/null";
 
         Response response;
@@ -464,15 +489,141 @@ TEST_F(WebAuthTest, PasswordWithSpecialCharactersWorks) {
     EXPECT_EQ(login("guest", password).status, 200);
 }
 
-TEST_F(WebAuthTest, CookieIsNotSecureWhenTlsFellBackToHttp) {
-    // A configured certificate that can't be read leaves the server on plain
-    // HTTP, where a browser would throw away a Secure cookie.
-    startApp("", (m_dir / "missing.pem").string());
-    setUpAdmin();
+TEST_F(WebAuthTest, FirstBootCreatesACertificateAndServesTls) {
+    const fs::path cert = m_dir / "new" / "certs" / "server.crt";
+    const fs::path key = m_dir / "new" / "certs" / "server.key";
+    startApp("", cert.string(), key.string());
 
-    const Response response = login(kAdminName, kAdminPassword);
-    ASSERT_EQ(response.status, 200);
-    EXPECT_FALSE(response.hasHeader("Secure"));
+    EXPECT_TRUE(fs::exists(cert));
+    EXPECT_TRUE(fs::exists(key));
+    EXPECT_EQ(fs::status(key).permissions() & (fs::perms::group_all | fs::perms::others_all),
+              fs::perms::none);
+
+    RequestOptions secure;
+    secure.https = true;
+    EXPECT_EQ(request("GET", "/api/setup/status", secure).status, 200);
+
+    // Plain HTTP to the same port gets nowhere
+    EXPECT_NE(request("GET", "/api/setup/status").status, 200);
+
+    // A login over TLS gets a cookie a browser will only send back over TLS
+    secure.body = credentials(kAdminName, kAdminPassword);
+    const Response setup = request("POST", "/api/setup", secure);
+    ASSERT_EQ(setup.status, 201) << setup.body;
+    EXPECT_TRUE(setup.hasHeader("Secure"));
+
+    // The same certificate is used next time
+    stopApp();
+    const auto created = fs::last_write_time(cert);
+    startApp("", cert.string(), key.string());
+    EXPECT_EQ(fs::last_write_time(cert), created);
+}
+
+TEST_F(WebAuthTest, ACertificateThatCantBeUsedStopsStartup) {
+    const fs::path cert = m_dir / "server.crt";
+    const fs::path key = m_dir / "server.key";
+
+    // Only one of them: not a first boot, and nothing to use
+    std::ofstream(cert) << "not a certificate";
+    EXPECT_FALSE(tryStartApp("", cert.string(), key.string()));
+    m_app.reset();
+
+    // Both, but not valid
+    std::ofstream(key) << "not a key";
+    EXPECT_FALSE(tryStartApp("", cert.string(), key.string()));
+    m_app.reset();
+
+    // Left as found, rather than replaced
+    std::ifstream file(cert);
+    std::string contents;
+    std::getline(file, contents);
+    EXPECT_EQ(contents, "not a certificate");
+}
+
+TEST_F(WebAuthTest, ACertificateWithTheWrongKeyStopsStartup) {
+    const fs::path first = m_dir / "first";
+    const fs::path second = m_dir / "second";
+    ASSERT_TRUE(security::CertManager::createSelfSigned((first / "server.crt").string(),
+                                                        (first / "server.key").string(), "a"));
+    ASSERT_TRUE(security::CertManager::createSelfSigned((second / "server.crt").string(),
+                                                        (second / "server.key").string(), "b"));
+
+    EXPECT_FALSE(tryStartApp("", (first / "server.crt").string(), (second / "server.key").string()));
+}
+
+TEST_F(WebAuthTest, CertificateWithoutItsPairNeedsBothPaths) {
+    EXPECT_FALSE(tryStartApp("", (m_dir / "server.crt").string(), ""));
+}
+
+TEST_F(WebAuthTest, EmptyTlsPathsMeanPlainHttp) {
+    startApp();
+    EXPECT_EQ(request("GET", "/api/setup/status").status, 200);
+    EXPECT_FALSE(setUpAdmin().empty());
+    EXPECT_FALSE(login(kAdminName, kAdminPassword).hasHeader("Secure"));
+}
+
+TEST_F(WebAuthTest, ThereIsNoSecondPlainHttpListener) {
+    startApp();
+    const std::string reached = shellOutput(
+        "curl -s --max-time 2 -o /dev/null -w '%{http_code}' http://127.0.0.1:4321/api/setup/status");
+    EXPECT_EQ(reached, "000");
+}
+
+TEST_F(WebAuthTest, ResponsesAreValidJsonWhateverDevicesAreNamed) {
+    startApp();
+    RequestOptions admin;
+    admin.cookie = setUpAdmin();
+
+    const std::string name = R"(Quote " back\slash <img src=x onerror=alert(1)>)";
+    RequestOptions device = admin;
+    device.body = nlohmann::json{{"type", "switch"}, {"protocol", "local"},
+                                 {"name", name}, {"id", "quoted"}}.dump();
+    ASSERT_EQ(request("POST", "/api/devices", device).status, 201);
+
+    RequestOptions room = admin;
+    room.body = nlohmann::json{{"name", name}, {"id", "quotedroom"}}.dump();
+    const Response createdRoom = request("POST", "/api/rooms", room);
+    ASSERT_EQ(createdRoom.status, 201) << createdRoom.body;
+    EXPECT_EQ(createdRoom.json()["name"], name);
+
+    EXPECT_EQ(request("GET", "/api/devices", admin).json()[0]["name"], name);
+    EXPECT_EQ(request("GET", "/api/devices/quoted", admin).json()["name"], name);
+    const nlohmann::json rooms = request("GET", "/api/rooms", admin).json();
+    ASSERT_TRUE(rooms.is_array());
+    bool found = false;
+    for (const auto& entry : rooms) {
+        found = found || entry["name"] == name;
+    }
+    EXPECT_TRUE(found);
+}
+
+TEST_F(WebAuthTest, RoomsSurviveADeviceReportingAnOddState) {
+    startApp();
+    RequestOptions admin;
+    admin.cookie = setUpAdmin();
+
+    RequestOptions device = admin;
+    device.body = R"({"type":"switch","protocol":"local","name":"Odd","id":"odd","room":"Kitchen"})";
+    ASSERT_EQ(request("POST", "/api/devices", device).status, 201);
+    m_app->deviceManager().getDevice("odd")->setState("on", "yes");
+
+    EXPECT_EQ(request("GET", "/api/rooms", admin).status, 200);
+
+    // Text that isn't valid UTF-8 doesn't lose the whole list either
+    m_app->deviceManager().getDevice("odd")->setState("note", std::string("bad\xFF"));
+    EXPECT_EQ(request("GET", "/api/devices", admin).status, 200);
+}
+
+TEST_F(WebAuthTest, SecurityHeadersAreOnApiAndStaticResponses) {
+    startApp();
+    for (const char* path : {"/api/setup/status", "/index.html"}) {
+        SCOPED_TRACE(path);
+        const Response response = request("GET", path);
+        EXPECT_EQ(response.status, 200);
+        EXPECT_TRUE(response.hasHeader("Content-Security-Policy: default-src 'none'"));
+        EXPECT_TRUE(response.hasHeader("X-Content-Type-Options: nosniff"));
+        EXPECT_TRUE(response.hasHeader("X-Frame-Options: DENY"));
+    }
 }
 
 TEST_F(WebAuthTest, OnlyTheExactSessionCookieIsAccepted) {

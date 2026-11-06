@@ -111,8 +111,8 @@ private:
     int m_webPort = 443;
     int m_webHttpPort = 80;
     std::string m_webRoot = "/opt/smarthub/www";
-    std::string m_tlsCertPath = "/etc/smarthub/cert.pem";
-    std::string m_tlsKeyPath = "/etc/smarthub/key.pem";
+    std::string m_tlsCertPath = "/etc/smarthub/certs/server.crt";
+    std::string m_tlsKeyPath = "/etc/smarthub/certs/server.key";
 
     // Display
     std::string m_displayDevice = "/dev/fb0";

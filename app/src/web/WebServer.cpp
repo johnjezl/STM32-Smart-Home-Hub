@@ -229,28 +229,35 @@ bool WebServer::start() {
 
     char addr[128];
 
-    // Check if TLS is configured
-    bool useTls = !m_certPath.empty() && !m_keyPath.empty();
+    // Check if TLS is configured. Empty paths are how plain HTTP is asked for. Anything else has
+    // to work, because falling back would send passwords over the network in the clear.
+    const bool useTls = !m_certPath.empty() || !m_keyPath.empty();
 
     if (useTls) {
+#if MG_TLS == MG_TLS_NONE
+        LOG_ERROR("TLS is configured, but this build has no TLS support");
+        delete m_mgr;
+        m_mgr = nullptr;
+        return false;
+#endif
         // Read certificate and key file contents
         s_certData = readFile(m_certPath);
         s_keyData = readFile(m_keyPath);
 
         if (s_certData.empty() || s_keyData.empty()) {
-            LOG_ERROR("Failed to read TLS cert/key files");
-            useTls = false;
-        } else {
-            std::snprintf(addr, sizeof(addr), "https://0.0.0.0:%d", m_port);
-            s_tls_opts.cert = mg_str_n(s_certData.c_str(), s_certData.size());
-            s_tls_opts.key = mg_str_n(s_keyData.c_str(), s_keyData.size());
-            LOG_INFO("TLS enabled with cert: %s (%zu bytes)", m_certPath.c_str(), s_certData.size());
+            LOG_ERROR("Failed to read TLS cert/key files: %s, %s", m_certPath.c_str(), m_keyPath.c_str());
+            mg_mgr_free(m_mgr);
+            delete m_mgr;
+            m_mgr = nullptr;
+            return false;
         }
-    }
-
-    if (!useTls) {
+        std::snprintf(addr, sizeof(addr), "https://0.0.0.0:%d", m_port);
+        s_tls_opts.cert = mg_str_n(s_certData.c_str(), s_certData.size());
+        s_tls_opts.key = mg_str_n(s_keyData.c_str(), s_keyData.size());
+        LOG_INFO("TLS enabled with cert: %s (%zu bytes)", m_certPath.c_str(), s_certData.size());
+    } else {
         std::snprintf(addr, sizeof(addr), "http://0.0.0.0:%d", m_port);
-        LOG_WARN("TLS not configured - running HTTP only (insecure)");
+        LOG_WARN("TLS is turned off in the config - running HTTP only (insecure)");
     }
 
     struct mg_connection* c = mg_http_listen(m_mgr, addr, eventHandler,
@@ -275,24 +282,20 @@ bool WebServer::start() {
         }
     }
 
-    // Additional HTTP listener on port 4321 for development/testing
-    {
-        char devAddr[64];
-        std::snprintf(devAddr, sizeof(devAddr), "http://0.0.0.0:4321");
-        struct mg_connection* devC = mg_http_listen(m_mgr, devAddr, eventHandler, nullptr);
-        if (devC) {
-            LOG_INFO("Additional HTTP listener on port 4321");
-        } else {
-            LOG_WARN("Failed to start listener on port 4321");
-        }
-    }
-
     m_running = true;
 
     // Start server thread
     m_thread = std::thread([this]() {
+        auto lastCleanup = std::chrono::steady_clock::now();
         while (m_running) {
             mg_mgr_poll(m_mgr, 100);
+
+            // Expired sessions only get removed if someone uses them, unless this does it
+            const auto now = std::chrono::steady_clock::now();
+            if (m_sessionMgr && now - lastCleanup >= std::chrono::minutes(1)) {
+                lastCleanup = now;
+                m_sessionMgr->cleanup();
+            }
         }
     });
 
@@ -538,6 +541,11 @@ void WebServer::addSecurityHeaders(std::string& headers) {
     headers += "X-XSS-Protection: 1; mode=block\r\n";
     headers += "Referrer-Policy: strict-origin-when-cross-origin\r\n";
     headers += "Cache-Control: no-store\r\n";
+    // Everything the dashboard uses comes from this server, and app.js has no inline code. If a
+    // value does get past escaping, this stops a browser running it.
+    headers += "Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; "
+               "img-src 'self' data:; font-src 'self'; connect-src 'self'; base-uri 'none'; "
+               "form-action 'self'; frame-ancestors 'none'\r\n";
     if (!m_certPath.empty()) {
         headers += "Strict-Transport-Security: max-age=31536000; includeSubDomains\r\n";
     }
@@ -722,8 +730,11 @@ void WebServer::handleHttpRequest(struct mg_connection* c, struct mg_http_messag
     }
     // Static files
     else {
+        std::string headers;
+        addSecurityHeaders(headers);
         struct mg_http_serve_opts opts = {};
         opts.root_dir = m_webRoot.c_str();
+        opts.extra_headers = headers.c_str();
         mg_http_serve_dir(c, hm, &opts);
     }
 }
@@ -732,28 +743,33 @@ void WebServer::handleWebSocket(struct mg_connection* /*c*/, void* /*ev_data*/) 
     // WebSocket handling - to be implemented
 }
 
+namespace {
+
+// Names and state can hold anything a device reported. Replacing text that isn't valid UTF-8
+// keeps one bad value from failing the whole response.
+std::string toResponse(const nlohmann::json& value) {
+    return value.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
+}
+
+nlohmann::json deviceJson(const IDevice& device) {
+    return {
+        {"id", device.id()},
+        {"name", device.name()},
+        {"type", device.typeString()},
+        {"room", device.room()},
+        {"online", device.isAvailable()},
+        {"state", device.getState()},
+    };
+}
+
+}  // namespace
+
 void WebServer::apiGetDevices(struct mg_connection* c) {
-    // Build JSON response
-    std::string json = "[";
-    auto devices = m_deviceManager.getAllDevices();
-    bool first = true;
-
-    for (const auto& device : devices) {
-        if (!first) json += ",";
-        first = false;
-
-        json += "{";
-        json += "\"id\":\"" + device->id() + "\",";
-        json += "\"name\":\"" + device->name() + "\",";
-        json += "\"type\":\"" + device->typeString() + "\",";
-        json += "\"room\":\"" + device->room() + "\",";
-        json += "\"online\":" + std::string(device->isAvailable() ? "true" : "false") + ",";
-        json += "\"state\":" + device->getState().dump();
-        json += "}";
+    nlohmann::json devices = nlohmann::json::array();
+    for (const auto& device : m_deviceManager.getAllDevices()) {
+        devices.push_back(deviceJson(*device));
     }
-
-    json += "]";
-    sendJson(c, 200, json);
+    sendJson(c, 200, toResponse(devices));
 }
 
 void WebServer::apiGetDevice(struct mg_connection* c, const std::string& id) {
@@ -763,16 +779,7 @@ void WebServer::apiGetDevice(struct mg_connection* c, const std::string& id) {
         return;
     }
 
-    std::string json = "{";
-    json += "\"id\":\"" + device->id() + "\",";
-    json += "\"name\":\"" + device->name() + "\",";
-    json += "\"type\":\"" + device->typeString() + "\",";
-    json += "\"room\":\"" + device->room() + "\",";
-    json += "\"online\":" + std::string(device->isAvailable() ? "true" : "false") + ",";
-    json += "\"state\":" + device->getState().dump();
-    json += "}";
-
-    sendJson(c, 200, json);
+    sendJson(c, 200, toResponse(deviceJson(*device)));
 }
 
 void WebServer::apiSetDeviceState(struct mg_connection* c, const std::string& id,
@@ -810,7 +817,7 @@ void WebServer::apiSetDeviceState(struct mg_connection* c, const std::string& id
         }
 
         // Return updated state
-        std::string json = "{\"success\":true,\"state\":" + device->getState().dump() + "}";
+        std::string json = toResponse({{"success", true}, {"state", device->getState()}});
         sendJson(c, 200, json);
     } catch (const std::exception& e) {
         LOG_ERROR("Failed to parse device state: %s", e.what());
@@ -825,13 +832,11 @@ void WebServer::apiGetSensorHistory(struct mg_connection* c, const std::string& 
 }
 
 void WebServer::apiGetSystemStatus(struct mg_connection* c) {
-    std::string json = "{";
-    json += "\"version\":\"0.1.0\",";
-    json += "\"uptime\":" + std::to_string(0) + ",";
-    json += "\"devices\":" + std::to_string(m_deviceManager.deviceCount());
-    json += "}";
-
-    sendJson(c, 200, json);
+    sendJson(c, 200, toResponse({
+        {"version", "0.1.0"},
+        {"uptime", 0},
+        {"devices", m_deviceManager.deviceCount()},
+    }));
 }
 
 void WebServer::startSession(struct mg_connection* c, const security::User& user, int status) {
@@ -1001,34 +1006,28 @@ void WebServer::apiSetup(struct mg_connection* c, struct mg_http_message* hm) {
 }
 
 void WebServer::apiGetRooms(struct mg_connection* c) {
-    auto rooms = m_deviceManager.getAllRooms();
-
-    std::string json = "[";
-    bool first = true;
-    for (const auto& [id, name] : rooms) {
-        if (!first) json += ",";
-        first = false;
-
+    nlohmann::json rooms = nlohmann::json::array();
+    for (const auto& [id, name] : m_deviceManager.getAllRooms()) {
         // Count devices in this room (devices store room name, not id)
         auto devices = m_deviceManager.getDevicesByRoom(name);
         int activeCount = 0;
         for (const auto& dev : devices) {
-            auto state = dev->getState();
-            if (state.contains("on") && state["on"].get<bool>()) {
+            // A device can report anything, so don't assume this is a boolean
+            const auto state = dev->getState();
+            if (state.value("on", nlohmann::json()) == true) {
                 activeCount++;
             }
         }
 
-        json += "{";
-        json += "\"id\":\"" + id + "\",";
-        json += "\"name\":\"" + name + "\",";
-        json += "\"deviceCount\":" + std::to_string(devices.size()) + ",";
-        json += "\"activeDevices\":" + std::to_string(activeCount);
-        json += "}";
+        rooms.push_back({
+            {"id", id},
+            {"name", name},
+            {"deviceCount", devices.size()},
+            {"activeDevices", activeCount},
+        });
     }
-    json += "]";
 
-    sendJson(c, 200, json);
+    sendJson(c, 200, toResponse(rooms));
 }
 
 void WebServer::apiCreateRoom(struct mg_connection* c, struct mg_http_message* hm) {
@@ -1057,8 +1056,7 @@ void WebServer::apiCreateRoom(struct mg_connection* c, struct mg_http_message* h
         }
 
         if (m_deviceManager.addRoom(id, name)) {
-            std::string json = "{\"success\":true,\"id\":\"" + id + "\",\"name\":\"" + name + "\"}";
-            sendJson(c, 201, json);
+            sendJson(c, 201, toResponse({{"success", true}, {"id", id}, {"name", name}}));
         } else {
             sendError(c, 409, "Room already exists");
         }
@@ -1082,8 +1080,7 @@ void WebServer::apiUpdateRoom(struct mg_connection* c, const std::string& id,
         }
 
         if (m_deviceManager.updateRoom(id, name)) {
-            std::string json = "{\"success\":true,\"id\":\"" + id + "\",\"name\":\"" + name + "\"}";
-            sendJson(c, 200, json);
+            sendJson(c, 200, toResponse({{"success", true}, {"id", id}, {"name", name}}));
         } else {
             sendError(c, 404, "Room not found");
         }
@@ -1158,8 +1155,7 @@ void WebServer::apiCreateDevice(struct mg_connection* c, struct mg_http_message*
         device->setRoom(room);
 
         if (m_deviceManager.addDevice(device)) {
-            std::string json = "{\"success\":true,\"id\":\"" + id + "\"}";
-            sendJson(c, 201, json);
+            sendJson(c, 201, toResponse({{"success", true}, {"id", id}}));
         } else {
             sendError(c, 500, "Failed to add device");
         }
@@ -1258,18 +1254,17 @@ void WebServer::apiGetPendingDevices(struct mg_connection* c) {
     // Get pending device if any
     auto pendingDevice = m_zigbeeHandler->getPendingDevice();
 
-    std::string json = "[";
+    nlohmann::json pending = nlohmann::json::array();
     if (pendingDevice) {
-        json += "{";
-        json += "\"ieeeAddress\":\"" + pendingDevice->protocolAddress() + "\",";
-        json += "\"manufacturer\":\"" + pendingDevice->getConfig().value("manufacturer", "") + "\",";
-        json += "\"model\":\"" + pendingDevice->getConfig().value("model", "") + "\",";
-        json += "\"type\":\"" + pendingDevice->typeString() + "\"";
-        json += "}";
+        const nlohmann::json config = pendingDevice->getConfig();
+        pending.push_back({
+            {"ieeeAddress", pendingDevice->protocolAddress()},
+            {"manufacturer", config.value("manufacturer", "")},
+            {"model", config.value("model", "")},
+            {"type", pendingDevice->typeString()},
+        });
     }
-    json += "]";
-
-    sendJson(c, 200, json);
+    sendJson(c, 200, toResponse(pending));
 }
 
 void WebServer::apiAddZigbeeDevice(struct mg_connection* c, struct mg_http_message* hm) {
@@ -1312,8 +1307,7 @@ void WebServer::apiAddZigbeeDevice(struct mg_connection* c, struct mg_http_messa
             // Clear pending device
             m_zigbeeHandler->clearPendingDevice();
 
-            std::string json = "{\"success\":true,\"id\":\"" + pendingDevice->id() + "\"}";
-            sendJson(c, 201, json);
+            sendJson(c, 201, toResponse({{"success", true}, {"id", pendingDevice->id()}}));
         } else {
             sendError(c, 500, "Failed to add device");
         }
@@ -1335,17 +1329,11 @@ void WebServer::apiGetAutomations(struct mg_connection* c) {
 
     auto automations = m_automationMgr->getAllAutomations();
 
-    std::string json = "[";
-    bool first = true;
+    nlohmann::json list = nlohmann::json::array();
     for (const auto& automation : automations) {
-        if (!first) json += ",";
-        first = false;
-
-        json += automation->toJson().dump();
+        list.push_back(automation->toJson());
     }
-    json += "]";
-
-    sendJson(c, 200, json);
+    sendJson(c, 200, toResponse(list));
 }
 
 void WebServer::apiCreateAutomation(struct mg_connection* c, struct mg_http_message* hm) {
@@ -1404,7 +1392,7 @@ void WebServer::apiGetAutomation(struct mg_connection* c, const std::string& id)
         return;
     }
 
-    sendJson(c, 200, automation->toJson().dump());
+    sendJson(c, 200, toResponse(automation->toJson()));
 }
 
 void WebServer::apiUpdateAutomation(struct mg_connection* c, const std::string& id,

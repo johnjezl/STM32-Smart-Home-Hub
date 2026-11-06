@@ -19,8 +19,8 @@ web:
   http_port: 80
   root: /opt/smarthub/www
   tls:
-    cert: /etc/smarthub/cert.pem
-    key: /etc/smarthub/key.pem
+    cert: /etc/smarthub/certs/server.crt
+    key: /etc/smarthub/certs/server.key
 
 # Web authentication
 security:
