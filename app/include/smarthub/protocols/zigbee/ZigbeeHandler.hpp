@@ -10,6 +10,7 @@
 #include "ZigbeeCoordinator.hpp"
 #include "ZigbeeDeviceDatabase.hpp"
 #include <map>
+#include <set>
 #include <utility>
 #include <deque>
 #include <chrono>
@@ -174,6 +175,7 @@ private:
         uint16_t nwkAddr = 0;
         uint64_t attempt = 0;      // Goes up when the device announces again
         bool finished = false;
+        bool forWizard = false;    // It joined during discovery, even if that has ended since
     };
     std::map<uint64_t, PairingTask> m_pairingTasks;
     std::mutex m_pairingMutex;
@@ -204,6 +206,9 @@ private:
     // Devices the hub keeps, IEEE to device id. Announcing again doesn't make one of these new, and
     // this outlives a leave, because the hub still has the device when it rejoins.
     std::map<uint64_t, std::string> m_savedDevices;
+    // Devices the Add Device wizard was cancelled on. They stay on the network, so announcing
+    // again outside a wizard mustn't add them anyway.
+    std::set<uint64_t> m_declinedDevices;
     enum class ZoneAlarm { Other, Motion, Open };  // What an IAS zone's alarm means
     std::map<uint64_t, ZoneAlarm> m_zoneAlarms;
     static ZoneAlarm zoneAlarmFor(DeviceType type, std::optional<uint16_t> zoneType);

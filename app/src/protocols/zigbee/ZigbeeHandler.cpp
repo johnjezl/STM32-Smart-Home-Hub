@@ -266,6 +266,8 @@ void ZigbeeHandler::shutdown() {
         m_addressChecks.clear();
         m_lastAddressLookup.clear();
         m_zoneAlarms.clear();
+        m_declinedDevices.clear();
+        m_pendingDevice.reset();
     }
 
     m_initialized = false;
@@ -476,6 +478,18 @@ DevicePtr ZigbeeHandler::getPendingDevice() const {
 
 void ZigbeeHandler::clearPendingDevice() {
     std::lock_guard<std::mutex> lock(m_deviceMutex);
+    if (m_pendingDevice) {
+        // Unless it was added, the wizard was cancelled
+        auto it = m_deviceIdToIeee.find(m_pendingDevice->id());
+        if (it != m_deviceIdToIeee.end() && m_savedDevices.count(it->second) == 0) {
+            const uint64_t ieeeAddr = it->second;
+            m_declinedDevices.insert(ieeeAddr);
+            m_deviceIdToIeee.erase(it);
+            m_ieeeToDeviceId.erase(ieeeAddr);
+            m_deviceEndpoints.erase(ieeeAddr);
+            m_zoneAlarms.erase(ieeeAddr);
+        }
+    }
     m_pendingDevice.reset();
 }
 
@@ -585,6 +599,7 @@ void ZigbeeHandler::forgetDevice(const std::string& deviceId) {
     m_ieeeToDeviceId.erase(ieeeAddr);
     m_deviceEndpoints.erase(ieeeAddr);
     m_savedDevices.erase(ieeeAddr);
+    m_declinedDevices.erase(ieeeAddr);
     m_zoneAlarms.erase(ieeeAddr);
     m_addressChecks.erase(std::remove(m_addressChecks.begin(), m_addressChecks.end(), ieeeAddr),
                           m_addressChecks.end());
@@ -655,6 +670,7 @@ void ZigbeeHandler::startPairing(uint16_t nwkAddr, uint64_t ieeeAddr) {
     if (existing != m_pairingTasks.end()) {
         existing->second.nwkAddr = nwkAddr;
         existing->second.attempt++;
+        existing->second.forWizard = existing->second.forWizard || m_discovering;
         m_pairingCv.notify_all();
         return;
     }
@@ -663,6 +679,7 @@ void ZigbeeHandler::startPairing(uint16_t nwkAddr, uint64_t ieeeAddr) {
     // would prevent reception of the Active Endpoints and Simple Descriptor responses.
     PairingTask& task = m_pairingTasks[ieeeAddr];
     task.nwkAddr = nwkAddr;
+    task.forWizard = m_discovering;
     task.thread = std::thread([this, ieeeAddr]() {
         for (;;) {
             uint64_t attempt = pairDevice(ieeeAddr);
@@ -1002,6 +1019,38 @@ void ZigbeeHandler::finishPairing(uint64_t ieeeAddr) {
         return;
     }
 
+    // Decided from when it joined, as the wizard may have been cancelled since
+    bool forWizard = false;
+    {
+        std::lock_guard<std::mutex> lock(m_pairingMutex);
+        auto task = m_pairingTasks.find(ieeeAddr);
+        forWizard = task != m_pairingTasks.end() && task->second.forWizard;
+    }
+    const bool discovering = m_discovering;
+
+    {
+        std::lock_guard<std::mutex> lock(m_deviceMutex);
+
+        // Announcing again while the wizard holds it. The wizard adds this one, so another
+        // device added here would make that fail.
+        auto mapped = m_ieeeToDeviceId.find(ieeeAddr);
+        if (m_pendingDevice && mapped != m_ieeeToDeviceId.end() && m_pendingDevice->id() == mapped->second) {
+            m_pendingDevice->setState("networkAddress", static_cast<int>(deviceInfo->networkAddress));
+            return;
+        }
+
+        if (discovering) {
+            m_declinedDevices.erase(ieeeAddr);  // Being offered again
+        } else if (forWizard) {
+            LOG_INFO("Not adding 0x%016" PRIX64 ": the wizard it joined during has ended", ieeeAddr);
+            m_declinedDevices.insert(ieeeAddr);
+            return;
+        } else if (m_declinedDevices.count(ieeeAddr) > 0) {
+            LOG_INFO("Not adding 0x%016" PRIX64 ": it was declined in the wizard", ieeeAddr);
+            return;
+        }
+    }
+
     // Create SmartHub device from Zigbee device info
     auto device = createDeviceFromInfo(*deviceInfo);
     if (!device) {
@@ -1052,7 +1101,7 @@ void ZigbeeHandler::finishPairing(uint64_t ieeeAddr) {
 
     // If in discovery mode, store as pending and notify via pending callback
     // Don't auto-add - let the UI wizard complete first
-    if (m_discovering) {
+    if (discovering) {
         LOG_INFO("Device discovered during pairing - storing as pending");
         {
             std::lock_guard<std::mutex> lock(m_deviceMutex);
