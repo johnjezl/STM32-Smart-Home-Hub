@@ -7,7 +7,6 @@
 #include <set>
 #include <smarthub/devices/DeviceManager.hpp>
 #include <ctime>
-#include <cmath>
 #include <algorithm>
 #include <smarthub/devices/Device.hpp>
 #include <smarthub/devices/DeviceTypeRegistry.hpp>
@@ -731,13 +730,16 @@ void DeviceManager::markStateChanged(const std::string& deviceId, const std::str
 
 void DeviceManager::recordSensorSample(const std::string& deviceId, const std::string& property,
                                        const nlohmann::json& value) {
-    // Only what's worth charting: other numbers in state are things like network addresses
-    if (!value.is_number() ||
-        (property != "temperature" && property != "humidity" && property != "illuminance")) {
+    // Only what's worth charting: other numbers in state are things like network addresses.
+    // Limits too, because one wild value recorded would flatten a chart for a week.
+    if (!value.is_number()) {
         return;
     }
     const double number = value.get<double>();
-    if (!std::isfinite(number)) {
+    const bool plausible = property == "temperature" ? (number >= -90.0 && number <= 150.0)
+                         : property == "humidity"    ? (number >= 0.0 && number <= 100.0)
+                                                     : false;
+    if (!plausible) {
         return;
     }
 
@@ -798,7 +800,9 @@ bool DeviceManager::flushSensorSamples() {
     const int64_t now = static_cast<int64_t>(std::time(nullptr));
     if (now - m_lastHistoryPrune >= kPruneIntervalSeconds || now < m_lastHistoryPrune) {
         m_lastHistoryPrune = now;
-        auto prune = m_database.prepare("DELETE FROM sensor_history WHERE timestamp < ?");
+        // By device so that it can use the index, rather than scanning the table on the SD card
+        auto prune = m_database.prepare(
+            "DELETE FROM sensor_history WHERE device_id IN (SELECT id FROM devices) AND timestamp < ?");
         if (prune && prune->isValid()) {
             prune->bind(1, now - kHistoryRetentionSeconds);
             prune->execute();
@@ -815,11 +819,12 @@ std::vector<SensorSample> DeviceManager::sensorHistory(const std::string& device
         return samples;
     }
     const int64_t now = static_cast<int64_t>(std::time(nullptr));
-    const int64_t slot = std::max<int64_t>(1, (now - fromTimestamp) / maxPoints + 1);
+    // No narrower than the chart's slots (range / (points - 1)), so it fills them
+    const int64_t slot = std::max<int64_t>(1, (now - fromTimestamp) / std::max(1, maxPoints - 1) + 1);
 
     auto stmt = m_database.prepare(
         "SELECT MAX(timestamp), AVG(value) FROM sensor_history "
-        "WHERE device_id = ? AND property = ? AND timestamp >= ? "
+        "WHERE device_id = ? AND property = ? AND timestamp >= ? AND timestamp <= ? "
         "GROUP BY timestamp / ? ORDER BY 1");
     if (!stmt || !stmt->isValid()) {
         return samples;
@@ -827,7 +832,8 @@ std::vector<SensorSample> DeviceManager::sensorHistory(const std::string& device
     stmt->bind(1, deviceId);
     stmt->bind(2, property);
     stmt->bind(3, fromTimestamp);
-    stmt->bind(4, slot);
+    stmt->bind(4, now);  // After a clock change, rows can be dated in the future
+    stmt->bind(5, slot);
     while (stmt->step()) {
         samples.push_back({stmt->getInt64(0), stmt->getDouble(1)});
     }
@@ -835,8 +841,6 @@ std::vector<SensorSample> DeviceManager::sensorHistory(const std::string& device
 }
 
 bool DeviceManager::flushStateChanges() {
-    const bool samplesSaved = flushSensorSamples();
-
     std::map<std::pair<std::string, std::string>, std::string> unsaved;
     {
         std::lock_guard<std::mutex> lock(m_stateWriteMutex);
@@ -879,10 +883,11 @@ bool DeviceManager::flushStateChanges() {
         }
     }
     writeBatch();
-    return saved && samplesSaved;
+    return saved;
 }
 
 void DeviceManager::stateWriterLoop() {
+    int secondsSinceSamplesSaved = 0;
     std::unique_lock<std::mutex> lock(m_stateWriteMutex);
     while (!m_stateWriterStopping) {
         m_stateWriterWake.wait_for(lock, std::chrono::seconds(kStateSaveIntervalSeconds),
@@ -893,6 +898,11 @@ void DeviceManager::stateWriterLoop() {
         lock.unlock();
         try {
             flushStateChanges();
+            secondsSinceSamplesSaved += kStateSaveIntervalSeconds;
+            if (secondsSinceSamplesSaved >= kHistorySaveIntervalSeconds) {
+                secondsSinceSamplesSaved = 0;
+                flushSensorSamples();
+            }
         } catch (const std::exception& e) {
             LOG_ERROR("Failed to save device state: %s", e.what());
         }

@@ -6,6 +6,7 @@
 #pragma once
 
 #include <string>
+#include <optional>
 #include <vector>
 #include <functional>
 #include <cstdint>
@@ -75,7 +76,7 @@ public:
 
     /**
      * Set the data points to display
-     * @param data Vector of data points (will be resampled to fit chart)
+     * @param data Data points, oldest first. Each goes where its time is on the chart.
      */
     void setData(const std::vector<DataPoint>& data);
 
@@ -167,8 +168,14 @@ inline const char* timeRangeLabel(TimeRange range) {
 }
 
 /**
- * Helper to get time range in seconds
+ * The value at each of the chart's points. Readings sit where their time is. Readings close
+ * together are joined, so a sensor reporting every few minutes draws a line even on a short view,
+ * and a longer silence stays a gap. Unset means nothing to draw there.
  */
+std::vector<std::optional<float>> chartValues(const std::vector<DataPoint>& data, uint64_t now,
+                                              uint64_t rangeSeconds, int points);
+static constexpr uint64_t CHART_MAX_JOINED_GAP_SECONDS = 1800;
+
 /**
  * Which of the chart's points a reading belongs to, so that points sit where their time is, and
  * gaps in the data show as gaps. -1 if it's outside the range.
@@ -179,6 +186,9 @@ inline int chartSlot(uint64_t timestamp, uint64_t now, uint64_t rangeSeconds, in
     return static_cast<int>(fromStart * static_cast<uint64_t>(points - 1) / rangeSeconds);
 }
 
+/**
+ * Helper to get time range in seconds
+ */
 inline uint64_t timeRangeSeconds(TimeRange range) {
     switch (range) {
         case TimeRange::Hour1:   return 3600;

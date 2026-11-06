@@ -10,6 +10,7 @@
 #include <smarthub/devices/DeviceManager.hpp>
 #include <smarthub/devices/SensorDisplay.hpp>
 #include <ctime>
+#include <cerrno>
 #include <cstdlib>
 #include <smarthub/devices/Device.hpp>
 #include <smarthub/devices/DeviceTypeRegistry.hpp>
@@ -877,18 +878,29 @@ void WebServer::apiGetSensorHistory(struct mg_connection* c, const std::string& 
     constexpr int kMaxHours = DeviceManager::kHistoryRetentionSeconds / 3600;
     constexpr int kMaxPoints = 240;
     int hours = 24;
-    char text[16] = {0};
-    if (mg_http_get_var(&hm->query, "hours", text, sizeof(text)) > 0) {
+    const struct mg_str hoursText = mg_http_var(hm->query, mg_str("hours"));
+    if (hoursText.buf != nullptr) {
+        const std::string text(hoursText.buf, hoursText.len);
         char* end = nullptr;
-        const long parsed = std::strtol(text, &end, 10);
-        if (*end != '\0' || parsed < 1 || parsed > kMaxHours) {
+        errno = 0;
+        const long parsed = std::strtol(text.c_str(), &end, 10);
+        if (text.empty() || *end != '\0' || errno != 0 || parsed < 1 || parsed > kMaxHours) {
             sendError(c, 400, "hours must be from 1 to " + std::to_string(kMaxHours));
             return;
         }
         hours = static_cast<int>(parsed);
     }
 
-    const std::string property = historyProperty(device->type());
+    std::string property = historyProperty(device->type());
+    const struct mg_str propertyText = mg_http_var(hm->query, mg_str("property"));
+    if (propertyText.buf != nullptr) {
+        property.assign(propertyText.buf, propertyText.len);
+        if (property != "temperature" && property != "humidity") {
+            sendError(c, 400, "property must be temperature or humidity");
+            return;
+        }
+    }
+
     nlohmann::json data = nlohmann::json::array();
     if (!property.empty()) {
         const int64_t from = static_cast<int64_t>(std::time(nullptr)) - static_cast<int64_t>(hours) * 3600;

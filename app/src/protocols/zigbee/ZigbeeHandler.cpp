@@ -11,6 +11,7 @@
 #include <smarthub/devices/types/TemperatureSensor.hpp>
 #include <smarthub/devices/types/MotionSensor.hpp>
 #include <cinttypes>
+#include <cstdint>
 #include <cctype>
 #include <algorithm>
 #include <cmath>
@@ -960,15 +961,19 @@ void ZigbeeHandler::onAttributeReport(uint16_t nwkAddr, const ZclAttributeValue&
 
         case zcl::cluster::TEMPERATURE_MEASUREMENT:
             if (attr.attributeId == zcl::attr::temperature::MEASURED_VALUE) {
-                // Temperature in 0.01°C units
-                notifyState(deviceId, "temperature", attr.asInt16() / 100.0);
+                // Temperature in 0.01°C units. 0x8000 means the sensor has no valid reading.
+                if (attr.asInt16() != INT16_MIN) {
+                    notifyState(deviceId, "temperature", attr.asInt16() / 100.0);
+                }
             }
             break;
 
         case zcl::cluster::RELATIVE_HUMIDITY:
             if (attr.attributeId == zcl::attr::humidity::MEASURED_VALUE) {
-                // Humidity in 0.01% units
-                notifyState(deviceId, "humidity", attr.asUint16() / 100.0);
+                // Humidity in 0.01% units. 0xFFFF means the sensor has no valid reading.
+                if (attr.asUint16() != 0xFFFF) {
+                    notifyState(deviceId, "humidity", attr.asUint16() / 100.0);
+                }
             }
             break;
 
