@@ -74,7 +74,7 @@ ssh root@192.168.4.99 "killall smarthub; sleep 1"
 cat app/build-arm/smarthub | ssh root@192.168.4.99 "cat > /usr/bin/smarthub && chmod +x /usr/bin/smarthub"
 
 # Start the application
-ssh root@192.168.4.99 "nohup smarthub > /var/log/smarthub.log 2>&1 &"
+ssh root@192.168.4.99 "nohup smarthub > /var/log/smarthub.log 2>&1 < /dev/null &"
 ```
 
 If the board is unresponsive, use the `power_cycle` MCP tool with `sbc_name: "stm32mp157f-dk2"` before deploying.
