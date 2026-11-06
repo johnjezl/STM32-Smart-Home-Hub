@@ -520,19 +520,17 @@ TEST_F(WebAuthTest, FirstBootCreatesACertificateAndServesTls) {
     EXPECT_EQ(fs::last_write_time(cert), created);
 }
 
-TEST_F(WebAuthTest, ACertificateThatCantBeUsedStopsStartup) {
+// The hub keeps running without a web server, rather than serving anything insecurely
+TEST_F(WebAuthTest, ACertificateThatCantBeUsedLeavesTheWebServerDown) {
     const fs::path cert = m_dir / "server.crt";
     const fs::path key = m_dir / "server.key";
-
-    // Only one of them: not a first boot, and nothing to use
     std::ofstream(cert) << "not a certificate";
-    EXPECT_FALSE(tryStartApp("", cert.string(), key.string()));
-    m_app.reset();
-
-    // Both, but not valid
     std::ofstream(key) << "not a key";
-    EXPECT_FALSE(tryStartApp("", cert.string(), key.string()));
-    m_app.reset();
+
+    EXPECT_TRUE(tryStartApp("", cert.string(), key.string()));
+    EXPECT_EQ(request("GET", "/api/setup/status").status, 0);
+    EXPECT_NO_THROW(m_app->deviceManager().deviceCount());
+    stopApp();
 
     // Left as found, rather than replaced
     std::ifstream file(cert);
@@ -541,7 +539,15 @@ TEST_F(WebAuthTest, ACertificateThatCantBeUsedStopsStartup) {
     EXPECT_EQ(contents, "not a certificate");
 }
 
-TEST_F(WebAuthTest, ACertificateWithTheWrongKeyStopsStartup) {
+TEST_F(WebAuthTest, ACertificateWithoutItsKeyLeavesTheWebServerDown) {
+    const fs::path cert = m_dir / "server.crt";
+    std::ofstream(cert) << "not a certificate";
+
+    EXPECT_TRUE(tryStartApp("", cert.string(), (m_dir / "server.key").string()));
+    EXPECT_EQ(request("GET", "/api/setup/status").status, 0);
+}
+
+TEST_F(WebAuthTest, ACertificateWithTheWrongKeyLeavesTheWebServerDown) {
     const fs::path first = m_dir / "first";
     const fs::path second = m_dir / "second";
     ASSERT_TRUE(security::CertManager::createSelfSigned((first / "server.crt").string(),
@@ -549,11 +555,52 @@ TEST_F(WebAuthTest, ACertificateWithTheWrongKeyStopsStartup) {
     ASSERT_TRUE(security::CertManager::createSelfSigned((second / "server.crt").string(),
                                                         (second / "server.key").string(), "b"));
 
-    EXPECT_FALSE(tryStartApp("", (first / "server.crt").string(), (second / "server.key").string()));
+    EXPECT_TRUE(tryStartApp("", (first / "server.crt").string(), (second / "server.key").string()));
+    EXPECT_EQ(request("GET", "/api/setup/status").status, 0);
 }
 
-TEST_F(WebAuthTest, CertificateWithoutItsPairNeedsBothPaths) {
-    EXPECT_FALSE(tryStartApp("", (m_dir / "server.crt").string(), ""));
+TEST_F(WebAuthTest, OnlyOneTlsPathLeavesTheWebServerDown) {
+    EXPECT_TRUE(tryStartApp("", (m_dir / "server.crt").string(), ""));
+    EXPECT_EQ(request("GET", "/api/setup/status").status, 0);
+}
+
+TEST_F(WebAuthTest, TheSameTlsPathForBothLeavesTheWebServerDown) {
+    const fs::path both = m_dir / "both.pem";
+    EXPECT_TRUE(tryStartApp("", both.string(), both.string()));
+    EXPECT_EQ(request("GET", "/api/setup/status").status, 0);
+    EXPECT_FALSE(fs::exists(both));
+}
+
+TEST_F(WebAuthTest, AKeyLeftByAnInterruptedFirstBootIsReplaced) {
+    const fs::path cert = m_dir / "server.crt";
+    const fs::path key = m_dir / "server.key";
+    std::ofstream(key) << "left from a power cut";
+
+    startApp("", cert.string(), key.string());
+
+    RequestOptions secure;
+    secure.https = true;
+    EXPECT_EQ(request("GET", "/api/setup/status", secure).status, 200);
+}
+
+TEST_F(WebAuthTest, ALeftoverTemporaryKeyFileCantExposeTheKey) {
+    const fs::path cert = m_dir / "server.crt";
+    const fs::path key = m_dir / "server.key";
+    std::ofstream(m_dir / "server.key.new") << "old";
+    fs::permissions(m_dir / "server.key.new", fs::perms::all);
+
+    ASSERT_TRUE(security::CertManager::createSelfSigned(cert.string(), key.string(), "a"));
+    EXPECT_EQ(fs::status(key).permissions() & (fs::perms::group_all | fs::perms::others_all),
+              fs::perms::none);
+}
+
+TEST_F(WebAuthTest, BlankTlsPathsInTheConfigMeanPlainHttp) {
+    const fs::path config = m_dir / "blank.yaml";
+    std::ofstream(config) << "web:\n  tls:\n    cert:\n    key:\n";
+    Config parsed;
+    ASSERT_TRUE(parsed.load(config.string()));
+    EXPECT_EQ(parsed.tlsCertPath(), "");
+    EXPECT_EQ(parsed.tlsKeyPath(), "");
 }
 
 TEST_F(WebAuthTest, EmptyTlsPathsMeanPlainHttp) {
@@ -632,6 +679,12 @@ TEST_F(WebAuthTest, SecurityHeadersAreOnApiAndStaticResponses) {
         EXPECT_TRUE(response.hasHeader("X-Content-Type-Options: nosniff"));
         EXPECT_TRUE(response.hasHeader("X-Frame-Options: DENY"));
     }
+}
+
+TEST_F(WebAuthTest, OnlyApiResponsesRefuseCaching) {
+    startApp();
+    EXPECT_TRUE(request("GET", "/api/setup/status").hasHeader("Cache-Control: no-store"));
+    EXPECT_FALSE(request("GET", "/index.html").hasHeader("no-store"));
 }
 
 TEST_F(WebAuthTest, OnlyTheExactSessionCookieIsAccepted) {

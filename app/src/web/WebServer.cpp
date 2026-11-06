@@ -236,6 +236,7 @@ bool WebServer::start() {
     if (useTls) {
 #if MG_TLS == MG_TLS_NONE
         LOG_ERROR("TLS is configured, but this build has no TLS support");
+        mg_mgr_free(m_mgr);
         delete m_mgr;
         m_mgr = nullptr;
         return false;
@@ -264,6 +265,7 @@ bool WebServer::start() {
                                               useTls ? &s_tls_opts : nullptr);
     if (!c) {
         LOG_ERROR("Failed to start web server on %s", addr);
+        mg_mgr_free(m_mgr);
         delete m_mgr;
         m_mgr = nullptr;
         return false;
@@ -540,7 +542,6 @@ void WebServer::addSecurityHeaders(std::string& headers) {
     headers += "X-Frame-Options: DENY\r\n";
     headers += "X-XSS-Protection: 1; mode=block\r\n";
     headers += "Referrer-Policy: strict-origin-when-cross-origin\r\n";
-    headers += "Cache-Control: no-store\r\n";
     // Everything the dashboard uses comes from this server, and app.js has no inline code. If a
     // value does get past escaping, this stops a browser running it.
     headers += "Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; "
@@ -1509,7 +1510,7 @@ void WebServer::sendJson(struct mg_connection* c, int status, const std::string&
 
 void WebServer::sendJsonWithHeaders(struct mg_connection* c, int status,
                                      const std::string& json, const std::string& extraHeaders) {
-    std::string headers = "Content-Type: application/json\r\n";
+    std::string headers = "Content-Type: application/json\r\nCache-Control: no-store\r\n";
     addSecurityHeaders(headers);
     headers += extraHeaders;
 

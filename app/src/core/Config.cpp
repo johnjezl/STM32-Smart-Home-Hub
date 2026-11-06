@@ -129,11 +129,15 @@ bool Config::load(const std::string& path) {
                 m_webRoot = config["web"]["root"].as<std::string>();
             }
             if (config["web"]["tls"]) {
+                // A blank value turns TLS off, but YAML reads it as null, which converts to "null"
+                const auto tlsPath = [](const YAML::Node& node) {
+                    return node.IsNull() ? std::string() : node.as<std::string>();
+                };
                 if (config["web"]["tls"]["cert"]) {
-                    m_tlsCertPath = config["web"]["tls"]["cert"].as<std::string>();
+                    m_tlsCertPath = tlsPath(config["web"]["tls"]["cert"]);
                 }
                 if (config["web"]["tls"]["key"]) {
-                    m_tlsKeyPath = config["web"]["tls"]["key"].as<std::string>();
+                    m_tlsKeyPath = tlsPath(config["web"]["tls"]["key"]);
                 }
             }
         }

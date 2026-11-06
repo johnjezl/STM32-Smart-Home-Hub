@@ -324,9 +324,18 @@ bool Application::configureTls() {
         return false;
     }
 
-    // First boot. Files that exist but don't work are left alone, because they could be someone's
-    // real certificate and regenerating would hide what's wrong with it.
-    if (!fs::exists(certPath) && !fs::exists(keyPath)) {
+    if (certPath == keyPath) {
+        LOG_ERROR("TLS needs separate certificate and key files, but both are %s", certPath.c_str());
+        return false;
+    }
+
+    // First boot, or one that lost power between writing the key and the certificate. A key on
+    // its own is no use to anyone. A certificate that exists is left alone, even if it doesn't
+    // work: it could be someone's real one, and regenerating would hide what's wrong with it.
+    if (!fs::exists(certPath)) {
+        if (fs::exists(keyPath)) {
+            LOG_WARN("Found TLS key %s with no certificate, replacing it", keyPath.c_str());
+        }
         LOG_INFO("Creating a self-signed TLS certificate at %s", certPath.c_str());
         if (!security::CertManager::createSelfSigned(certPath, keyPath, "smarthub.local")) {
             LOG_ERROR("Failed to create a TLS certificate at %s", certPath.c_str());
@@ -340,7 +349,7 @@ bool Application::configureTls() {
     }
 
     m_webServer->setTlsCert(certPath, keyPath);
-    m_webServer->setHttpRedirect(true, 80);  // Redirect HTTP to HTTPS
+    m_webServer->setHttpRedirect(true, m_config->webHttpPort());  // Redirect HTTP to HTTPS
     return true;
 }
 
@@ -353,7 +362,12 @@ bool Application::initializeWebServer() {
     );
 
     if (!configureTls()) {
-        return false;
+        // No web server rather than an insecure one. Everything else, including automations and
+        // the touchscreen, doesn't depend on a certificate, so it keeps running.
+        LOG_ERROR("Web server not started, because TLS can't be used. "
+                  "Fix the certificate, or set both paths to empty to run without TLS.");
+        m_webServer.reset();
+        return true;
     }
 
     m_webServer->setSecurityManagers(m_sessionManager.get(), m_apiTokenManager.get(),
