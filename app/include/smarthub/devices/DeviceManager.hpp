@@ -260,11 +260,11 @@ private:
                           const nlohmann::json& value);
     void stateWriterLoop();
     void stopStateWriter();
+    bool roomExists(const std::string& id);
 
-    std::mutex m_stateWriteMutex;
+    std::mutex m_stateWriteMutex;  // Guards the queue and the stop flag
     std::map<std::pair<std::string, std::string>, std::string> m_unsavedState;
     std::thread m_stateWriter;
-    std::mutex m_stateWriterMutex;
     std::condition_variable m_stateWriterWake;
     bool m_stateWriterStopping = false;
     bool m_discovering = false;
