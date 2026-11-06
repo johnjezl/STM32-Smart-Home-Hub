@@ -304,7 +304,7 @@ TEST_F(ScreenRenderTest, AddAutomation) {
     auto* root = showAndRender("add_automation", std::make_unique<AddAutomationScreen>(
         *screenManager, *themeManager, *automationManager, *deviceManager));
 
-    EXPECT_GE(test::countText(root, "Add Automation (Step 1/4)"), 1);
+    EXPECT_GE(test::countText(root, "Add Automation (Step 1/3)"), 1);
 }
 
 TEST_F(ScreenRenderTest, EditAutomation) {
