@@ -36,20 +36,31 @@ is_removable() {
     [ "$(cat "$SYS_BLOCK/$name/device/type" 2>/dev/null || true)" = "SD" ]
 }
 
-# The disks this system is running from, through any partitions, RAID or LVM
+# The disks this system is running from, through any partitions, RAID or LVM. Dies if it can't tell.
 system_disks() {
-    local mountpoint source
+    local mountpoint source fstype
     for mountpoint in / /boot /boot/efi /home /usr /var; do
-        source=$(findmnt -n -o SOURCE "$mountpoint" 2>/dev/null || true)
-        case "$source" in
-            /dev/*) lsblk -nrs -o NAME,TYPE "${source%%\[*}" 2>/dev/null | awk '$2 == "disk" { print $1 }' ;;
-        esac
+        while read -r source fstype; do
+            case "$fstype" in
+                tmpfs | autofs | overlay | squashfs) continue ;;
+            esac
+            case "$source" in
+                /dev/*) lsblk -nrs -o NAME,TYPE "${source%%\[*}" | awk '$2 == "disk" { print $1 }' ;;
+                *) die "Can't tell which disk holds $mountpoint ($source)" ;;
+            esac
+        done < <(findmnt -nr -o SOURCE,FSTYPE "$mountpoint" || true)
     done
+}
+
+# Where the device and its partitions are mounted, one to a line. List mode, as raw mode escapes
+# spaces, and a card labelled "NO NAME" is common.
+mounts_of() {
+    lsblk -nl -o MOUNTPOINTS "$1" | sed '/^[[:space:]]*$/d'
 }
 
 refuse_unless_safe() {
     local device="$1"
-    local name type size
+    local name type size disks mountpoint
     name=$(basename "$device")
 
     [ -b "$device" ] || die "$device is not a block device"
@@ -57,11 +68,29 @@ refuse_unless_safe() {
     type=$(lsblk -dn -o TYPE "$device" | tr -d ' ')
     [ "$type" = "disk" ] || die "$device is a $type, not a whole disk"
 
-    if system_disks | grep -qxF "$name"; then
+    # Captured first: with pipefail, grep stopping at a match could read as there being no match
+    disks=$(system_disks)
+    if grep -qxF "$name" <<< "$disks"; then
         die "$device is holding this system"
     fi
 
     is_removable "$device" || die "$device is not removable"
+
+    # Something's using it, like LVM or encryption
+    if compgen -G "$SYS_BLOCK/$name/holders/*" > /dev/null ||
+       compgen -G "$SYS_BLOCK/$name/*/holders/*" > /dev/null; then
+        die "$device is in use by another device, such as LVM or encryption"
+    fi
+
+    # Mounted where a desktop mounts a card is fine, as it gets unmounted. Anywhere else, it's
+    # probably something this system is using, however removable it is.
+    while read -r mountpoint; do
+        case "$mountpoint" in
+            /media/* | /run/media/*) ;;
+            "") ;;
+            *) die "$device is in use, at $mountpoint" ;;
+        esac
+    done < <(mounts_of "$device")
 
     size=$(lsblk -bdn -o SIZE "$device" | tr -d ' ')
     [ "${size:-0}" -gt 0 ] || die "$device has no media in it"
@@ -88,11 +117,7 @@ detect_device() {
     echo "${candidates[0]}"
 }
 
-if [ ! -f "$IMAGE" ]; then
-    echo "Error: Image not found: $IMAGE" >&2
-    echo "Run ./tools/build.sh first" >&2
-    exit 1
-fi
+[ -f "$IMAGE" ] || die "Image not found: $IMAGE. Run ./tools/build.sh first"
 
 if [ -n "${1:-}" ]; then
     DEVICE="$1"
@@ -100,11 +125,16 @@ else
     DEVICE=$(detect_device)
 fi
 
+# So that a name like /dev/disk/by-id/... is checked as the disk it really is
+if [ -e "$DEVICE" ]; then
+    DEVICE=$(readlink -f "$DEVICE")
+fi
+
 refuse_unless_safe "$DEVICE"
 
 echo "Target device: $DEVICE"
 echo "Size and model: $(lsblk -dn -o SIZE,MODEL "$DEVICE")"
-echo "Image: $IMAGE ($(du -h "$IMAGE" | cut -f1))"
+echo "Image: $IMAGE ($(du -h --apparent-size "$IMAGE" | cut -f1))"
 echo ""
 lsblk "$DEVICE" -o NAME,SIZE,FSTYPE,LABEL,MOUNTPOINT || true
 echo ""
@@ -117,11 +147,13 @@ if [ "$confirm" != "$DEVICE" ]; then
 fi
 
 echo "Unmounting partitions..."
-while read -r mountpoint; do
-    if [ -n "$mountpoint" ]; then
-        sudo umount "$mountpoint"
-    fi
-done < <(lsblk -nr -o MOUNTPOINT "$DEVICE")
+mapfile -t MOUNTS < <(mounts_of "$DEVICE")
+for mountpoint in "${MOUNTS[@]}"; do
+    sudo umount "$mountpoint" || die "Couldn't unmount $mountpoint"
+done
+if [ -n "$(mounts_of "$DEVICE")" ]; then
+    die "$DEVICE is still mounted"
+fi
 
 echo "Flashing..."
 sudo dd if="$IMAGE" of="$DEVICE" bs=4M conv=fsync status=progress
