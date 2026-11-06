@@ -62,6 +62,12 @@ public:
         m_responders[{subsystem, command}] = std::move(responder);
     }
 
+    /** It has gone from the network, so lookups no longer find it. */
+    void removeDevice(uint16_t nwkAddr) {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_devices.erase(nwkAddr);
+    }
+
     /** Hold back a device's reply about this endpoint until releaseDescriptors(). */
     void holdDescriptor(uint16_t nwkAddr, uint8_t endpoint) {
         std::lock_guard<std::mutex> lock(m_mutex);

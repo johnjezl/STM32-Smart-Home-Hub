@@ -305,6 +305,8 @@ void ZigbeeHandler::onNetworkAddressFound(uint16_t nwkAddr, uint64_t ieeeAddr, b
         return;
     }
 
+    notifyAvailability(*savedId, DeviceAvailability::Online);  // The network says it's there
+
     bool endpointKnown = false;
     {
         std::lock_guard<std::mutex> lock(m_deviceMutex);

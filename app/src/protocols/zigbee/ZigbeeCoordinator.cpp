@@ -747,7 +747,7 @@ void ZigbeeCoordinator::handleDeviceAnnounce(const ZnpFrame& frame) {
             std::chrono::system_clock::now().time_since_epoch()).count();
         device.available = true;
 
-        m_nwkToIeee[nwkAddr] = ieeeAddr;
+        takeAddress(nwkAddr, ieeeAddr);
     }
 
     // Notify callback, which requests the device's details
@@ -797,6 +797,16 @@ void ZigbeeCoordinator::handleTcDeviceInd(const ZnpFrame& frame) {
              nwkAddr, ieeeAddr, parentAddr);
 }
 
+void ZigbeeCoordinator::takeAddress(uint16_t nwkAddr, uint64_t ieeeAddr) {
+    // Whoever had this address is somewhere else now, so a command to it must not come here.
+    // Without an entry, it's looked up again the next time it's needed.
+    auto owner = m_nwkToIeee.find(nwkAddr);
+    if (owner != m_nwkToIeee.end() && owner->second != ieeeAddr) {
+        m_devices.erase(owner->second);
+    }
+    m_nwkToIeee[nwkAddr] = ieeeAddr;
+}
+
 void ZigbeeCoordinator::handleNwkAddrRsp(const ZnpFrame& frame) {
     // NWK_ADDR_RSP format:
     // Status(1) + IEEEAddr(8) + NwkAddr(2) + StartIndex(1) + NumAssocDev(1) + AssocDevList(N)
@@ -823,7 +833,7 @@ void ZigbeeCoordinator::handleNwkAddrRsp(const ZnpFrame& frame) {
         device.lastSeen = std::chrono::duration_cast<std::chrono::seconds>(
             std::chrono::system_clock::now().time_since_epoch()).count();
         device.available = true;
-        m_nwkToIeee[nwkAddr] = ieeeAddr;
+        takeAddress(nwkAddr, ieeeAddr);
     }
 
     std::lock_guard<std::mutex> lock(m_callbackMutex);

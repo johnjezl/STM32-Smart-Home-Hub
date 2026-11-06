@@ -692,6 +692,42 @@ TEST_F(ZigbeeHandlerFlowTest, SavedDeviceWithAnAddressNowUsedElsewhereGetsNoComm
     EXPECT_EQ(frames.back().nwkAddr, LIGHT.nwkAddr);
 }
 
+TEST_F(ZigbeeHandlerFlowTest, DeviceFoundAtASavedDevicesAddressTakesIt) {
+    // LIGHT was saved at this address, and has since moved, and PLUG has it now
+    auto outOfDate = savedDevice(LIGHT, 1);
+    outOfDate->setState("networkAddress", 0x4242);
+    handler->restoreDevice(*outOfDate);
+    fake.removeDevice(LIGHT.nwkAddr);
+    FakeZigbeeDevice plugMoved = PLUG;
+    plugMoved.nwkAddr = 0x4242;
+    fake.addDevice(plugMoved);
+
+    ASSERT_NE(pair(plugMoved), nullptr);
+
+    // LIGHT's old address is PLUG's now, so a command to LIGHT must not be sent there
+    fake.clearSentFrames();
+    EXPECT_FALSE(handler->sendCommand(idOf(LIGHT), "on", {{"on", true}}));
+    EXPECT_TRUE(airFrames(fake).empty());
+}
+
+TEST_F(ZigbeeHandlerFlowTest, DeviceThatLeftIsBackOnlineWhenALookupFindsIt) {
+    auto saved = savedDevice(LIGHT, 1);
+    handler->restoreDevice(*saved);
+    fake.deviceLeft(LIGHT);
+    EXPECT_TRUE(eventually([&] {
+        std::lock_guard<std::mutex> lock(mutex);
+        return !availabilityChanges.empty() && availabilityChanges.back().second == DeviceAvailability::Offline;
+    }));
+
+    // Asks the network, which still has it
+    handler->sendCommand(idOf(LIGHT), "on", {{"on", true}});
+
+    EXPECT_TRUE(eventually([&] {
+        std::lock_guard<std::mutex> lock(mutex);
+        return availabilityChanges.back().second == DeviceAvailability::Online;
+    }));
+}
+
 TEST_F(ZigbeeHandlerFlowTest, TwoDevicesWithOneAddressKeepTheFirst) {
     handler->restoreDevice(*savedDevice(LIGHT, 1));
     SwitchDevice typed("copy", "Copy", "zigbee", "00124B0000001234");
