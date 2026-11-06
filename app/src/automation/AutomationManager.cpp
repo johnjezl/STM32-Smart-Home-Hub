@@ -38,6 +38,14 @@ bool AutomationManager::initialize() {
     LOG_INFO("Initializing automation manager");
 
     loadFromDatabase();
+
+    // Before subscribing, because Zigbee can already be publishing changes
+    {
+        std::lock_guard<std::mutex> lock(m_queueMutex);
+        m_stopping = false;
+        m_worker = std::thread(&AutomationManager::workerLoop, this);
+    }
+
     setupEventHandlers();
 
     // Start from this minute, so a restart doesn't run a time trigger that already ran in it
@@ -45,9 +53,6 @@ bool AutomationManager::initialize() {
     std::tm startTm{};
     localtime_r(&startTime, &startTm);
     m_lastCheckedMinute = startTm.tm_min;
-
-    m_stopping = false;
-    m_worker = std::thread(&AutomationManager::workerLoop, this);
 
     m_initialized = true;
 
@@ -220,9 +225,6 @@ namespace {
 thread_local int t_runDepth = 0;
 constexpr int kMaxRunDepth = 8;
 
-// More than this waiting means automations are firing far faster than they can run
-constexpr size_t kMaxQueuedRuns = 256;
-
 }  // namespace
 
 void AutomationManager::enqueueRuns(std::vector<std::pair<Automation, std::string>> runs) {
@@ -241,10 +243,10 @@ void AutomationManager::enqueueRuns(std::vector<std::pair<Automation, std::strin
                           automation.name.c_str());
                 continue;
             }
-            if (m_runQueue.size() >= kMaxQueuedRuns) {
-                LOG_ERROR("Automation '%s' not run: too many runs are waiting",
-                          automation.name.c_str());
-                continue;
+            // A new trigger restarts the automation, so the queue holds one run of each. Motion
+            // turning a light on for a minute then stays on until a minute after the last motion.
+            for (auto it = m_runQueue.begin(); it != m_runQueue.end();) {
+                it = it->second.automation.id == automation.id ? m_runQueue.erase(it) : std::next(it);
             }
 
             Run run;
@@ -278,7 +280,11 @@ void AutomationManager::workerLoop() {
         // Unlocked: actions can wait on devices, and changing one publishes an event that comes
         // straight back to onDeviceStateChanged on this thread.
         lock.unlock();
-        continueRun(std::move(run));
+        try {
+            continueRun(std::move(run));
+        } catch (const std::exception& e) {
+            LOG_ERROR("Automation run failed: %s", e.what());
+        }
         lock.lock();
 
         m_workerBusy = false;
@@ -436,9 +442,18 @@ void AutomationManager::continueRun(Run run) {
         ~ResetDepth() { t_runDepth = 0; }
     } resetDepth;
 
-    if (run.nextAction == 0) {
-        if (!automation.enabled) return;
+    // It could have been turned off or removed while waiting. An edit doesn't stop this run,
+    // which finishes the actions it started with.
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        const auto stored = m_automations.find(automation.id);
+        if (stored == m_automations.end() || !stored->second->enabled) {
+            LOG_INFO("Automation %s no longer enabled, stopping", automation.name.c_str());
+            return;
+        }
+    }
 
+    if (run.nextAction == 0) {
         if (automation.condition.has_value() && !evaluateCondition(*automation.condition)) {
             LOG_DEBUG("Automation '%s' condition not met, skipping", automation.name.c_str());
             return;
@@ -448,23 +463,22 @@ void AutomationManager::continueRun(Run run) {
                  automation.name.c_str(), run.triggerInfo.c_str());
 
         std::lock_guard<std::mutex> lock(m_mutex);
-        auto stored = m_automations.find(automation.id);
+        const auto stored = m_automations.find(automation.id);
         if (stored != m_automations.end()) {
             stored->second->lastTriggeredAt = getCurrentTimestamp();
             saveToDatabase(*stored->second);
         }
-    } else {
-        // It could have been turned off or removed during a delay. An edit doesn't stop this
-        // run, which finishes the actions it started with.
-        std::lock_guard<std::mutex> lock(m_mutex);
-        const auto stored = m_automations.find(automation.id);
-        if (stored == m_automations.end() || !stored->second->enabled) {
-            LOG_INFO("Automation %s stopped during a delay", automation.name.c_str());
-            return;
-        }
     }
 
     while (run.nextAction < automation.actions.size()) {
+        {
+            std::lock_guard<std::mutex> lock(m_queueMutex);
+            if (m_stopping) {
+                LOG_INFO("Automation %s stopped by shutdown", automation.name.c_str());
+                return;
+            }
+        }
+
         const Action& action = automation.actions[run.nextAction];
         ++run.nextAction;
 
@@ -477,11 +491,14 @@ void AutomationManager::continueRun(Run run) {
         const int64_t delayMs = std::min<int64_t>(action.delayMs, run.delayBudgetMs);
         run.delayBudgetMs -= delayMs;
         const auto due = std::chrono::steady_clock::now() + std::chrono::milliseconds(delayMs);
-        {
-            std::lock_guard<std::mutex> lock(m_queueMutex);
-            if (!m_stopping) {
-                m_runQueue.emplace(due, std::move(run));
-            }
+
+        std::lock_guard<std::mutex> lock(m_queueMutex);
+        // Its own actions might have triggered it again, and the newer run takes over
+        const bool restarted = std::any_of(m_runQueue.begin(), m_runQueue.end(), [&](const auto& entry) {
+            return entry.second.automation.id == automation.id;
+        });
+        if (!m_stopping && !restarted) {
+            m_runQueue.emplace(due, std::move(run));
         }
         return;
     }
@@ -510,7 +527,7 @@ void AutomationManager::executeAction(const Action& action) {
         }
 
         case ActionType::Delay:
-            // Handled in executeAutomation
+            // Handled in continueRun
             break;
     }
 }

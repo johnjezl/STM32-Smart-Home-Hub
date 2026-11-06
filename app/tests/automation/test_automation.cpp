@@ -480,7 +480,7 @@ TEST_F(AutomationManagerTest, InternalEventsDontRunAutomations) {
     trigger.property = "_removed";
     ASSERT_TRUE(automationManager->addAutomation(lightOnWhen(trigger)));
 
-    // This would deadlock if the action ran, because the event is published under a lock
+    // Internal events aren't changes to a device, so nothing should run
     EXPECT_TRUE(deviceManager->removeDevice("source"));
     automationManager->waitForRuns();
     EXPECT_NE(light->getProperty("on"), true);
@@ -600,6 +600,42 @@ TEST_F(AutomationManagerTest, ADelayDoesNotHoldUpWhoChangedTheDevice) {
     EXPECT_LT(std::chrono::steady_clock::now() - start, std::chrono::seconds(5));
 }
 
+TEST_F(AutomationManagerTest, ANewTriggerRestartsARunInADelay) {
+    automationManager->initialize();
+    auto source = std::make_shared<SwitchDevice>("source", "Source");
+    auto light = std::make_shared<SwitchDevice>("light_001", "Light");
+    deviceManager->addDevice(source);
+    deviceManager->addDevice(light);
+    ASSERT_TRUE(automationManager->addAutomation(delayedLightOn(400)));
+
+    ASSERT_TRUE(deviceManager->setDeviceState("source", "on", true));
+    std::this_thread::sleep_for(std::chrono::milliseconds(250));
+    ASSERT_TRUE(deviceManager->setDeviceState("source", "on", false));
+
+    // The first run would be finished by now, if it hadn't been restarted
+    std::this_thread::sleep_for(std::chrono::milliseconds(250));
+    EXPECT_NE(light->getProperty("on"), true);
+
+    automationManager->waitForRuns();
+    EXPECT_EQ(light->getProperty("on"), true);
+}
+
+TEST_F(AutomationManagerTest, DeletedAutomationDoesNotRunFromTheQueue) {
+    automationManager->initialize();
+    auto source = std::make_shared<SwitchDevice>("source", "Source");
+    auto light = std::make_shared<SwitchDevice>("light_001", "Light");
+    deviceManager->addDevice(source);
+    deviceManager->addDevice(light);
+    const Automation automation = delayedLightOn(200);
+    ASSERT_TRUE(automationManager->addAutomation(automation));
+
+    ASSERT_TRUE(deviceManager->setDeviceState("source", "on", true));
+    ASSERT_TRUE(automationManager->deleteAutomation(automation.id));
+
+    automationManager->waitForRuns();
+    EXPECT_NE(light->getProperty("on"), true);
+}
+
 TEST_F(AutomationManagerTest, ADelayDoesNotHoldUpOtherAutomations) {
     automationManager->initialize();
     auto source = std::make_shared<SwitchDevice>("source", "Source");
@@ -686,6 +722,15 @@ TEST_F(AutomationManagerTest, ConcurrentDeviceChangesAndAutomations) {
     trigger.property = "on";
     ASSERT_TRUE(automationManager->addAutomation(lightOnWhen(trigger)));
 
+    // The light is turned off below, so each run that turns it on is a change
+    std::atomic<int> actionsRun{0};
+    const auto subscription = eventBus->subscribe("device.state", [&](const Event& event) {
+        const auto& state = static_cast<const DeviceStateEvent&>(event);
+        if (state.deviceId == "light_001" && state.property == "on") {
+            ++actionsRun;
+        }
+    });
+
     std::atomic<bool> stop{false};
     std::vector<std::thread> threads;
     threads.emplace_back([&] {
@@ -693,6 +738,7 @@ TEST_F(AutomationManagerTest, ConcurrentDeviceChangesAndAutomations) {
         while (!stop) {
             on = !on;
             deviceManager->setDeviceState("source", "on", on);
+            deviceManager->setDeviceState("light_001", "on", false);
         }
     });
     threads.emplace_back([&] {
@@ -708,7 +754,7 @@ TEST_F(AutomationManagerTest, ConcurrentDeviceChangesAndAutomations) {
         while (!stop) {
             automationManager->poll(time += 1000);
             automationManager->getAllAutomations();
-            automationManager->setEnabled("runs_action", time % 2000 == 0);
+            automationManager->setEnabled("runs_action", (time / 1000) % 16 != 0);
         }
     });
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
@@ -717,7 +763,8 @@ TEST_F(AutomationManagerTest, ConcurrentDeviceChangesAndAutomations) {
         thread.join();
     }
     automationManager->waitForRuns();
-    SUCCEED();
+    EXPECT_GT(actionsRun.load(), 0);
+    eventBus->unsubscribe(subscription);
 }
 
 TEST_F(AutomationManagerTest, ReEnablingAnEnabledAutomationKeepsItsCountdown) {
