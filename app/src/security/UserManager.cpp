@@ -430,6 +430,10 @@ std::string UserManager::hashPassword(const std::string& password,
     // Generate salt if not provided
     if (useSalt.empty()) {
         useSalt = generateSalt();
+        if (useSalt.empty()) {
+            LOG_ERROR("Failed to generate salt");
+            return "";
+        }
     }
 
     // Decode salt from base64

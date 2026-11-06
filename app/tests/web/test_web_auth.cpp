@@ -228,7 +228,11 @@ TEST_F(WebAuthTest, PublicRoutesNeedNoCredentials) {
     startApp();
     setUpAdmin();
 
-    EXPECT_EQ(request("POST", "/api/auth/logout").status, 200);
+    // A cross-site form arrives without the cookie, and must not clear it
+    const Response logout = request("POST", "/api/auth/logout");
+    EXPECT_EQ(logout.status, 200);
+    EXPECT_FALSE(logout.hasHeader("Set-Cookie"));
+
 
     EXPECT_EQ(request("GET", "/api/system/status").status, 200);
     EXPECT_EQ(request("GET", "/api/setup/status").status, 200);

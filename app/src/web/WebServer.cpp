@@ -945,16 +945,17 @@ void WebServer::apiLogin(struct mg_connection* c, struct mg_http_message* hm) {
 }
 
 void WebServer::apiLogout(struct mg_connection* c, struct mg_http_message* hm) {
-    // Only this browser's session; the user's other devices stay logged in
-    if (m_sessionMgr) {
-        const std::string token = sessionTokenFromCookies(hm);
-        if (!token.empty()) {
+    // With no cookie there's nothing to end. A cross-site request also arrives
+    // that way, and clearing the cookie would let any page log the user out.
+    const std::string token = sessionTokenFromCookies(hm);
+    std::string cookieHeader;
+    if (!token.empty()) {
+        // Only this browser's session; the user's other devices stay logged in
+        if (m_sessionMgr) {
             m_sessionMgr->destroySession(token);
         }
+        cookieHeader = "Set-Cookie: session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0\r\n";
     }
-
-    // Clear session cookie
-    std::string cookieHeader = "Set-Cookie: session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0\r\n";
 
     std::string json = "{\"success\":true}";
     sendJsonWithHeaders(c, 200, json, cookieHeader);

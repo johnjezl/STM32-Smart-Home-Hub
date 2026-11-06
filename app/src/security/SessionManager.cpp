@@ -27,14 +27,14 @@ std::string SessionManager::createSession(int userId,
                                            const std::string& userAgent) {
     std::lock_guard<std::mutex> lock(m_mutex);
 
-    // Enforce max sessions per user
-    enforceMaxSessions(username);
-
-    // Generate token
+    // Generate token first: a failure here shouldn't cost another session
     std::string token = generateToken();
     if (token.empty()) {
         return "";
     }
+
+    // Enforce max sessions per user
+    enforceMaxSessions(username);
 
     // Get current time
     auto now = std::chrono::system_clock::now();
