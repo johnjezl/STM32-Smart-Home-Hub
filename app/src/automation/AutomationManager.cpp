@@ -35,10 +35,8 @@ AutomationManager::~AutomationManager() {
 bool AutomationManager::initialize() {
     if (m_initialized) return true;
 
-    {
-        std::lock_guard<std::mutex> lock(m_stopMutex);
-        m_stopping = false;
-    }
+    m_stopping = false;
+    m_stopFlag = nullptr;
 
     LOG_INFO("Initializing automation manager");
 
@@ -63,12 +61,8 @@ void AutomationManager::shutdown() {
 
     LOG_INFO("Shutting down automation manager");
 
-    // Wake runs waiting in a delay, then wait for them to finish
-    {
-        std::lock_guard<std::mutex> lock(m_stopMutex);
-        m_stopping = true;
-    }
-    m_stopSignal.notify_all();
+    // Runs waiting in a delay notice this. Unsubscribing below waits for them to finish.
+    m_stopping = true;
 
     if (m_eventSubscription > 0) {
         m_eventBus.unsubscribe(m_eventSubscription);
@@ -209,13 +203,9 @@ void AutomationManager::checkIntervalTriggers(uint64_t currentTimeMs) {
     executeAll(runs);
 }
 
-bool AutomationManager::isStopping() {
+bool AutomationManager::isStopping() const {
     const auto* stopFlag = m_stopFlag.load();
-    if (stopFlag && stopFlag->load()) {
-        return true;
-    }
-    std::lock_guard<std::mutex> lock(m_stopMutex);
-    return m_stopping;
+    return m_stopping || (stopFlag && stopFlag->load());
 }
 
 void AutomationManager::executeAll(const std::vector<PendingRun>& runs) {
@@ -412,12 +402,11 @@ void AutomationManager::executeAutomation(const Automation& automation,
             // Older saved automations could have longer delays than validation allows
             const auto delayMs = std::min<int64_t>(action.delayMs, delayBudgetMs);
             delayBudgetMs -= delayMs;
-            // A signal handler can set the stop flag but can't wake this, so keep checking
+            // A signal handler can only set a flag, so this checks for one regularly
             const auto wakeAt = std::chrono::steady_clock::now() + std::chrono::milliseconds(delayMs);
             while (std::chrono::steady_clock::now() < wakeAt && !isStopping()) {
-                std::unique_lock<std::mutex> lock(m_stopMutex);
-                m_stopSignal.wait_until(lock, std::min(wakeAt, std::chrono::steady_clock::now() +
-                                                                   std::chrono::milliseconds(100)));
+                std::this_thread::sleep_for(std::min<std::chrono::steady_clock::duration>(
+                    wakeAt - std::chrono::steady_clock::now(), std::chrono::milliseconds(100)));
             }
             if (isStopping()) {
                 LOG_INFO("Automation %s stopped by shutdown", automation.name.c_str());

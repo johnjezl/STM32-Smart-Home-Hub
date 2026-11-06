@@ -58,8 +58,9 @@ void EventBus::unsubscribe(SubscriptionId id) {
     std::vector<std::shared_ptr<Handler>> removed;
 
     const auto removeFrom = [&](std::vector<Subscription>& subscriptions) {
-        const auto first = std::remove_if(subscriptions.begin(), subscriptions.end(),
-                                          [id](const Subscription& s) { return s.id == id; });
+        // Partition rather than remove_if, which leaves nothing usable in the elements it removes
+        const auto first = std::stable_partition(subscriptions.begin(), subscriptions.end(),
+                                                 [id](const Subscription& s) { return s.id != id; });
         for (auto it = first; it != subscriptions.end(); ++it) {
             removed.push_back(it->handler);
         }

@@ -8,10 +8,12 @@
 #include <smarthub/core/Application.hpp>
 #include <smarthub/core/Logger.hpp>
 
+#include <time.h>
 #include <unistd.h>
 
 #include <atomic>
 #include <csignal>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 
@@ -19,15 +21,25 @@ using namespace smarthub;
 
 namespace {
 
-// Written by the signal handler, so it has to be safe to use from one
+// Written by the signal handler, so these have to be safe to use from one
 std::atomic<bool> g_stopRequested{false};
+std::atomic<int64_t> g_firstSignalSeconds{0};
 static_assert(std::atomic<bool>::is_always_lock_free);
+static_assert(std::atomic<int64_t>::is_always_lock_free);
+
+// Long enough that a repeated Ctrl-C doesn't cut off a shutdown that's going fine
+constexpr int64_t kForceExitAfterSeconds = 5;
 
 // A signal can arrive at any point, on any thread, so this can't take a lock, which rules out
 // logging. Application::run notices the flag and shuts down on the main thread.
 void signalHandler(int signum) {
-    if (g_stopRequested.exchange(true)) {
-        // A second signal means shutdown is stuck and someone wants out
+    timespec now{};
+    clock_gettime(CLOCK_MONOTONIC, &now);
+
+    if (!g_stopRequested.exchange(true)) {
+        g_firstSignalSeconds = now.tv_sec;
+    } else if (now.tv_sec - g_firstSignalSeconds >= kForceExitAfterSeconds) {
+        // Another signal this much later means shutdown is stuck and someone wants out
         _exit(128 + signum);
     }
 }
