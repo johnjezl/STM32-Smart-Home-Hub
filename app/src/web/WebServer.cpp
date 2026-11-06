@@ -125,44 +125,6 @@ bool isAllowedHostHeader(struct mg_http_message* hm, const std::vector<std::stri
                        });
 }
 
-// What the API can change on a device. Anything else on a device's state is
-// reported by the device: a client writing it could fake a sensor reading, set
-// off automations, or store a string the dashboard then has to display.
-bool isControllableProperty(const IDevice& device, const std::string& property,
-                            const nlohmann::json& value) {
-    struct Control {
-        const char* property;
-        DeviceCapability capability;
-        double min;
-        double max;
-    };
-    static const Control kNumeric[] = {
-        {"brightness", DeviceCapability::Brightness, 0, 100},
-        {"colorTemp", DeviceCapability::ColorTemperature, 1000, 10000},  // kelvin
-        {"color_h", DeviceCapability::ColorHSV, 0, 360},
-        {"color_s", DeviceCapability::ColorHSV, 0, 100},
-        {"color_v", DeviceCapability::ColorHSV, 0, 100},
-        {"color_r", DeviceCapability::ColorRGB, 0, 255},
-        {"color_g", DeviceCapability::ColorRGB, 0, 255},
-        {"color_b", DeviceCapability::ColorRGB, 0, 255},
-    };
-
-    if (property == "on") {
-        return value.is_boolean() && device.hasCapability(DeviceCapability::OnOff);
-    }
-    if (!value.is_number()) {
-        return false;
-    }
-    for (const Control& control : kNumeric) {
-        if (property == control.property) {
-            const double number = value.get<double>();
-            return number >= control.min && number <= control.max &&
-                   device.hasCapability(control.capability);
-        }
-    }
-    return false;
-}
-
 AuthInfo authInfoFor(const security::User& user, bool isApiToken) {
     AuthInfo auth;
     auth.authenticated = true;
@@ -833,7 +795,7 @@ void WebServer::apiSetDeviceState(struct mg_connection* c, const std::string& id
         }
 
         for (auto& [key, value] : stateJson.items()) {
-            if (!isControllableProperty(*device, key, value)) {
+            if (!DeviceManager::isControllableProperty(*device, key, value)) {
                 sendError(c, 400, "This device can't be set to that");
                 return;
             }
@@ -1361,6 +1323,28 @@ void WebServer::apiAddZigbeeDevice(struct mg_connection* c, struct mg_http_messa
 // Automation API Handlers
 // =============================================================================
 
+namespace {
+
+// Devices might be added later, so only the ones that exist can be checked here.
+// AutomationManager checks again when an action runs.
+std::string automationProblem(DeviceManager& devices, const nlohmann::json& data) {
+    const std::string problem = Automation::validateJson(data);
+    if (!problem.empty()) return problem;
+
+    for (const auto& action : data["actions"]) {
+        if (action.value("type", "set_device_state") != "set_device_state") continue;
+
+        const auto device = devices.getDevice(action.value("deviceId", action.value("device_id", "")));
+        const std::string property = action.value("property", "");
+        if (device && !DeviceManager::isControllableProperty(*device, property, action["value"])) {
+            return "action can't set " + property + " to that value on " + device->id();
+        }
+    }
+    return "";
+}
+
+}  // namespace
+
 void WebServer::apiGetAutomations(struct mg_connection* c) {
     if (!m_automationMgr) {
         sendError(c, 503, "Automations not available");
@@ -1393,7 +1377,7 @@ void WebServer::apiCreateAutomation(struct mg_connection* c, struct mg_http_mess
     try {
         auto data = nlohmann::json::parse(body);
 
-        const std::string problem = Automation::validateJson(data);
+        const std::string problem = automationProblem(m_deviceManager, data);
         if (!problem.empty()) {
             sendError(c, 400, problem);
             return;
@@ -1450,7 +1434,7 @@ void WebServer::apiUpdateAutomation(struct mg_connection* c, const std::string& 
 
     try {
         auto data = nlohmann::json::parse(body);
-        const std::string problem = Automation::validateJson(data);
+        const std::string problem = automationProblem(m_deviceManager, data);
         if (!problem.empty()) {
             sendError(c, 400, problem);
             return;

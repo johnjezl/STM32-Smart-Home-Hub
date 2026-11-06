@@ -159,16 +159,18 @@ void AutomationManager::checkIntervalTriggers(uint64_t currentTimeMs) {
         for (const auto& [id, automation] : m_automations) {
             if (!automation->enabled) continue;
 
-            for (const auto& trigger : automation->triggers) {
+            for (size_t index = 0; index < automation->triggers.size(); ++index) {
+                const auto& trigger = automation->triggers[index];
                 if (trigger.type == TriggerType::TimeInterval && trigger.intervalMinutes > 0) {
+                    const auto timer = std::make_pair(id, index);
                     uint64_t intervalMs = static_cast<uint64_t>(trigger.intervalMinutes) * 60 * 1000;
-                    uint64_t lastCheck = m_lastIntervalCheck[id];
+                    uint64_t lastCheck = m_lastIntervalCheck[timer];
 
                     if (lastCheck == 0) {
                         // First check - initialize
-                        m_lastIntervalCheck[id] = currentTimeMs;
+                        m_lastIntervalCheck[timer] = currentTimeMs;
                     } else if (currentTimeMs - lastCheck >= intervalMs) {
-                        m_lastIntervalCheck[id] = currentTimeMs;
+                        m_lastIntervalCheck[timer] = currentTimeMs;
                         runs.push_back({*automation, "Interval:" +
                                         std::to_string(trigger.intervalMinutes) + "min"});
                         break;
@@ -369,13 +371,22 @@ void AutomationManager::executeAutomation(const Automation& automation,
 
 void AutomationManager::executeAction(const Action& action) {
     switch (action.type) {
-        case ActionType::SetDeviceState:
+        case ActionType::SetDeviceState: {
             LOG_DEBUG("Action: Set %s.%s = %s",
                      action.deviceId.c_str(),
                      action.property.c_str(),
                      action.value.dump().c_str());
+            // Devices can change after an automation is saved, and the LCD wizard takes free text
+            const auto device = m_deviceManager.getDevice(action.deviceId);
+            if (!device ||
+                !DeviceManager::isControllableProperty(*device, action.property, action.value)) {
+                LOG_WARN("Skipping action: can't set %s.%s to %s", action.deviceId.c_str(),
+                         action.property.c_str(), action.value.dump().c_str());
+                break;
+            }
             m_deviceManager.setDeviceState(action.deviceId, action.property, action.value);
             break;
+        }
 
         case ActionType::Delay:
             // Handled in executeAutomation
@@ -428,6 +439,7 @@ bool AutomationManager::updateAutomation(const Automation& automation) {
     }
 
     m_automations[automation.id] = ptr;
+    clearIntervalTimers(automation.id);
     LOG_INFO("Updated automation: %s", automation.name.c_str());
     return true;
 }
@@ -447,16 +459,23 @@ bool AutomationManager::deleteAutomation(const std::string& id) {
 
     std::string name = it->second->name;
     m_automations.erase(it);
-    m_lastIntervalCheck.erase(id);
+    clearIntervalTimers(id);
 
     LOG_INFO("Deleted automation: %s", name.c_str());
     return true;
 }
 
+void AutomationManager::clearIntervalTimers(const std::string& id) {
+    auto it = m_lastIntervalCheck.lower_bound(std::make_pair(id, size_t{0}));
+    while (it != m_lastIntervalCheck.end() && it->first.first == id) {
+        it = m_lastIntervalCheck.erase(it);
+    }
+}
+
 AutomationPtr AutomationManager::getAutomation(const std::string& id) const {
     std::lock_guard<std::mutex> lock(m_mutex);
     auto it = m_automations.find(id);
-    return (it != m_automations.end()) ? it->second : nullptr;
+    return (it != m_automations.end()) ? std::make_shared<Automation>(*it->second) : nullptr;
 }
 
 std::vector<AutomationPtr> AutomationManager::getAllAutomations() const {
@@ -465,7 +484,7 @@ std::vector<AutomationPtr> AutomationManager::getAllAutomations() const {
     result.reserve(m_automations.size());
 
     for (const auto& [id, automation] : m_automations) {
-        result.push_back(automation);
+        result.push_back(std::make_shared<Automation>(*automation));
     }
 
     return result;

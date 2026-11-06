@@ -456,7 +456,7 @@ void AddAutomationScreen::createStep3_Actions() {
     m_actionPropertyDropdown = lv_dropdown_create(m_step3Container);
     lv_obj_set_size(m_actionPropertyDropdown, 150, 40);
     lv_obj_align(m_actionPropertyDropdown, LV_ALIGN_TOP_LEFT, 320, 52);
-    lv_dropdown_set_options(m_actionPropertyDropdown, "on\nbrightness\ncolor");
+    lv_dropdown_set_options(m_actionPropertyDropdown, "on\nbrightness");
     styleDropdown(m_actionPropertyDropdown);
 
     // Value input

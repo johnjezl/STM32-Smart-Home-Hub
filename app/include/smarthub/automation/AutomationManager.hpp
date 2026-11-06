@@ -57,6 +57,7 @@ public:
     bool addAutomation(const Automation& automation);
     bool updateAutomation(const Automation& automation);
     bool deleteAutomation(const std::string& id);
+    // These return copies: other threads run and change the stored automations
     AutomationPtr getAutomation(const std::string& id) const;
     std::vector<AutomationPtr> getAllAutomations() const;
 
@@ -120,6 +121,8 @@ private:
     bool saveToDatabase(const Automation& automation);
     bool deleteFromDatabase(const std::string& id);
 
+    void clearIntervalTimers(const std::string& id);
+
     // Get current timestamp
     uint64_t getCurrentTimestamp() const;
 
@@ -134,7 +137,7 @@ private:
 
     // Timer state
     int m_lastCheckedMinute = -1;
-    std::map<std::string, uint64_t> m_lastIntervalCheck;  // automationId -> lastCheck
+    std::map<std::pair<std::string, size_t>, uint64_t> m_lastIntervalCheck;  // (id, trigger index)
 
     bool m_initialized = false;
 };

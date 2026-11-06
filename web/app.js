@@ -627,14 +627,14 @@ class SmartHubApp {
 
             card.innerHTML = `
                 <div class="automation-info">
-                    <div class="automation-name">${automation.name}</div>
-                    <div class="automation-trigger">${this.formatTriggerSummary(automation.trigger || automation.triggers?.[0])}</div>
+                    <div class="automation-name">${this.escapeHtml(automation.name)}</div>
+                    <div class="automation-trigger">${this.escapeHtml(this.formatTriggerSummary(automation.trigger || automation.triggers?.[0]))}</div>
                 </div>
                 <div class="automation-controls">
-                    <button class="automation-edit-btn admin-only" data-automation-id="${automation.id}" title="Edit">✏️</button>
+                    <button class="automation-edit-btn admin-only" data-automation-id="${this.escapeHtml(automation.id)}" title="Edit">✏️</button>
                     <label class="toggle">
                         <input type="checkbox" ${automation.enabled ? 'checked' : ''} ${this.isAdmin() ? '' : 'disabled'}
-                            data-automation-id="${automation.id}">
+                            data-automation-id="${this.escapeHtml(automation.id)}">
                         <span class="toggle-slider"></span>
                     </label>
                 </div>
@@ -651,6 +651,12 @@ class SmartHubApp {
 
             container.appendChild(card);
         });
+    }
+
+    escapeHtml(value) {
+        const element = document.createElement('div');
+        element.textContent = String(value ?? '');
+        return element.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     }
 
     formatTriggerSummary(trigger) {

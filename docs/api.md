@@ -616,7 +616,7 @@ Create a new automation.
 
 `compare_op` is one of `eq`, `neq`, `gt`, `gte`, `lt` or `lte`. In a `time` trigger, an `hour` or `minute` of -1 means any. An automation with several triggers uses a `triggers` array instead of `trigger`.
 
-An action can also be `{"type": "delay", "delayMs": 500}`. Delays can total at most 60 seconds.
+An action's property has to be one a client can set on that device, such as `on` or `brightness`. An action can also be `{"type": "delay", "delayMs": 500}`. Delays can total at most 60 seconds.
 
 `condition` is optional, and must hold for the actions to run:
 
