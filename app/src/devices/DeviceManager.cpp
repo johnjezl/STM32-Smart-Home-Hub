@@ -6,6 +6,9 @@
 #include <optional>
 #include <set>
 #include <smarthub/devices/DeviceManager.hpp>
+#include <ctime>
+#include <cmath>
+#include <algorithm>
 #include <smarthub/devices/Device.hpp>
 #include <smarthub/devices/DeviceTypeRegistry.hpp>
 #include <smarthub/protocols/ProtocolFactory.hpp>
@@ -66,6 +69,7 @@ void DeviceManager::shutdown() {
 
     // After the protocols have stopped, so this includes the last reports
     saveAllDevices();
+    flushSensorSamples();
 
     std::lock_guard<std::mutex> lock(m_mutex);
     m_devices.clear();
@@ -256,6 +260,13 @@ bool DeviceManager::removeDevice(const std::string& id) {
             for (auto entry = m_unsavedState.begin(); entry != m_unsavedState.end();) {
                 entry = entry->first.first == id ? m_unsavedState.erase(entry) : std::next(entry);
             }
+            for (auto entry = m_lastSampleTime.begin(); entry != m_lastSampleTime.end();) {
+                entry = entry->first.first == id ? m_lastSampleTime.erase(entry) : std::next(entry);
+            }
+            m_unsavedSamples.erase(
+                std::remove_if(m_unsavedSamples.begin(), m_unsavedSamples.end(),
+                               [&id](const PendingSample& sample) { return sample.deviceId == id; }),
+                m_unsavedSamples.end());
         }
 
         deleteDeviceFromDatabase(id);
@@ -604,6 +615,9 @@ void DeviceManager::applyStateChange(const DevicePtr& device, const std::string&
         previous = device->getProperty(property);
         device->setState(property, value);
     }
+    // Even if it's unchanged: a steady temperature is still a reading
+    recordSensorSample(device->id(), property, value);
+
     if (previous != value) {
         markStateChanged(device->id(), property, value);
 
@@ -715,7 +729,114 @@ void DeviceManager::markStateChanged(const std::string& deviceId, const std::str
     m_unsavedState[{deviceId, property}] = std::move(text);
 }
 
+void DeviceManager::recordSensorSample(const std::string& deviceId, const std::string& property,
+                                       const nlohmann::json& value) {
+    // Only what's worth charting: other numbers in state are things like network addresses
+    if (!value.is_number() ||
+        (property != "temperature" && property != "humidity" && property != "illuminance")) {
+        return;
+    }
+    const double number = value.get<double>();
+    if (!std::isfinite(number)) {
+        return;
+    }
+
+    const int64_t now = static_cast<int64_t>(std::time(nullptr));
+    std::lock_guard<std::mutex> lock(m_stateWriteMutex);
+    auto last = m_lastSampleTime.find({deviceId, property});
+    // A clock that went backwards, as it can at boot before NTP, shouldn't stop the recording
+    if (last != m_lastSampleTime.end() && now >= last->second &&
+        now - last->second < kHistorySampleIntervalSeconds) {
+        return;
+    }
+    m_lastSampleTime[{deviceId, property}] = now;
+    m_unsavedSamples.push_back({deviceId, property, number, now});
+}
+
+bool DeviceManager::flushSensorSamples() {
+    std::vector<PendingSample> samples;
+    {
+        std::lock_guard<std::mutex> lock(m_stateWriteMutex);
+        samples.swap(m_unsavedSamples);
+    }
+
+    constexpr size_t kRowsPerBatch = 500;
+    bool saved = true;
+    for (size_t start = 0; start < samples.size(); start += kRowsPerBatch) {
+        const size_t end = std::min(start + kRowsPerBatch, samples.size());
+
+        // One statement per batch, so each batch is one write to the SD card. The join skips
+        // samples from a device removed since, which the foreign key would otherwise refuse.
+        std::string sql = "WITH v(device_id, property, value, timestamp) AS (VALUES ";
+        for (size_t i = start; i < end; ++i) {
+            sql += i == start ? "(?, ?, ?, ?)" : ", (?, ?, ?, ?)";
+        }
+        sql += ") INSERT INTO sensor_history (device_id, property, value, timestamp) "
+               "SELECT v.device_id, v.property, v.value, v.timestamp FROM v "
+               "JOIN devices ON devices.id = v.device_id";
+
+        auto stmt = m_database.prepare(sql);
+        if (!stmt || !stmt->isValid()) {
+            saved = false;
+            continue;
+        }
+        int parameter = 1;
+        for (size_t i = start; i < end; ++i) {
+            stmt->bind(parameter++, samples[i].deviceId);
+            stmt->bind(parameter++, samples[i].property);
+            stmt->bind(parameter++, samples[i].value);
+            stmt->bind(parameter++, samples[i].timestamp);
+        }
+        // Not retried: a gap in a chart is better than holding on to a growing list
+        if (!stmt->execute()) {
+            LOG_WARN("Lost %zu sensor readings: couldn't save them", end - start);
+            saved = false;
+        }
+    }
+
+    constexpr int64_t kPruneIntervalSeconds = 3600;
+    const int64_t now = static_cast<int64_t>(std::time(nullptr));
+    if (now - m_lastHistoryPrune >= kPruneIntervalSeconds || now < m_lastHistoryPrune) {
+        m_lastHistoryPrune = now;
+        auto prune = m_database.prepare("DELETE FROM sensor_history WHERE timestamp < ?");
+        if (prune && prune->isValid()) {
+            prune->bind(1, now - kHistoryRetentionSeconds);
+            prune->execute();
+        }
+    }
+    return saved;
+}
+
+std::vector<SensorSample> DeviceManager::sensorHistory(const std::string& deviceId,
+                                                       const std::string& property,
+                                                       int64_t fromTimestamp, int maxPoints) const {
+    std::vector<SensorSample> samples;
+    if (maxPoints <= 0) {
+        return samples;
+    }
+    const int64_t now = static_cast<int64_t>(std::time(nullptr));
+    const int64_t slot = std::max<int64_t>(1, (now - fromTimestamp) / maxPoints + 1);
+
+    auto stmt = m_database.prepare(
+        "SELECT MAX(timestamp), AVG(value) FROM sensor_history "
+        "WHERE device_id = ? AND property = ? AND timestamp >= ? "
+        "GROUP BY timestamp / ? ORDER BY 1");
+    if (!stmt || !stmt->isValid()) {
+        return samples;
+    }
+    stmt->bind(1, deviceId);
+    stmt->bind(2, property);
+    stmt->bind(3, fromTimestamp);
+    stmt->bind(4, slot);
+    while (stmt->step()) {
+        samples.push_back({stmt->getInt64(0), stmt->getDouble(1)});
+    }
+    return samples;
+}
+
 bool DeviceManager::flushStateChanges() {
+    const bool samplesSaved = flushSensorSamples();
+
     std::map<std::pair<std::string, std::string>, std::string> unsaved;
     {
         std::lock_guard<std::mutex> lock(m_stateWriteMutex);
@@ -758,7 +879,7 @@ bool DeviceManager::flushStateChanges() {
         }
     }
     writeBatch();
-    return saved;
+    return saved && samplesSaved;
 }
 
 void DeviceManager::stateWriterLoop() {

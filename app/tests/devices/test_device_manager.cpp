@@ -12,6 +12,7 @@
 #include <smarthub/core/EventBus.hpp>
 #include <smarthub/database/Database.hpp>
 #include "../mocks/MockProtocolHandler.hpp"
+#include <ctime>
 #include <filesystem>
 #include <memory>
 #include <thread>
@@ -1022,4 +1023,154 @@ TEST(DeviceManagerRestore, ProtocolLearnsItsDevicesSoTheyWorkAfterARestart) {
     }
     ProtocolFactory::instance().unregisterProtocol("recording");
     std::remove(path.c_str());
+}
+
+// ---- Sensor history ----
+
+class SensorHistoryTest : public DeviceManagerTest {
+protected:
+    void SetUp() override {
+        DeviceManagerTest::SetUp();
+        ProtocolFactory::instance().registerProtocol("history_mock",
+            [this](EventBus& bus, const nlohmann::json& config) -> ProtocolHandlerPtr {
+                protocol = std::make_shared<smarthub::testing::MockProtocolHandler>(bus, config);
+                return protocol;
+            });
+        manager = std::make_unique<DeviceManager>(eventBus, *database);
+        manager->initialize();
+        ASSERT_TRUE(manager->loadProtocol("history_mock", nlohmann::json::object()));
+        ASSERT_TRUE(manager->addDevice(std::make_shared<TemperatureSensor>("t", "T", "history_mock")));
+    }
+    void TearDown() override {
+        manager->shutdown();
+        manager.reset();
+        ProtocolFactory::instance().unregisterProtocol("history_mock");
+        DeviceManagerTest::TearDown();
+    }
+    std::vector<SensorSample> history(const std::string& property = "temperature") {
+        return manager->sensorHistory("t", property, std::time(nullptr) - 3600, 60);
+    }
+    int rowCount() {
+        auto stmt = database->prepare("SELECT COUNT(*) FROM sensor_history");
+        stmt->step();
+        return stmt->getInt(0);
+    }
+    void insertRow(int64_t timestamp, double value) {
+        auto stmt = database->prepare(
+            "INSERT INTO sensor_history (device_id, property, value, timestamp) VALUES ('t', 'temperature', ?, ?)");
+        stmt->bind(1, value);
+        stmt->bind(2, timestamp);
+        ASSERT_TRUE(stmt->execute());
+    }
+    std::shared_ptr<smarthub::testing::MockProtocolHandler> protocol;
+    std::unique_ptr<DeviceManager> manager;
+};
+
+TEST_F(SensorHistoryTest, ReportIsRecorded) {
+    protocol->simulateStateChange("t", "temperature", 21.5);
+    ASSERT_TRUE(manager->flushStateChanges());
+
+    auto samples = history();
+    ASSERT_EQ(samples.size(), 1u);
+    EXPECT_DOUBLE_EQ(samples[0].value, 21.5);
+    EXPECT_NEAR(samples[0].timestamp, std::time(nullptr), 5);
+}
+
+TEST_F(SensorHistoryTest, FrequentReportsAreLimitedForTheSdCard) {
+    for (int i = 0; i < 10; i++) {
+        protocol->simulateStateChange("t", "temperature", 20.0 + i);
+    }
+    ASSERT_TRUE(manager->flushStateChanges());
+    EXPECT_EQ(rowCount(), 1);
+}
+
+TEST_F(SensorHistoryTest, EachPropertyHasItsOwnLimit) {
+    protocol->simulateStateChange("t", "temperature", 20.0);
+    protocol->simulateStateChange("t", "humidity", 50.0);
+    ASSERT_TRUE(manager->flushStateChanges());
+    EXPECT_EQ(history("temperature").size(), 1u);
+    EXPECT_EQ(history("humidity").size(), 1u);
+}
+
+TEST_F(SensorHistoryTest, OtherStateIsNotRecorded) {
+    protocol->simulateStateChange("t", "networkAddress", 4660);
+    protocol->simulateStateChange("t", "battery", 90);
+    protocol->simulateStateChange("t", "temperature", "hot");
+    ASSERT_TRUE(manager->flushStateChanges());
+    EXPECT_EQ(rowCount(), 0);
+}
+
+TEST_F(SensorHistoryTest, FlushWithNothingNewWritesNothing) {
+    ASSERT_TRUE(manager->flushStateChanges());
+    EXPECT_EQ(rowCount(), 0);
+}
+
+TEST_F(SensorHistoryTest, ReadingFromARemovedDeviceDoesNotLoseOthers) {
+    ASSERT_TRUE(manager->addDevice(std::make_shared<TemperatureSensor>("u", "U", "history_mock")));
+    protocol->simulateStateChange("t", "temperature", 21.0);
+    protocol->simulateStateChange("u", "temperature", 22.0);
+    ASSERT_TRUE(manager->removeDevice("u"));
+
+    ASSERT_TRUE(manager->flushStateChanges());
+
+    EXPECT_EQ(rowCount(), 1);
+    EXPECT_EQ(history().size(), 1u);
+}
+
+TEST_F(SensorHistoryTest, RemovingADeviceRemovesItsHistory) {
+    protocol->simulateStateChange("t", "temperature", 21.0);
+    ASSERT_TRUE(manager->flushStateChanges());
+    ASSERT_EQ(rowCount(), 1);
+
+    ASSERT_TRUE(manager->removeDevice("t"));
+
+    EXPECT_EQ(rowCount(), 0);
+}
+
+TEST_F(SensorHistoryTest, OldReadingsArePruned) {
+    const int64_t now = std::time(nullptr);
+    insertRow(now - DeviceManager::kHistoryRetentionSeconds - 100, 1.0);
+    insertRow(now - DeviceManager::kHistoryRetentionSeconds + 100, 2.0);
+
+    ASSERT_TRUE(manager->flushStateChanges());
+
+    EXPECT_EQ(rowCount(), 1);
+}
+
+TEST_F(SensorHistoryTest, QueryIsOldestFirstAndWithinTheRange) {
+    const int64_t now = std::time(nullptr);
+    insertRow(now - 7200, 1.0);
+    insertRow(now - 600, 3.0);
+    insertRow(now - 1800, 2.0);
+
+    auto samples = history();
+
+    ASSERT_EQ(samples.size(), 2u);
+    EXPECT_DOUBLE_EQ(samples[0].value, 2.0);
+    EXPECT_DOUBLE_EQ(samples[1].value, 3.0);
+}
+
+TEST_F(SensorHistoryTest, QueryAveragesIntoTheNumberOfPointsAskedFor) {
+    const int64_t now = std::time(nullptr);
+    for (int i = 0; i < 120; i++) {
+        insertRow(now - 3600 + i * 30, i < 60 ? 10.0 : 20.0);
+    }
+
+    auto samples = manager->sensorHistory("t", "temperature", now - 3600, 2);
+
+    ASSERT_LE(samples.size(), 3u);
+    ASSERT_GE(samples.size(), 2u);
+    EXPECT_LT(samples.front().value, samples.back().value);
+    for (const auto& sample : samples) {
+        EXPECT_GE(sample.value, 10.0);
+        EXPECT_LE(sample.value, 20.0);
+    }
+}
+
+TEST_F(SensorHistoryTest, HistorySurvivesARestart) {
+    protocol->simulateStateChange("t", "temperature", 21.5);
+    manager->shutdown();
+    manager = std::make_unique<DeviceManager>(eventBus, *database);
+    manager->initialize();
+    EXPECT_EQ(history().size(), 1u) << "shutting down saves what's waiting";
 }

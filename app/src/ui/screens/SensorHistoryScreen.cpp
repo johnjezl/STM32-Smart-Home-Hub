@@ -12,7 +12,6 @@
 #include <algorithm>
 #include "smarthub/core/Logger.hpp"
 
-#include <cstdlib>
 #include <ctime>
 #include <cmath>
 
@@ -118,8 +117,10 @@ void SensorHistoryScreen::createHeader() {
 void SensorHistoryScreen::createChart() {
     // Chart container
     m_content = lv_obj_create(m_container);
-    lv_obj_set_size(m_content, LV_PCT(100), lv_pct(100) - 60);
-    lv_obj_align(m_content, LV_ALIGN_TOP_MID, 0, 60);
+    constexpr int HEADER_HEIGHT = 60;
+    constexpr int SCREEN_HEIGHT = 480;
+    lv_obj_set_size(m_content, LV_PCT(100), SCREEN_HEIGHT - HEADER_HEIGHT);
+    lv_obj_align(m_content, LV_ALIGN_TOP_MID, 0, HEADER_HEIGHT);
     lv_obj_set_style_bg_opa(m_content, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(m_content, 0, 0);
     lv_obj_set_style_pad_all(m_content, ThemeManager::SPACING_MD, 0);
@@ -131,6 +132,11 @@ void SensorHistoryScreen::createChart() {
     m_chart->setYAxis("Temperature", "°F");
     m_chart->setYRange(50, 90);
     m_chart->setTimeRange(TimeRange::Hours24);
+
+    m_emptyLabel = lv_label_create(m_container);
+    lv_obj_set_style_text_color(m_emptyLabel, m_theme.textSecondary(), 0);
+    lv_obj_center(m_emptyLabel);
+    lv_obj_add_flag(m_emptyLabel, LV_OBJ_FLAG_HIDDEN);
 
     m_chart->onTimeRangeChanged([this](TimeRange range) {
         onTimeRangeChanged(range);
@@ -150,102 +156,54 @@ void SensorHistoryScreen::loadSensorData() {
             lv_label_set_text(m_currentValueLabel, sensorValueText(device->type(), device->getState()).c_str());
         }
 
-        // The chart is reused from sensor to sensor, so every kind has to set its axis
-        if (m_chart) {
-            const auto state = device->getState();
-            switch (device->type()) {
-                case DeviceType::TemperatureSensor:
-                case DeviceType::MultiSensor: {
-                    // Wide enough for a reading outside the usual indoor range
-                    const float reading = static_cast<float>(temperatureFahrenheit(state).value_or(72.0));
-                    m_chart->setYAxis("Temperature", "°F");
-                    m_chart->setYRange(std::min(50.0f, reading - 20.0f), std::max(90.0f, reading + 20.0f));
-                    break;
-                }
-                case DeviceType::HumiditySensor:
-                    m_chart->setYAxis("Humidity", "%");
-                    m_chart->setYRange(0, 100);
-                    break;
-                default:
-                    m_chart->setYAxis("Value", "");
-                    m_chart->setYRange(50, 90);
-                    break;
-            }
-        }
-
         // Update chart title
         if (m_chart) {
             m_chart->setTitle(device->name() + " History");
         }
     }
 
-    // Load or generate history data
-    // TODO: In production, load from database
-    generateMockData();
+    const std::string property = device ? historyProperty(device->type()) : "";
+    const bool celsius = property == "temperature";
 
-    if (m_chart && !m_historyData.empty()) {
+    m_historyData.clear();
+    if (!property.empty() && m_chart) {
+        const uint64_t range = timeRangeSeconds(m_chart->timeRange());
+        const int64_t from = static_cast<int64_t>(time(nullptr)) - static_cast<int64_t>(range);
+        for (const SensorSample& sample :
+             m_deviceManager.sensorHistory(m_sensorId, property, from, TimeSeriesChart::MAX_POINTS)) {
+            const double value = celsius ? sample.value * 9.0 / 5.0 + 32.0 : sample.value;
+            m_historyData.push_back({static_cast<uint64_t>(sample.timestamp), static_cast<float>(value)});
+        }
+    }
+
+    // The chart is reused from sensor to sensor, so this is all set every time
+    if (m_chart) {
+        if (celsius) {
+            m_chart->setYAxis("Temperature", "°F");
+        } else if (property == "humidity") {
+            m_chart->setYAxis("Humidity", "%");
+        } else {
+            m_chart->setYAxis("", "");
+        }
+
+        // Wide enough to see the shape, and to fit whatever was recorded
+        float low = celsius ? 60.0f : 0.0f;
+        float high = celsius ? 80.0f : 100.0f;
+        for (const DataPoint& point : m_historyData) {
+            low = std::min(low, point.value - 5.0f);
+            high = std::max(high, point.value + 5.0f);
+        }
+        m_chart->setYRange(low, high);
         m_chart->setData(m_historyData);
     }
-}
 
-void SensorHistoryScreen::generateMockData() {
-    m_historyData.clear();
-
-    auto device = m_deviceManager.getDevice(m_sensorId);
-    float baseValue = 72.0f;  // Default base temp
-    float variation = 5.0f;
-
-    if (device) {
-        const auto state = device->getState();
-        if (device->type() == DeviceType::HumiditySensor) {
-            baseValue = static_cast<float>(humidityPercent(state).value_or(45.0));
-            variation = 15.0f;
-        } else if (auto temperature = temperatureFahrenheit(state)) {
-            baseValue = static_cast<float>(*temperature);
-        }
-    }
-
-    // Generate realistic-looking sensor data
-    uint64_t now = static_cast<uint64_t>(time(nullptr));
-    TimeRange range = m_chart ? m_chart->timeRange() : TimeRange::Hours24;
-    uint64_t rangeSeconds = timeRangeSeconds(range);
-    int numPoints = TimeSeriesChart::MAX_POINTS;
-    uint64_t interval = rangeSeconds / numPoints;
-
-    // Seed random with sensor ID for consistent patterns
-    unsigned int seed = 0;
-    for (char c : m_sensorId) {
-        seed += static_cast<unsigned int>(c);
-    }
-    srand(seed + static_cast<unsigned int>(now / 3600));  // Change hourly
-
-    float prevValue = baseValue;
-    for (int i = 0; i < numPoints; i++) {
-        DataPoint dp;
-        dp.timestamp = now - (numPoints - 1 - i) * interval;
-
-        // Random walk with mean reversion
-        float delta = (static_cast<float>(rand()) / RAND_MAX - 0.5f) * 2.0f;
-        float meanReversion = (baseValue - prevValue) * 0.1f;
-        prevValue = prevValue + delta + meanReversion;
-
-        // Add time-of-day variation for temperature
-        if (device && (device->type() == DeviceType::TemperatureSensor ||
-                       device->type() == DeviceType::MultiSensor)) {
-            // Simulate daily temperature cycle
-            float hourOfDay = fmod(static_cast<float>(dp.timestamp) / 3600.0f, 24.0f);
-            float dailyCycle = sinf((hourOfDay - 6.0f) * 3.14159f / 12.0f) * 3.0f;
-            dp.value = prevValue + dailyCycle;
+    if (m_emptyLabel) {
+        if (m_historyData.empty()) {
+            lv_label_set_text(m_emptyLabel, property.empty() ? "No history for this sensor" : "No history yet");
+            lv_obj_clear_flag(m_emptyLabel, LV_OBJ_FLAG_HIDDEN);
         } else {
-            dp.value = prevValue;
+            lv_obj_add_flag(m_emptyLabel, LV_OBJ_FLAG_HIDDEN);
         }
-
-        // Clamp to reasonable range
-        float minVal = baseValue - variation * 2;
-        float maxVal = baseValue + variation * 2;
-        dp.value = std::max(minVal, std::min(maxVal, dp.value));
-
-        m_historyData.push_back(dp);
     }
 }
 

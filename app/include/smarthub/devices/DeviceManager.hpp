@@ -25,6 +25,12 @@ class Device;
 /**
  * Device manager - central registry for all devices and protocols
  */
+/** One recorded sensor reading */
+struct SensorSample {
+    int64_t timestamp;  // Unix seconds
+    double value;
+};
+
 class DeviceManager {
 public:
     DeviceManager(EventBus& eventBus, Database& database);
@@ -215,6 +221,17 @@ public:
     static constexpr int kStateSaveIntervalSeconds = 30;
 
     /**
+     * Recorded readings of a property, oldest first, averaged into at most maxPoints time slots.
+     * Readings from the last kStateSaveIntervalSeconds may not be included yet.
+     */
+    std::vector<SensorSample> sensorHistory(const std::string& deviceId, const std::string& property,
+                                            int64_t fromTimestamp, int maxPoints) const;
+    // To limit wear on the SD card: at most one reading a minute per sensor, kept for a week,
+    // which is the longest the chart shows
+    static constexpr int64_t kHistorySampleIntervalSeconds = 60;
+    static constexpr int64_t kHistoryRetentionSeconds = 7 * 24 * 3600;
+
+    /**
      * Save a single device to database
      */
     bool saveDevice(const DevicePtr& device);
@@ -266,6 +283,21 @@ private:
 
     std::mutex m_stateWriteMutex;  // Guards the queue and the stop flag
     std::map<std::pair<std::string, std::string>, std::string> m_unsavedState;
+
+    // Guarded by m_stateWriteMutex
+    struct PendingSample {
+        std::string deviceId;
+        std::string property;
+        double value;
+        int64_t timestamp;
+    };
+    std::vector<PendingSample> m_unsavedSamples;
+    std::map<std::pair<std::string, std::string>, int64_t> m_lastSampleTime;
+    int64_t m_lastHistoryPrune = 0;  // Only the writer touches this
+
+    void recordSensorSample(const std::string& deviceId, const std::string& property,
+                            const nlohmann::json& value);
+    bool flushSensorSamples();
     std::thread m_stateWriter;
     std::condition_variable m_stateWriterWake;
     bool m_stateWriterStopping = false;

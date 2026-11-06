@@ -50,7 +50,6 @@ private:
     void createHeader();
     void createChart();
     void loadSensorData();
-    void generateMockData();
 
     void onBackClicked();
     void onTimeRangeChanged(TimeRange range);
@@ -62,6 +61,7 @@ private:
     lv_obj_t* m_titleLabel = nullptr;
     lv_obj_t* m_subtitleLabel = nullptr;
     lv_obj_t* m_currentValueLabel = nullptr;
+    lv_obj_t* m_emptyLabel = nullptr;
 
     std::unique_ptr<TimeSeriesChart> m_chart;
 #endif

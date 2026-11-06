@@ -449,23 +449,29 @@ Delete a device.
 
 ### GET /api/devices/{id}/history
 
-Get sensor history data.
+Get a sensor's recorded readings, oldest first, averaged into at most 240 time slots.
+
+Readings are recorded at most once a minute per sensor and kept for 7 days. The newest 30 seconds may not be included yet. Temperature is in Celsius, as sensors report it.
 
 **Parameters:**
 - `id` (path) - Device identifier
-- `hours` (query) - Number of hours of history (default: 24)
+- `hours` (query) - Number of hours of history, 1 to 168 (default: 24)
 
 **Response (200 OK):**
 ```json
 {
   "deviceId": "sensor1",
-  "property": "value",
+  "property": "temperature",
   "data": [
-    {"timestamp": 1705500000, "value": 72.5},
-    {"timestamp": 1705503600, "value": 73.0}
+    {"timestamp": 1705500000, "value": 22.5},
+    {"timestamp": 1705503600, "value": 23.0}
   ]
 }
 ```
+
+`property` is empty and `data` has nothing for a device without a recorded reading, like a motion sensor.
+
+**Errors:** 400 for an invalid `hours`, 404 for an unknown device.
 
 ---
 
