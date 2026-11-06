@@ -50,7 +50,7 @@ void Logger::log(Level level, const char* file, int line, const char* fmt, ...) 
     char buffer[2048];
     va_list args;
     va_start(args, fmt);
-    std::vsnprintf(buffer, sizeof(buffer), fmt, args);
+    std::vsnprintf(buffer, sizeof(buffer), fmt, args);  // NOLINT(clang-analyzer-valist.Uninitialized): started just above
     va_end(args);
 
     writeLog(level, file, line, buffer);

@@ -10,6 +10,13 @@
  */
 
 #include <gtest/gtest.h>
+#include <string>
+#include <vector>
+#include <mutex>
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
 #include <smarthub/protocols/http/HttpClient.hpp>
 #include <smarthub/protocols/wifi/MqttDiscovery.hpp>
 #include <smarthub/protocols/wifi/ShellyDevice.hpp>
@@ -556,6 +563,19 @@ TEST_F(TuyaMessageTest, FindMessageInBufferWithGarbage) {
     EXPECT_EQ(len, 24);
 }
 
+TEST_F(TuyaMessageTest, EncodedV33MessageHasAPaddedVersionHeader) {
+    TuyaCrypto crypto("0123456789abcdef", "3.3");
+    TuyaMessage msg(TuyaCommand::CONTROL, 1);
+    msg.setPayload(std::string("{}"));
+
+    const std::vector<uint8_t> encoded = msg.encode(crypto, "3.3");
+
+    // Prefix (4), sequence (4), command (4), length (4), then the 15-byte header
+    ASSERT_GE(encoded.size(), 31u);
+    const std::vector<uint8_t> expected = {'3', '.', '3', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+    EXPECT_EQ(std::vector<uint8_t>(encoded.begin() + 16, encoded.begin() + 31), expected);
+}
+
 class TuyaDeviceConfigTest : public ::testing::Test {};
 
 TEST_F(TuyaDeviceConfigTest, DefaultPort) {
@@ -625,6 +645,53 @@ TEST_F(WifiHandlerTest, ShutdownCleansUp) {
 
     EXPECT_FALSE(handler.isConnected());
     EXPECT_EQ(handler.state(), ProtocolState::Disconnected);
+}
+
+TEST_F(WifiHandlerTest, AddedDeviceIsKnownByItsId) {
+    // Somewhere for the device to connect to
+    const int listener = socket(AF_INET, SOCK_STREAM, 0);
+    ASSERT_GE(listener, 0);
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    ASSERT_EQ(bind(listener, reinterpret_cast<sockaddr*>(&address), sizeof(address)), 0);
+    ASSERT_EQ(listen(listener, 1), 0);
+    socklen_t length = sizeof(address);
+    ASSERT_EQ(getsockname(listener, reinterpret_cast<sockaddr*>(&address), &length), 0);
+
+    WifiHandler handler(eventBus, config);
+    TuyaDeviceConfig device;
+    device.deviceId = "bf1234567890abcdef12";
+    device.localKey = "0123456789abcdef";
+    device.ipAddress = "127.0.0.1";
+    device.port = ntohs(address.sin_port);
+
+    ASSERT_TRUE(handler.addTuyaDevice(device));
+
+    // Reading the id from an entry already moved from left it empty
+    const auto known = handler.getKnownDeviceAddresses();
+    ASSERT_EQ(known.size(), 1u);
+    EXPECT_FALSE(known[0].empty());
+
+    // Adding it again replaces it, which disconnects the first, and used to deadlock
+    ASSERT_TRUE(handler.addTuyaDevice(device));
+    EXPECT_EQ(handler.getKnownDeviceAddresses().size(), 1u);
+
+    // What it reports is under the same id
+    std::vector<std::string> reported;
+    std::mutex mutex;
+    handler.setDeviceAvailabilityCallback([&](const std::string& id, DeviceAvailability) {
+        std::lock_guard<std::mutex> lock(mutex);
+        reported.push_back(id);
+    });
+
+    // This has to finish too: it used to deadlock with a Tuya device connected
+    handler.shutdown();
+    close(listener);
+
+    std::lock_guard<std::mutex> lock(mutex);
+    ASSERT_EQ(reported.size(), 1u) << "once, though the destructor disconnects too";
+    EXPECT_EQ(reported[0], known[0]);
 }
 
 TEST_F(WifiHandlerTest, GetKnownDevicesEmptyInitially) {

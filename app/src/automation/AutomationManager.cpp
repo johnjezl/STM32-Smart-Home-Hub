@@ -572,7 +572,7 @@ void AutomationManager::executeAction(const Action& action) {
 }
 
 std::string AutomationManager::problemWith(const Automation& automation) const {
-    const std::string problem = Automation::validateJson(automation.toJson());
+    std::string problem = Automation::validateJson(automation.toJson());
     if (!problem.empty()) return problem;
 
     // Devices might be added later, so only the ones that exist can be checked.

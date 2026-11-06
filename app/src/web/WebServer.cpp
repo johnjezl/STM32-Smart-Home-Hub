@@ -702,7 +702,7 @@ void WebServer::handleHttpRequest(struct mg_connection* c, struct mg_http_messag
             size_t slashPos = remainder.find('/');
             if (slashPos == std::string::npos) {
                 // /api/devices/{id}
-                std::string id = remainder;
+                const std::string& id = remainder;
                 if (mg_strcmp(hm->method, mg_str("GET")) == 0) {
                     apiGetDevice(c, id);
                 } else if (mg_strcmp(hm->method, mg_str("PUT")) == 0) {
@@ -745,7 +745,7 @@ void WebServer::handleHttpRequest(struct mg_connection* c, struct mg_http_messag
             size_t slashPos = remainder.find('/');
             if (slashPos == std::string::npos) {
                 // /api/automations/{id}
-                std::string id = remainder;
+                const std::string& id = remainder;
                 if (mg_strcmp(hm->method, mg_str("GET")) == 0) {
                     apiGetAutomation(c, id);
                 } else if (mg_strcmp(hm->method, mg_str("PUT")) == 0) {
@@ -1443,8 +1443,8 @@ void WebServer::apiZigbeePermitJoin(struct mg_connection* c, struct mg_http_mess
             auto data = nlohmann::json::parse(body);
             duration = data.value("duration", 60);
         }
-    } catch (...) {
-        // Use default duration
+    } catch (const std::exception& e) {
+        LOG_DEBUG("Using the default permit-join duration: %s", e.what());
     }
 
     m_zigbeeHandler->startDiscovery();

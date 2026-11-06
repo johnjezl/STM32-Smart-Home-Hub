@@ -185,11 +185,11 @@ public:
     bool queryStatus();
 
     // Callbacks
-    void setStateCallback(TuyaStateCallback cb) { m_stateCallback = std::move(cb); }
+    void setStateCallback(TuyaStateCallback cb) { m_tuyaStateCallback = std::move(cb); }
     void setConnectionCallback(TuyaConnectionCallback cb) { m_connectionCallback = std::move(cb); }
 
     // Configuration
-    const TuyaDeviceConfig& config() const { return m_config; }
+    const TuyaDeviceConfig& config() const { return m_tuyaConfig; }
 
 private:
     void connectionThread();
@@ -198,7 +198,7 @@ private:
     void processMessage(const TuyaMessage& msg);
     bool performSessionNegotiation();
 
-    TuyaDeviceConfig m_config;
+    TuyaDeviceConfig m_tuyaConfig;
     TuyaCrypto m_crypto;
 
     int m_socket = -1;
@@ -211,7 +211,7 @@ private:
     std::map<uint8_t, TuyaDataPoint> m_dataPoints;
     std::mutex m_dpMutex;
 
-    TuyaStateCallback m_stateCallback;
+    TuyaStateCallback m_tuyaStateCallback;
     TuyaConnectionCallback m_connectionCallback;
 };
 

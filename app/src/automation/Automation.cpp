@@ -482,7 +482,7 @@ std::string validateFields(const nlohmann::json& j) {
     }
     int64_t totalDelayMs = 0;
     for (const auto& action : j["actions"]) {
-        const std::string problem = validateAction(action);
+        std::string problem = validateAction(action);
         if (!problem.empty()) return problem;
         if (action.value("type", "") == "delay") {
             totalDelayMs += wholeNumber(action, "delayMs", wholeNumber(action, "delay_ms", 0));

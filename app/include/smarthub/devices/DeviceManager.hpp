@@ -85,7 +85,7 @@ public:
     /**
      * Add a new device
      */
-    bool addDevice(DevicePtr device);
+    bool addDevice(const DevicePtr& device);
 
     /**
      * Remove a device by ID
@@ -256,7 +256,7 @@ public:
 private:
     ProtocolHandlerPtr protocolNamed(const std::string& name) const;
     void restoreDevices(IProtocolHandler& protocol, const std::string& name);
-    void onDeviceDiscovered(DevicePtr device);
+    void onDeviceDiscovered(const DevicePtr& device);
     void applyStateChange(const DevicePtr& device, const std::string& property,
                           const nlohmann::json& value);
     void onDeviceStateChanged(const std::string& deviceId,

@@ -101,7 +101,7 @@ public:
      * Start async WiFi scan
      * Results delivered via callback
      */
-    void startScan(ScanCallback callback);
+    void startScan(const ScanCallback& callback);
 
     /**
      * Get cached scan results (last scan)
@@ -116,7 +116,7 @@ public:
      */
     void connect(const std::string& ssid,
                  const std::string& password,
-                 ConnectCallback callback);
+                 const ConnectCallback& callback);
 
     /**
      * Disconnect from current network
@@ -167,10 +167,10 @@ private:
     void updateStatus();
 
     // Worker thread for async operations
-    void scanWorker(ScanCallback callback);
+    void scanWorker(const ScanCallback& callback);
     void connectWorker(const std::string& ssid,
                        const std::string& password,
-                       ConnectCallback callback);
+                       const ConnectCallback& callback);
 
     mutable std::mutex m_mutex;
     std::vector<WifiNetwork> m_scanResults;

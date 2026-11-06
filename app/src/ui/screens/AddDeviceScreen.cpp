@@ -259,6 +259,7 @@ void AddDeviceScreen::showStep(int step) {
         case 2: createStep2_NameProtocol(); break;
         case 3: createStep3_ProtocolConfig(); break;
         case 4: createStep4_RoomSelection(); break;
+        default: break;
     }
 }
 
@@ -671,7 +672,7 @@ EventHandler AddDeviceScreen::makePairingEventHandler() {
 }
 
 std::function<void(DevicePtr)> AddDeviceScreen::makePendingDeviceCallback() {
-    return [this, post = uiPoster()](DevicePtr device) {
+    return [this, post = uiPoster()](const DevicePtr& device) {
         LOG_INFO("Pending device callback: received device %s", device->id().c_str());
         post([this, device] { onZigbeeDeviceDiscovered(device); });
     };
@@ -701,7 +702,7 @@ void AddDeviceScreen::stopZigbeePairing() {
     m_deviceManager.stopDiscovery();
 }
 
-void AddDeviceScreen::onZigbeeDeviceDiscovered(DevicePtr device) {
+void AddDeviceScreen::onZigbeeDeviceDiscovered(const DevicePtr& device) {
     if (!device || !m_isPairing) return;
 
     LOG_INFO("Zigbee device discovered: %s", device->id().c_str());

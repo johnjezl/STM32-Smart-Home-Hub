@@ -9,7 +9,7 @@ namespace smarthub {
 namespace ui {
 
 AnimationManager::AnimationManager() = default;
-AnimationManager::~AnimationManager() = default;
+
 
 #ifdef SMARTHUB_ENABLE_LVGL
 
@@ -63,7 +63,7 @@ void AnimationManager::fadeOut(lv_obj_t* obj, uint32_t durationMs, AnimationEasi
 
 void AnimationManager::animateValue(lv_obj_t* obj, int32_t startVal, int32_t endVal,
                                      uint32_t durationMs,
-                                     std::function<void(lv_obj_t*, int32_t)> setter) {
+                                     const std::function<void(lv_obj_t*, int32_t)>& setter) {
     if (!obj) return;
 
     // For simple cases without custom setter, we can use LVGL's built-in

@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <regex>
 #include <fstream>
+#include <utility>
 
 namespace smarthub {
 namespace network {
@@ -98,7 +99,7 @@ bool NetworkManager::isWifiEnabled() const {
     return result.find("UP") != std::string::npos;
 }
 
-void NetworkManager::startScan(ScanCallback callback) {
+void NetworkManager::startScan(const ScanCallback& callback) {
     if (!m_wifiAvailable || !m_running) {
         if (callback) {
             callback({});
@@ -123,7 +124,7 @@ std::vector<WifiNetwork> NetworkManager::getScanResults() const {
 
 void NetworkManager::connect(const std::string& ssid,
                              const std::string& password,
-                             ConnectCallback callback) {
+                             const ConnectCallback& callback) {
     if (!m_wifiAvailable || !m_running) {
         if (callback) {
             ConnectionResult result;
@@ -231,7 +232,7 @@ std::vector<std::string> NetworkManager::getSavedNetworks() const {
 
 void NetworkManager::setStatusCallback(StatusCallback callback) {
     std::lock_guard<std::mutex> lock(m_mutex);
-    m_statusCallback = callback;
+    m_statusCallback = std::move(callback);
 }
 
 int NetworkManager::signalToIconIndex(int signalStrength) {
@@ -426,7 +427,7 @@ NetworkStatus NetworkManager::parseStatusOutput(const std::string& output) {
     return status;
 }
 
-void NetworkManager::scanWorker(ScanCallback callback) {
+void NetworkManager::scanWorker(const ScanCallback& callback) {
     LOG_DEBUG("NetworkManager: Starting WiFi scan...");
 
     // Request a scan
@@ -463,7 +464,7 @@ void NetworkManager::scanWorker(ScanCallback callback) {
 
 void NetworkManager::connectWorker(const std::string& ssid,
                                    const std::string& password,
-                                   ConnectCallback callback) {
+                                   const ConnectCallback& callback) {
     ConnectionResult result;
 
     LOG_INFO("NetworkManager: Connecting to '%s'...", ssid.c_str());
