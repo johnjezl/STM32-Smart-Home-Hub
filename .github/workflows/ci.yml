@@ -356,6 +356,9 @@ jobs:
             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
             -DSMARTHUB_BUILD_TESTS=OFF
 
+      - name: Run tool tests
+        run: tools/tests/test_flash.sh
+
       - name: Run dashboard tests
         run: node web/tests/test_app.js
 

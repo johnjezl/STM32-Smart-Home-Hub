@@ -166,12 +166,14 @@ ls ~/projects/smarthub/buildroot-src/output/images/
 ### Using flash.sh Script
 
 ```bash
-# Auto-detect SD card
+# Use the removable device, if there's only one
 ./tools/flash.sh
 
 # Or specify device
 ./tools/flash.sh /dev/sdX
 ```
+
+It only writes to a whole, removable disk that isn't holding this system, and asks for the device's name to be typed back.
 
 ### Manual Flash
 
