@@ -26,7 +26,7 @@ PosixSerialPort::~PosixSerialPort() {
 bool PosixSerialPort::open(const std::string& port, int baudRate) {
     m_fd = ::open(port.c_str(), O_RDWR | O_NOCTTY | O_NONBLOCK);
     if (m_fd < 0) {
-        LOG_ERROR("Failed to open serial port {}: {}", port, strerror(errno));
+        LOG_ERROR("Failed to open serial port %s: %s", port.c_str(), strerror(errno));
         return false;
     }
 
@@ -35,7 +35,7 @@ bool PosixSerialPort::open(const std::string& port, int baudRate) {
     memset(&tty, 0, sizeof(tty));
 
     if (tcgetattr(m_fd, &tty) != 0) {
-        LOG_ERROR("Failed to get serial attributes: {}", strerror(errno));
+        LOG_ERROR("Failed to get serial attributes: %s", strerror(errno));
         close();
         return false;
     }
@@ -51,7 +51,7 @@ bool PosixSerialPort::open(const std::string& port, int baudRate) {
         case 230400: speed = B230400; break;
         case 460800: speed = B460800; break;
         default:
-            LOG_ERROR("Unsupported baud rate: {}", baudRate);
+            LOG_ERROR("Unsupported baud rate: %d", baudRate);
             close();
             return false;
     }
@@ -81,7 +81,7 @@ bool PosixSerialPort::open(const std::string& port, int baudRate) {
     tty.c_cc[VTIME] = 1;  // 100ms timeout
 
     if (tcsetattr(m_fd, TCSANOW, &tty) != 0) {
-        LOG_ERROR("Failed to set serial attributes: {}", strerror(errno));
+        LOG_ERROR("Failed to set serial attributes: %s", strerror(errno));
         close();
         return false;
     }
@@ -89,7 +89,7 @@ bool PosixSerialPort::open(const std::string& port, int baudRate) {
     // Flush buffers
     tcflush(m_fd, TCIOFLUSH);
 
-    LOG_INFO("Opened serial port {} at {} baud", port, baudRate);
+    LOG_INFO("Opened serial port %s at %d baud", port.c_str(), baudRate);
     return true;
 }
 
@@ -187,7 +187,7 @@ bool ZnpTransport::open() {
     m_readerThread = std::thread(&ZnpTransport::readerThread, this);
     m_indicationThread = std::thread(&ZnpTransport::indicationThread, this);
 
-    LOG_INFO("ZNP transport opened on {}", m_port);
+    LOG_INFO("ZNP transport opened on %s", m_port.c_str());
     return true;
 }
 
@@ -236,12 +236,12 @@ bool ZnpTransport::send(const ZnpFrame& frame) {
 
     auto data = frame.serialize();
 
-    LOG_DEBUG("TX: {}", frame.toString());
+    LOG_DEBUG("TX: %s", frame.toString().c_str());
 
     std::lock_guard<std::mutex> writeLock(m_writeMutex);
     ssize_t written = m_serialPort->write(data.data(), data.size());
     if (written != static_cast<ssize_t>(data.size())) {
-        LOG_ERROR("Failed to write frame: wrote {} of {} bytes",
+        LOG_ERROR("Failed to write frame: wrote %zd of %zu bytes",
                   written, data.size());
         return false;
     }
@@ -264,7 +264,7 @@ std::optional<ZnpFrame> ZnpTransport::request(const ZnpFrame& frame, int timeout
         std::unique_lock<std::mutex> slotLock(m_requestSlotMutex);
         if (!m_requestSlotFreed.wait_for(slotLock, kMaxQueueWait,
                                          [this] { return !m_requestInProgress; })) {
-            LOG_WARN("Timeout waiting for an earlier request before {}", frame.toString());
+            LOG_WARN("Timeout waiting for an earlier request before %s", frame.toString().c_str());
             return std::nullopt;
         }
         m_requestInProgress = true;
@@ -301,7 +301,7 @@ std::optional<ZnpFrame> ZnpTransport::request(const ZnpFrame& frame, int timeout
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
     while (m_running && !m_pendingResponse) {
         if (m_responseCv.wait_until(lock, deadline) == std::cv_status::timeout) {
-            LOG_WARN("Timeout waiting for response to {}", frame.toString());
+            LOG_WARN("Timeout waiting for response to %s", frame.toString().c_str());
             m_waitingForResponse = false;
             return std::nullopt;
         }
@@ -310,7 +310,7 @@ std::optional<ZnpFrame> ZnpTransport::request(const ZnpFrame& frame, int timeout
     m_waitingForResponse = false;
 
     if (m_pendingResponse) {
-        LOG_DEBUG("RX: {}", m_pendingResponse->toString());
+        LOG_DEBUG("RX: %s", m_pendingResponse->toString().c_str());
         return std::move(m_pendingResponse);
     }
 
@@ -366,7 +366,7 @@ void ZnpTransport::indicationThread() {
 
         std::lock_guard<std::mutex> lock(m_callbackMutex);
         if (m_indicationCallback) {
-            LOG_DEBUG("Indication: {}", frame.toString());
+            LOG_DEBUG("Indication: %s", frame.toString().c_str());
             m_indicationCallback(frame);
         }
     }
@@ -406,7 +406,7 @@ void ZnpTransport::processReceivedData() {
 
     // Prevent buffer from growing too large
     if (m_rxBuffer.size() > 4096) {
-        LOG_WARN("Discarding {} bytes of garbage data", m_rxBuffer.size());
+        LOG_WARN("Discarding %zu bytes of garbage data", m_rxBuffer.size());
         m_rxBuffer.clear();
     }
 }
@@ -422,7 +422,7 @@ void ZnpTransport::dispatchFrame(const ZnpFrame& frame) {
             m_pendingResponse = frame;
             m_responseCv.notify_one();
         } else {
-            LOG_WARN("Unexpected response: {}", frame.toString());
+            LOG_WARN("Unexpected response: %s", frame.toString().c_str());
         }
     } else if (frame.isIndication()) {
         {

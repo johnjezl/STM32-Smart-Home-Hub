@@ -1,5 +1,6 @@
 # Build directories
 build/
+build-*/
 out/
 *.o
 *.elf
@@ -60,3 +61,8 @@ venv/
 
 # Local Wi-Fi credentials (see buildroot/board/smarthub/wpa_supplicant.conf.example)
 buildroot/board/smarthub/overlay/etc/wpa_supplicant/wpa_supplicant.conf
+
+# Built tools and vendor documents
+tools/rpmsg_test
+tools/rpmsg_poll/rpmsg_poll
+*.pdf

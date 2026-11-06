@@ -153,7 +153,7 @@ bool ZigbeeHandler::initialize() {
         m_stopPairing = false;
     }
 
-    LOG_INFO("Initializing Zigbee handler on {} at {} baud", port, baudRate);
+    LOG_INFO("Initializing Zigbee handler on %s at %d baud", port.c_str(), baudRate);
 
     // Create coordinator
     m_coordinator = m_coordinatorFactory
@@ -204,7 +204,7 @@ bool ZigbeeHandler::initialize() {
     if (m_config.contains("deviceDatabase")) {
         std::string dbPath = m_config["deviceDatabase"];
         if (!loadDeviceDatabase(dbPath)) {
-            LOG_WARN("Failed to load device database from {}", dbPath);
+            LOG_WARN("Failed to load device database from %s", dbPath.c_str());
         }
     }
 
@@ -330,7 +330,7 @@ bool ZigbeeHandler::sendCommand(const std::string& deviceAddress,
         }
     }
 
-    LOG_DEBUG("Sending command '{}' to {} (endpoint {})", command, deviceAddress, endpoint);
+    LOG_DEBUG("Sending command '%s' to %s (endpoint %d)", command.c_str(), deviceAddress.c_str(), endpoint);
 
     // Route command based on type
     if (command == "on" || command == "off" || command == "toggle") {
@@ -449,7 +449,7 @@ bool ZigbeeHandler::loadDeviceDatabase(const std::string& path) {
 // ============================================================================
 
 void ZigbeeHandler::onDeviceAnnounced(uint16_t nwkAddr, uint64_t ieeeAddr) {
-    LOG_INFO("Zigbee device announced: nwk=0x{:04X}, ieee=0x{:016X}", nwkAddr, ieeeAddr);
+    LOG_INFO("Zigbee device announced: nwk=0x%04X, ieee=0x%016llX", nwkAddr, static_cast<unsigned long long>(ieeeAddr));
 
     // Publish event to notify UI that a device was detected
     if (m_discovering) {
@@ -709,7 +709,7 @@ void ZigbeeHandler::finishPairing(uint64_t ieeeAddr) {
 }
 
 void ZigbeeHandler::onDeviceLeft(uint64_t ieeeAddr) {
-    LOG_INFO("Zigbee device left: ieee=0x{:016X}", ieeeAddr);
+    LOG_INFO("Zigbee device left: ieee=0x%016llX", static_cast<unsigned long long>(ieeeAddr));
 
     std::string deviceId;
     {
@@ -730,7 +730,7 @@ void ZigbeeHandler::onDeviceLeft(uint64_t ieeeAddr) {
 }
 
 void ZigbeeHandler::onAttributeReport(uint16_t nwkAddr, const ZclAttributeValue& attr) {
-    LOG_DEBUG("Attribute report: nwk=0x{:04X}, cluster=0x{:04X}, attr=0x{:04X}",
+    LOG_DEBUG("Attribute report: nwk=0x%04X, cluster=0x%04X, attr=0x%04X",
               nwkAddr, attr.clusterId, attr.attributeId);
 
     // Find device ID
@@ -802,7 +802,7 @@ void ZigbeeHandler::onAttributeReport(uint16_t nwkAddr, const ZclAttributeValue&
             break;
 
         default:
-            LOG_DEBUG("Unhandled cluster 0x{:04X} in attribute report", attr.clusterId);
+            LOG_DEBUG("Unhandled cluster 0x%04X in attribute report", attr.clusterId);
             break;
     }
 }
@@ -810,7 +810,7 @@ void ZigbeeHandler::onAttributeReport(uint16_t nwkAddr, const ZclAttributeValue&
 void ZigbeeHandler::onCommandReceived(uint16_t nwkAddr, uint8_t endpoint,
                                        uint16_t cluster, uint8_t command,
                                        const std::vector<uint8_t>& payload) {
-    LOG_DEBUG("Command received: nwk=0x{:04X}, ep={}, cluster=0x{:04X}, cmd={}",
+    LOG_DEBUG("Command received: nwk=0x%04X, ep=%d, cluster=0x%04X, cmd=%d",
               nwkAddr, endpoint, cluster, command);
 
     // Find device ID
@@ -920,7 +920,7 @@ DevicePtr ZigbeeHandler::createDeviceFromInfo(const ZigbeeDeviceInfo& info) {
 
         default:
             // Create as generic switch
-            LOG_WARN("Unknown device type, creating as switch: {}", name);
+            LOG_WARN("Unknown device type, creating as switch: %s", name.c_str());
             device = std::make_shared<SwitchDevice>(deviceId, name, "zigbee");
             break;
     }
@@ -946,13 +946,13 @@ DeviceType ZigbeeHandler::inferDeviceType(const ZigbeeDeviceInfo& info) {
     bool hasIasZone = false;
     bool hasOccupancy = false;
 
-    LOG_DEBUG("Inferring device type for {:016X}, {} endpoints with cluster info",
-              info.ieeeAddress, info.inClusters.size());
+    LOG_DEBUG("Inferring device type for %016llX, %zu endpoints with cluster info",
+              static_cast<unsigned long long>(info.ieeeAddress), info.inClusters.size());
 
     for (const auto& [endpoint, clusters] : info.inClusters) {
-        LOG_DEBUG("  Endpoint {} has {} clusters", endpoint, clusters.size());
+        LOG_DEBUG("  Endpoint %d has %zu clusters", endpoint, clusters.size());
         for (uint16_t cluster : clusters) {
-            LOG_DEBUG("    Cluster: 0x{:04X}", cluster);
+            LOG_DEBUG("    Cluster: 0x%04X", cluster);
             switch (cluster) {
                 case zcl::cluster::ON_OFF:
                     hasOnOff = true;
@@ -979,7 +979,7 @@ DeviceType ZigbeeHandler::inferDeviceType(const ZigbeeDeviceInfo& info) {
         }
     }
 
-    LOG_DEBUG("Cluster flags: OnOff={}, Level={}, Color={}, Temp={}, Humidity={}, IAS={}, Occupancy={}",
+    LOG_DEBUG("Cluster flags: OnOff=%d, Level=%d, Color=%d, Temp=%d, Humidity=%d, IAS=%d, Occupancy=%d",
               hasOnOff, hasLevel, hasColor, hasTemperature, hasHumidity, hasIasZone, hasOccupancy);
 
     // Determine type based on cluster combination

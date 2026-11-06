@@ -39,7 +39,9 @@ public:
     /**
      * Log a message at the specified level
      */
-    void log(Level level, const char* file, int line, const char* fmt, ...);
+    // Checks the format against its arguments at compile time. Counted from 2 because of `this`.
+    void log(Level level, const char* file, int line, const char* fmt, ...)
+        __attribute__((format(printf, 5, 6)));
 
     /**
      * Set minimum log level

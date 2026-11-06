@@ -12,7 +12,7 @@ namespace smarthub::zigbee {
 bool ZigbeeDeviceDatabase::load(const std::string& path) {
     std::ifstream file(path);
     if (!file.is_open()) {
-        LOG_ERROR("Failed to open device database: {}", path);
+        LOG_ERROR("Failed to open device database: %s", path.c_str());
         return false;
     }
 
@@ -21,7 +21,7 @@ bool ZigbeeDeviceDatabase::load(const std::string& path) {
         file >> json;
         return loadFromJson(json);
     } catch (const std::exception& e) {
-        LOG_ERROR("Failed to parse device database: {}", e.what());
+        LOG_ERROR("Failed to parse device database: %s", e.what());
         return false;
     }
 }
@@ -74,7 +74,7 @@ bool ZigbeeDeviceDatabase::loadFromJson(const nlohmann::json& json) {
     }
 
     m_loaded = true;
-    LOG_INFO("Loaded {} Zigbee device definitions", m_devices.size());
+    LOG_INFO("Loaded %zu Zigbee device definitions", m_devices.size());
 
     return true;
 }
@@ -120,7 +120,7 @@ void ZigbeeDeviceDatabase::addDevice(const ZigbeeDeviceEntry& entry) {
 
     // Check for duplicate
     if (m_index.find(key) != m_index.end()) {
-        LOG_WARN("Duplicate device entry: {} {}", entry.manufacturer, entry.model);
+        LOG_WARN("Duplicate device entry: %s %s", entry.manufacturer.c_str(), entry.model.c_str());
         return;
     }
 
