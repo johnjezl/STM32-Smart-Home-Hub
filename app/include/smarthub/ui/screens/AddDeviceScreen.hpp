@@ -87,7 +87,7 @@ private:
     // Zigbee pairing
     void startZigbeePairing();
     void stopZigbeePairing();
-    void onZigbeeDeviceDiscovered(DevicePtr device);
+    void onZigbeeDeviceDiscovered(const DevicePtr& device);
     EventHandler makePairingEventHandler();
     std::function<void(DevicePtr)> makePendingDeviceCallback();
 

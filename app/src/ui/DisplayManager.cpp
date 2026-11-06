@@ -7,6 +7,7 @@
 
 #include <fstream>
 #include <filesystem>
+#include <utility>
 
 namespace fs = std::filesystem;
 
@@ -127,7 +128,7 @@ void DisplayManager::wake() {
 }
 
 void DisplayManager::setTimeoutCallback(TimeoutCallback callback) {
-    m_timeoutCallback = callback;
+    m_timeoutCallback = std::move(callback);
 }
 
 void DisplayManager::setScreenOn(bool on) {

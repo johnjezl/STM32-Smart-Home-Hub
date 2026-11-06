@@ -1,0 +1,33 @@
+---
+# What CI fails on, along with cppcheck. Each check turned off here has its reason:
+#
+# performance-enum-size: saving a few bytes on enums isn't worth it here.
+# bugprone-easily-swappable-parameters: most functions with two strings or two ints would need changing.
+# bugprone-narrowing-conversions: mostly UI coordinates and sizes between int, float and lv_coord_t.
+# bugprone-implicit-widening-of-multiplication-result: mostly constants, like 7 * 24 * 3600, and none overflow.
+# performance-inefficient-string-concatenation: these aren't in hot paths, and + reads better.
+# bugprone-branch-clone: separate branches with the same body often read better, as in a switch on type.
+# bugprone-reserved-identifier: comes from forward declaring LVGL's own types, like _lv_group_t.
+# bugprone-suspicious-enum-usage: LVGL combines part and state flags from different enums by design.
+# performance-no-int-to-ptr: LVGL passes small integers as user data pointers by design.
+# clang-analyzer-security.insecureAPI.strcpy: only flags copies into buffers just sized from the same string.
+# clang-analyzer-optin.cplusplus.VirtualCall: destructors calling their own shutdown(), which is what's meant.
+Checks: >
+  -*,
+  bugprone-*,
+  clang-analyzer-*,
+  performance-*,
+  -performance-enum-size,
+  -performance-inefficient-string-concatenation,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-narrowing-conversions,
+  -bugprone-implicit-widening-of-multiplication-result,
+  -bugprone-branch-clone,
+  -bugprone-reserved-identifier,
+  -bugprone-suspicious-enum-usage,
+  -performance-no-int-to-ptr,
+  -clang-analyzer-security.insecureAPI.strcpy,
+  -clang-analyzer-optin.cplusplus.VirtualCall
+HeaderFilterRegex: '(app/include|shared/include|app/src)/.*'
+WarningsAsErrors: '*'
+...

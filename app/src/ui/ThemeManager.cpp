@@ -13,7 +13,7 @@ ThemeManager::ThemeManager() {
     loadDarkTheme();
 }
 
-ThemeManager::~ThemeManager() = default;
+
 
 void ThemeManager::setMode(ThemeMode mode) {
     if (m_mode == mode) {

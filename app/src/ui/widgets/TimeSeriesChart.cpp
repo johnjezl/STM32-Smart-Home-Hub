@@ -229,8 +229,9 @@ void TimeSeriesChart::updateChartData() {
     const auto values = chartValues(m_data, static_cast<uint64_t>(time(nullptr)),
                                     timeRangeSeconds(m_timeRange), MAX_POINTS);
     for (int i = 0; i < MAX_POINTS; i++) {
+        const std::optional<float>& value = values[static_cast<size_t>(i)];
         lv_chart_set_value_by_id(m_chart, m_series, i,
-            values[i] ? static_cast<lv_coord_t>(std::lround(*values[i])) : LV_CHART_POINT_NONE);
+            value ? static_cast<lv_coord_t>(std::lround(*value)) : LV_CHART_POINT_NONE);
     }
 
     lv_chart_refresh(m_chart);

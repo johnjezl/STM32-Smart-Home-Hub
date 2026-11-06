@@ -318,7 +318,7 @@ jobs:
   static-analysis:
     name: Static Analysis
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 45  # clang-tidy reads every source and LVGL's headers
 
     steps:
       - name: Checkout repository
@@ -344,6 +344,7 @@ jobs:
             libmosquitto-dev \
             libyaml-cpp-dev \
             nlohmann-json3-dev \
+            libdrm-dev \
             cppcheck \
             clang-tidy
 
@@ -354,7 +355,9 @@ jobs:
             -G Ninja \
             -DCMAKE_BUILD_TYPE=Debug \
             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
-            -DSMARTHUB_BUILD_TESTS=OFF
+            -DSMARTHUB_BUILD_TESTS=OFF \
+            -DSMARTHUB_NATIVE_BUILD=ON \
+            -DSMARTHUB_FETCH_LVGL=ON
 
       - name: Run dashboard tests
         run: node web/tests/test_app.js
@@ -371,24 +374,26 @@ jobs:
       - name: Run cppcheck
         working-directory: app
         run: |
+          # Warnings and performance fail the job. Style findings are opinions, so they aren't run.
+          # virtualCallInConstructor: destructors calling their own shutdown(), which is what's meant.
           cppcheck \
-            --enable=warning,style,performance \
+            --enable=warning,performance \
             --suppress=missingIncludeSystem \
+            --suppress=virtualCallInConstructor \
             --inline-suppr \
-            --error-exitcode=0 \
+            --language=c++ \
+            --std=c++17 \
+            --error-exitcode=1 \
+            --quiet \
             -I include \
+            -I ../shared/include \
             src/
 
       - name: Run clang-tidy
         working-directory: app
-        continue-on-error: true
         run: |
-          if [ -f build/compile_commands.json ]; then
-            clang-tidy \
-              -p build \
-              --checks='-*,bugprone-*,clang-analyzer-*,performance-*' \
-              src/**/*.cpp || true
-          fi
+          # Which checks is in .clang-tidy. Every source, UI included, which needs LVGL to be there.
+          run-clang-tidy -quiet -p build -j "$(nproc)" "$(pwd)/src/.*\.cpp$"
 
   # Summary job
   ci-complete:

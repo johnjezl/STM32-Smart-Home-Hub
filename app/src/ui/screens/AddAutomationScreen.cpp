@@ -13,6 +13,7 @@
 
 #include <cmath>
 #include <optional>
+#include <utility>
 
 namespace smarthub {
 namespace ui {
@@ -31,7 +32,7 @@ AddAutomationScreen::AddAutomationScreen(ScreenManager& screenManager,
 AddAutomationScreen::~AddAutomationScreen() = default;
 
 void AddAutomationScreen::onAutomationAdded(AutomationAddedCallback callback) {
-    m_onAutomationAdded = callback;
+    m_onAutomationAdded = std::move(callback);
 }
 
 void AddAutomationScreen::onCreate() {
@@ -501,6 +502,7 @@ void AddAutomationScreen::showStep(int step) {
             showTriggerConfig(m_selectedTriggerType);
             break;
         case 3: lv_obj_clear_flag(m_step3Container, LV_OBJ_FLAG_HIDDEN); break;
+        default: break;
     }
 
     updateNavigationButtons();
@@ -593,8 +595,7 @@ std::optional<double> parseNumber(const std::string& text) {
         size_t used = 0;
         const double number = std::stod(text, &used);
         if (used == text.size() && std::isfinite(number)) return number;
-    } catch (const std::exception&) {
-        // Not a number
+    } catch (const std::exception&) {  // NOLINT(bugprone-empty-catch): not a number is an answer here
     }
     return std::nullopt;
 }
@@ -687,6 +688,7 @@ void AddAutomationScreen::onCreateAutomation() {
                     case 2: trigger.compareOp = CompareOp::LessThan; break;
                     case 3: trigger.compareOp = CompareOp::LessOrEqual; break;
                     case 4: trigger.compareOp = CompareOp::Equal; break;
+                    default: break;
                 }
 
                 const auto threshold = parseNumber(lv_textarea_get_text(m_triggerThresholdInput));

@@ -15,6 +15,7 @@
 #include <smarthub/core/EventBus.hpp>
 #include <smarthub/database/Database.hpp>
 #include <smarthub/core/Logger.hpp>
+#include <utility>
 
 namespace smarthub {
 
@@ -98,7 +99,7 @@ bool DeviceManager::loadProtocol(const std::string& name, const nlohmann::json& 
 
     // Set up callbacks
     protocol->setDeviceDiscoveredCallback(
-        [this](DevicePtr device) {
+        [this](const DevicePtr& device) {
             onDeviceDiscovered(device);
         });
 
@@ -200,7 +201,7 @@ IProtocolHandler* DeviceManager::getProtocol(const std::string& name) {
     return nullptr;
 }
 
-bool DeviceManager::addDevice(DevicePtr device) {
+bool DeviceManager::addDevice(const DevicePtr& device) {
     if (!device) {
         LOG_ERROR("addDevice called with null device");
         return false;
@@ -1045,8 +1046,8 @@ void DeviceManager::loadDevicesFromDatabase() {
                     try {
                         nlohmann::json value = nlohmann::json::parse(valueStr);
                         device->setState(property, value);
-                    } catch (...) {
-                        // Ignore parse errors
+                    } catch (const std::exception& e) {
+                        LOG_WARN("Ignoring saved %s of %s: %s", property.c_str(), id.c_str(), e.what());
                     }
                 }
             }
@@ -1178,7 +1179,7 @@ bool DeviceManager::deleteRoom(const std::string& id) {
     return false;
 }
 
-void DeviceManager::onDeviceDiscovered(DevicePtr device) {
+void DeviceManager::onDeviceDiscovered(const DevicePtr& device) {
     LOG_INFO("Device discovered: %s (%s)", device->name().c_str(), device->id().c_str());
     addDevice(device);
 }

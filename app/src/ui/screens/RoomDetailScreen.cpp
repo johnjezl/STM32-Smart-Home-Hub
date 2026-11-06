@@ -705,7 +705,7 @@ void RoomDetailScreen::onAddDeviceClicked() {
         m_screenManager.getScreen("add_device"));
     if (addScreen) {
         addScreen->setPreselectedRoom(m_roomId, m_roomName);
-        addScreen->onDeviceAdded([this](DevicePtr /* device */) {
+        addScreen->onDeviceAdded([this](const DevicePtr& /* device */) {
             refreshDeviceList();
         });
         m_screenManager.showScreen("add_device");

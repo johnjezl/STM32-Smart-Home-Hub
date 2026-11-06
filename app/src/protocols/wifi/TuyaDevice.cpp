@@ -301,8 +301,10 @@ std::vector<uint8_t> TuyaMessage::encode(TuyaCrypto& crypto, const std::string& 
     // Add version header for v3.3+
     std::vector<uint8_t> fullPayload;
     if (version != "3.1") {
-        std::string verStr = version + "\0\0\0\0\0\0\0\0\0\0\0\0";
-        fullPayload.insert(fullPayload.end(), verStr.begin(), verStr.begin() + 15);
+        // The version, padded with zeros to 15 bytes
+        std::string verStr = version;
+        verStr.resize(15, '\0');
+        fullPayload.insert(fullPayload.end(), verStr.begin(), verStr.end());
     }
     fullPayload.insert(fullPayload.end(), encPayload.begin(), encPayload.end());
 
@@ -401,7 +403,7 @@ std::optional<TuyaMessage> TuyaMessage::decode(const std::vector<uint8_t>& data,
 TuyaDevice::TuyaDevice(const std::string& id, const std::string& name,
                        const TuyaDeviceConfig& config)
     : Device(id, name, DeviceType::Switch)
-    , m_config(config)
+    , m_tuyaConfig(config)
     , m_crypto(config.localKey, config.version) {
 
     setProtocol("tuya");
@@ -440,13 +442,13 @@ bool TuyaDevice::connect() {
     // Connect
     struct sockaddr_in addr{};
     addr.sin_family = AF_INET;
-    addr.sin_port = htons(m_config.port);
-    inet_pton(AF_INET, m_config.ipAddress.c_str(), &addr.sin_addr);
+    addr.sin_port = htons(m_tuyaConfig.port);
+    inet_pton(AF_INET, m_tuyaConfig.ipAddress.c_str(), &addr.sin_addr);
 
     int ret = ::connect(m_socket, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr));
     if (ret < 0 && errno != EINPROGRESS) {
         LOG_ERROR("Tuya connect to %s failed: %s",
-                  m_config.ipAddress.c_str(), strerror(errno));
+                  m_tuyaConfig.ipAddress.c_str(), strerror(errno));
         close(m_socket);
         m_socket = -1;
         return false;
@@ -459,7 +461,7 @@ bool TuyaDevice::connect() {
 
     ret = poll(&pfd, 1, 5000);  // 5 second timeout
     if (ret <= 0) {
-        LOG_ERROR("Tuya connection to %s timed out", m_config.ipAddress.c_str());
+        LOG_ERROR("Tuya connection to %s timed out", m_tuyaConfig.ipAddress.c_str());
         close(m_socket);
         m_socket = -1;
         return false;
@@ -477,7 +479,7 @@ bool TuyaDevice::connect() {
     }
 
     LOG_INFO("Connected to Tuya device %s at %s",
-             m_config.deviceId.c_str(), m_config.ipAddress.c_str());
+             m_tuyaConfig.deviceId.c_str(), m_tuyaConfig.ipAddress.c_str());
 
     // Perform session negotiation for v3.4/3.5
     if (m_crypto.needsSessionNegotiation()) {
@@ -497,7 +499,7 @@ bool TuyaDevice::connect() {
     setAvailability(DeviceAvailability::Online);
 
     if (m_connectionCallback) {
-        m_connectionCallback(m_config.deviceId, true);
+        m_connectionCallback(id(), true);
     }
 
     // Query initial status
@@ -508,21 +510,30 @@ bool TuyaDevice::connect() {
 
 void TuyaDevice::disconnect() {
     m_running = false;
-    m_connected = false;
+    // Only says so once, as this also runs from the destructor, and the thread can get there first
+    const bool wasConnected = m_connected.exchange(false);
 
+    // Wakes the thread, which is still using the socket, so it's only closed once that's stopped
     if (m_socket >= 0) {
-        close(m_socket);
-        m_socket = -1;
+        ::shutdown(m_socket, SHUT_RDWR);
     }
 
     if (m_thread.joinable()) {
         m_thread.join();
     }
 
+    {
+        std::lock_guard<std::mutex> lock(m_sendMutex);  // Another thread may be sending
+        if (m_socket >= 0) {
+            close(m_socket);
+            m_socket = -1;
+        }
+    }
+
     setAvailability(DeviceAvailability::Offline);
 
-    if (m_connectionCallback) {
-        m_connectionCallback(m_config.deviceId, false);
+    if (wasConnected && m_connectionCallback) {
+        m_connectionCallback(id(), false);
     }
 }
 
@@ -551,7 +562,7 @@ bool TuyaDevice::performSessionNegotiation() {
     }
 
     buffer.resize(n);
-    auto response = TuyaMessage::decode(buffer, m_crypto, m_config.version);
+    auto response = TuyaMessage::decode(buffer, m_crypto, m_tuyaConfig.version);
     if (!response || response->command() != TuyaCommand::SESS_KEY_NEG_RESP) {
         return false;
     }
@@ -592,7 +603,9 @@ void TuyaDevice::connectionThread() {
                 if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
                     continue;
                 }
-                LOG_WARN("Tuya device %s disconnected", m_config.deviceId.c_str());
+                if (m_running) {  // Otherwise it's disconnect() that woke this
+                    LOG_WARN("Tuya device %s disconnected", m_tuyaConfig.deviceId.c_str());
+                }
                 break;
             }
 
@@ -612,7 +625,7 @@ void TuyaDevice::connectionThread() {
                                               buffer.begin() + start + len);
                 buffer.erase(buffer.begin(), buffer.begin() + start + len);
 
-                auto msg = TuyaMessage::decode(msgData, m_crypto, m_config.version);
+                auto msg = TuyaMessage::decode(msgData, m_crypto, m_tuyaConfig.version);
                 if (msg) {
                     processMessage(*msg);
                 }
@@ -620,15 +633,17 @@ void TuyaDevice::connectionThread() {
         }
 
         if (pfd.revents & (POLLERR | POLLHUP)) {
-            LOG_WARN("Tuya device %s connection error", m_config.deviceId.c_str());
+            if (m_running) {
+                LOG_WARN("Tuya device %s connection error", m_tuyaConfig.deviceId.c_str());
+            }
             break;
         }
     }
 
-    m_connected = false;
+    const bool wasConnected = m_connected.exchange(false);
     setAvailability(DeviceAvailability::Offline);
-    if (m_connectionCallback) {
-        m_connectionCallback(m_config.deviceId, false);
+    if (wasConnected && m_connectionCallback) {
+        m_connectionCallback(id(), false);
     }
 }
 
@@ -639,11 +654,11 @@ bool TuyaDevice::sendMessage(const TuyaMessage& msg) {
         return false;
     }
 
-    auto data = msg.encode(m_crypto, m_config.version);
+    auto data = msg.encode(m_crypto, m_tuyaConfig.version);
 
     ssize_t sent = 0;
     while (sent < static_cast<ssize_t>(data.size())) {
-        ssize_t n = send(m_socket, data.data() + sent, data.size() - sent, 0);
+        ssize_t n = send(m_socket, data.data() + sent, data.size() - sent, MSG_NOSIGNAL);
         if (n < 0) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
                 continue;
@@ -712,8 +727,8 @@ void TuyaDevice::processMessage(const TuyaMessage& msg) {
                 Device::setState("colorTemp", dps[3].value);
             }
 
-            if (m_stateCallback) {
-                m_stateCallback(m_config.deviceId, dps);
+            if (m_tuyaStateCallback) {
+                m_tuyaStateCallback(id(), dps);
             }
             break;
         }
@@ -749,7 +764,7 @@ bool TuyaDevice::setDataPoints(const std::map<uint8_t, nlohmann::json>& dps) {
     }
 
     nlohmann::json payload;
-    payload["devId"] = m_config.deviceId;
+    payload["devId"] = m_tuyaConfig.deviceId;
     payload["uid"] = "";
     payload["t"] = std::to_string(std::time(nullptr));
 
@@ -759,7 +774,7 @@ bool TuyaDevice::setDataPoints(const std::map<uint8_t, nlohmann::json>& dps) {
     }
     payload["dps"] = dpsJson;
 
-    TuyaCommand cmd = (m_config.version == "3.4" || m_config.version == "3.5")
+    TuyaCommand cmd = (m_tuyaConfig.version == "3.4" || m_tuyaConfig.version == "3.5")
                       ? TuyaCommand::CONTROL_NEW
                       : TuyaCommand::CONTROL;
 
@@ -775,12 +790,12 @@ bool TuyaDevice::queryStatus() {
     }
 
     nlohmann::json payload;
-    payload["devId"] = m_config.deviceId;
+    payload["devId"] = m_tuyaConfig.deviceId;
     payload["uid"] = "";
     payload["t"] = std::to_string(std::time(nullptr));
     payload["dps"] = nlohmann::json::object();
 
-    TuyaCommand cmd = (m_config.version == "3.4" || m_config.version == "3.5")
+    TuyaCommand cmd = (m_tuyaConfig.version == "3.4" || m_tuyaConfig.version == "3.5")
                       ? TuyaCommand::DP_QUERY_NEW
                       : TuyaCommand::DP_QUERY;
 

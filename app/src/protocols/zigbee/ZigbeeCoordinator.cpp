@@ -845,9 +845,8 @@ void ZigbeeCoordinator::forgetAddress(uint16_t nwkAddr, uint64_t ieeeAddr) {
 }
 
 void ZigbeeCoordinator::handleDeviceAnnounce(const ZnpFrame& frame) {
-    if (frame.payload().size() < 11) return;
+    if (frame.payload().size() < 13) return;  // Through capabilities, at offset 12
 
-    uint16_t srcAddr = frame.getWord(0);
     uint16_t nwkAddr = frame.getWord(2);
     uint64_t ieeeAddr = frame.getQWord(4);
     uint8_t capabilities = frame.getByte(12);
@@ -883,10 +882,7 @@ void ZigbeeCoordinator::handleDeviceAnnounce(const ZnpFrame& frame) {
 void ZigbeeCoordinator::handleDeviceLeave(const ZnpFrame& frame) {
     if (frame.payload().size() < 10) return;
 
-    uint16_t srcAddr = frame.getWord(0);
     uint64_t ieeeAddr = frame.getQWord(2);
-    uint8_t request = frame.getByte(10);
-    uint8_t remove = frame.getByte(11);
 
     LOG_INFO("Device left: IEEE=%016" PRIX64, ieeeAddr);
 
@@ -970,7 +966,6 @@ void ZigbeeCoordinator::handleActiveEpRsp(const ZnpFrame& frame) {
     // SrcAddr(2) + Status(1) + NwkAddr(2) + ActiveEPCount(1) + ActiveEPList(N)
     if (frame.payload().size() < 6) return;
 
-    uint16_t srcAddr = frame.getWord(0);
     uint8_t status = frame.getByte(2);
     uint16_t nwkAddr = frame.getWord(3);
     uint8_t epCount = frame.getByte(5);
@@ -1010,7 +1005,6 @@ void ZigbeeCoordinator::handleSimpleDescRsp(const ZnpFrame& frame) {
     // + NumOutClusters(1) + OutClusterList(M*2)
     if (frame.payload().size() < 5) return;
 
-    uint16_t srcAddr = frame.getWord(0);
     uint8_t status = frame.getByte(2);
     uint16_t nwkAddr = frame.getWord(3);
     uint8_t descLen = frame.getByte(5);
@@ -1040,7 +1034,6 @@ void ZigbeeCoordinator::handleSimpleDescRsp(const ZnpFrame& frame) {
     uint8_t endpoint = frame.getByte(6);
     uint16_t profileId = frame.getWord(7);
     uint16_t deviceId = frame.getWord(9);
-    uint8_t deviceVersion = frame.getByte(11);
     uint8_t numInClusters = frame.getByte(12);
 
     LOG_INFO("Simple descriptor for %04X ep%d: profile=0x%04X, device=0x%04X, inClusters=%d",
@@ -1092,12 +1085,9 @@ void ZigbeeCoordinator::handleIncomingMessage(const ZnpFrame& frame) {
 
     if (frame.payload().size() < 17) return;
 
-    uint16_t groupId = frame.getWord(0);
     uint16_t clusterId = frame.getWord(2);
     uint16_t srcAddr = frame.getWord(4);
     uint8_t srcEndpoint = frame.getByte(6);
-    uint8_t dstEndpoint = frame.getByte(7);
-    uint8_t linkQuality = frame.getByte(9);
     uint8_t dataLen = frame.getByte(16);
 
     if (frame.payload().size() < 17 + dataLen) return;
