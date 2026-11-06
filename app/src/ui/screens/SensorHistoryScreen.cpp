@@ -9,6 +9,7 @@
 #include "smarthub/devices/DeviceManager.hpp"
 #include "smarthub/devices/Device.hpp"
 #include "smarthub/devices/SensorDisplay.hpp"
+#include <algorithm>
 #include "smarthub/core/Logger.hpp"
 
 #include <cstdlib>
@@ -149,18 +150,25 @@ void SensorHistoryScreen::loadSensorData() {
             lv_label_set_text(m_currentValueLabel, sensorValueText(device->type(), device->getState()).c_str());
         }
 
+        // The chart is reused from sensor to sensor, so every kind has to set its axis
         if (m_chart) {
+            const auto state = device->getState();
             switch (device->type()) {
                 case DeviceType::TemperatureSensor:
-                case DeviceType::MultiSensor:
+                case DeviceType::MultiSensor: {
+                    // Wide enough for a reading outside the usual indoor range
+                    const float reading = static_cast<float>(temperatureFahrenheit(state).value_or(72.0));
                     m_chart->setYAxis("Temperature", "°F");
-                    m_chart->setYRange(50, 90);
+                    m_chart->setYRange(std::min(50.0f, reading - 20.0f), std::max(90.0f, reading + 20.0f));
                     break;
+                }
                 case DeviceType::HumiditySensor:
                     m_chart->setYAxis("Humidity", "%");
                     m_chart->setYRange(0, 100);
                     break;
                 default:
+                    m_chart->setYAxis("Value", "");
+                    m_chart->setYRange(50, 90);
                     break;
             }
         }

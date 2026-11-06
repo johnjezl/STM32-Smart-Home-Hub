@@ -286,7 +286,7 @@ TestRunner.describe('Icon Mapping', () => {
 // ============================================================================
 
 TestRunner.describe('Sensor Value Formatting', () => {
-    const { sensorValue, roomSensors, roomClimateText } = SensorDisplayApi;
+    const { sensorValue, roomSensors, roomClimateText, roomMotionText } = SensorDisplayApi;
 
     TestRunner.it('should convert temperature from the Celsius sensors report', () => {
         const result = sensorValue({ type: 'temperature_sensor', state: { temperature: 22.5 } });
@@ -348,6 +348,20 @@ TestRunner.describe('Sensor Value Formatting', () => {
             { type: 'temperature_sensor', state: { temperature: 20 } }
         ]);
         TestRunner.assertEqual(roomClimateText(room), '68°F');
+    });
+
+    TestRunner.it('should not call a room clear before its motion sensor reports', () => {
+        const room = roomSensors([{ type: 'motion_sensor', state: {} }]);
+        TestRunner.assertTrue(room.hasMotionSensor);
+        TestRunner.assertEqual(roomMotionText(room), '--');
+        TestRunner.assertEqual(roomMotionText(roomSensors([{ type: 'motion_sensor', state: { motion: false } }])), 'Clear');
+    });
+
+    TestRunner.it('should round the same way as the LCD', () => {
+        // Compare with SensorDisplay.RoundsTheSameWayAsTheWebDashboard on the hub
+        TestRunner.assertEqual(roomClimateText(roomSensors([{ type: 'temperature_sensor', state: { temperature: 22.5 } }])), '73°F');
+        TestRunner.assertEqual(sensorValue({ type: 'humidity_sensor', state: { humidity: 44.5 } }).text, '45%');
+        TestRunner.assertEqual(roomClimateText(roomSensors([{ type: 'temperature_sensor', state: { temperature: -17.8 } }])), '0°F');
     });
 
     TestRunner.it('should detect motion from any sensor in a room', () => {

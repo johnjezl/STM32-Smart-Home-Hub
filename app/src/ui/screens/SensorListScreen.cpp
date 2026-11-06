@@ -136,29 +136,23 @@ void SensorListScreen::createSensorCards() {
         // Check if this is a sensor type
         bool isSensor = false;
         std::string icon;
-        std::string unit;
-
         switch (device->type()) {
             case DeviceType::TemperatureSensor:
             case DeviceType::MultiSensor:  // Temperature and humidity
                 isSensor = true;
                 icon = LV_SYMBOL_CHARGE;  // Thermometer-like
-                unit = "°F";
                 break;
             case DeviceType::HumiditySensor:
                 isSensor = true;
                 icon = LV_SYMBOL_CHARGE;
-                unit = "%";
                 break;
             case DeviceType::MotionSensor:
                 isSensor = true;
                 icon = LV_SYMBOL_EYE_OPEN;
-                unit = "";
                 break;
             case DeviceType::ContactSensor:
                 isSensor = true;
                 icon = LV_SYMBOL_CLOSE;
-                unit = "";
                 break;
             default:
                 break;

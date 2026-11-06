@@ -268,12 +268,23 @@ std::vector<DevicePtr> DeviceManager::getAllDevices() const {
 }
 
 std::vector<DevicePtr> DeviceManager::getDevicesByRoom(const std::string& room) const {
+    // The web dashboard assigns a device to a room by name and the LCD by id, so match either
+    std::string roomId = room;
+    std::string roomName = room;
+    for (const auto& [id, name] : getAllRooms()) {
+        if (id == room || name == room) {
+            roomId = id;
+            roomName = name;
+            break;
+        }
+    }
+
     std::lock_guard<std::mutex> lock(m_mutex);
 
     std::vector<DevicePtr> result;
 
     for (const auto& [id, device] : m_devices) {
-        if (device->room() == room) {
+        if (device->room() == roomId || device->room() == roomName) {
             result.push_back(device);
         }
     }

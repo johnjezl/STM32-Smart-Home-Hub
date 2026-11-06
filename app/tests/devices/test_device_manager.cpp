@@ -924,3 +924,31 @@ TEST_F(DeviceManagerTest, StateWithInvalidTextDoesNotThrow) {
     manager.shutdown();
     ProtocolFactory::instance().unregisterProtocol("plain_mock");
 }
+
+TEST(DeviceManagerRooms, FindsDevicesAssignedByRoomIdOrName) {
+    const std::string path = "/tmp/test_rooms_" + std::to_string(getpid()) + ".db";
+    std::remove(path.c_str());
+    {
+        EventBus eventBus;
+        Database database(path);
+        ASSERT_TRUE(database.initialize());
+        DeviceManager manager(eventBus, database);
+        ASSERT_TRUE(manager.initialize());
+        ASSERT_TRUE(manager.addRoom("living-room", "Living Room"));
+
+        auto fromLcd = std::make_shared<SwitchDevice>("lcd", "LCD");
+        fromLcd->setRoom("living-room");
+        auto fromWeb = std::make_shared<SwitchDevice>("web", "Web");
+        fromWeb->setRoom("Living Room");
+        auto elsewhere = std::make_shared<SwitchDevice>("other", "Other");
+        elsewhere->setRoom("Kitchen");
+        manager.addDevice(fromLcd);
+        manager.addDevice(fromWeb);
+        manager.addDevice(elsewhere);
+
+        EXPECT_EQ(manager.getDevicesByRoom("living-room").size(), 2u);
+        EXPECT_EQ(manager.getDevicesByRoom("Living Room").size(), 2u);
+        EXPECT_EQ(manager.getDevicesByRoom("Kitchen").size(), 1u) << "a room string with no room row still matches";
+    }
+    std::remove(path.c_str());
+}

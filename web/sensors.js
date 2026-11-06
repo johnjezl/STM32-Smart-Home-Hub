@@ -11,8 +11,13 @@
     const temperatureF = state => (isNumber(state?.temperature) ? state.temperature * 9 / 5 + 32 : undefined);
     const humidityPercent = state => (isNumber(state?.humidity) ? state.humidity : undefined);
 
+    // No "-0°F"
+    const fixed = (value, decimals) => {
+        const rounded = Number(value.toFixed(decimals));
+        return (rounded === 0 ? 0 : rounded).toFixed(decimals);
+    };
     const temperatureText = (fahrenheit, decimals = 0) =>
-        (fahrenheit === undefined ? '--°F' : `${fahrenheit.toFixed(decimals)}°F`);
+        (fahrenheit === undefined ? '--°F' : `${fixed(fahrenheit, decimals)}°F`);
     const humidityText = percent => (percent === undefined ? '--%' : `${Math.round(percent)}%`);
 
     const reportsTemperature = type => type === 'temperature_sensor' || type === 'multi_sensor';
@@ -60,6 +65,7 @@
             hasHumiditySensor: false,
             humidity: undefined,
             hasMotionSensor: false,
+            motionReported: false,
             motionDetected: false
         };
         devices.forEach(device => {
@@ -73,10 +79,19 @@
             }
             if (device.type === 'motion_sensor') {
                 room.hasMotionSensor = true;
-                room.motionDetected = room.motionDetected || device.state?.motion === true;
+                if (typeof device.state?.motion === 'boolean') {
+                    room.motionReported = true;
+                    room.motionDetected = room.motionDetected || device.state.motion;
+                }
             }
         });
         return room;
+    }
+
+    /** "Motion" or "Clear", or "--" before any motion sensor in the room has reported */
+    function roomMotionText(room) {
+        if (!room.motionReported) return '--';
+        return room.motionDetected ? 'Motion' : 'Clear';
     }
 
     /** A room's climate for a card, such as "72°F / 45%". Empty if the room has no such sensors. */
@@ -87,7 +102,7 @@
         return parts.join(' / ');
     }
 
-    const api = { sensorValue, roomSensors, roomClimateText, temperatureText, humidityText };
+    const api = { sensorValue, roomSensors, roomClimateText, roomMotionText, temperatureText, humidityText };
     if (typeof module !== 'undefined' && module.exports) {
         module.exports = api;
     } else {

@@ -55,6 +55,12 @@ void RoomCard::createLayout() {
 }
 
 void RoomCard::setRoomData(const RoomData& data) {
+    // Called every few seconds; setting a label redraws it even if nothing changed
+    if (m_hasShown && data == m_shown) {
+        return;
+    }
+    m_shown = data;
+    m_hasShown = true;
     m_roomId = data.id;
 
     if (m_nameLabel) {

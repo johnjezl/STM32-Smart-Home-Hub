@@ -318,7 +318,6 @@ body:not(.is-admin) .admin-only {
     font-weight: 600;
 }
 
-.room-temp,
 .room-climate {
     color: var(--text-secondary);
     font-weight: 500;

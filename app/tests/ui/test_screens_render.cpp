@@ -197,6 +197,7 @@ TEST_F(ScreenRenderTest, RoomDetail) {
 TEST_F(ScreenRenderTest, RoomDetailShowsTheSensorsOfEachRoom) {
     auto motion = std::make_shared<MotionSensor>("detail-motion", "Hall Motion");
     motion->setRoom("detail-a");
+    motion->setMotionDetected(false);
     auto temp = std::make_shared<TemperatureSensor>("detail-temp", "Hall Temp");
     temp->setRoom("detail-a");
     temp->setTemperature(20.0);
@@ -215,7 +216,8 @@ TEST_F(ScreenRenderTest, RoomDetailShowsTheSensorsOfEachRoom) {
 
     const auto visible = [&](const char* text) { return test::countText(root, text, true); };
     EXPECT_EQ(visible("68°F"), 1);
-    EXPECT_EQ(visible("Clear"), 1);
+    EXPECT_EQ(visible("68.0°F"), 1) << "the sensor's own row";
+    EXPECT_EQ(visible("Clear"), 2) << "the panel and the sensor's own row";
     EXPECT_EQ(visible("Humidity"), 0);
 
     screen->setRoom("detail-b", "Attic");
@@ -227,7 +229,7 @@ TEST_F(ScreenRenderTest, RoomDetailShowsTheSensorsOfEachRoom) {
     screen->setRoom("detail-a", "Hall");
     screen->onShow();
     test::render();
-    EXPECT_EQ(visible("Clear"), 1) << "the section has to come back for the next room";
+    EXPECT_EQ(visible("Clear"), 2) << "the section has to come back for the next room";
 
     screen->setRoom("empty-room", "Empty");
     screen->onShow();
