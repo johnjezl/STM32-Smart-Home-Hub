@@ -719,3 +719,119 @@ TEST_F(DeviceManagerTest, OneBadRowDoesNotLoseTheOthers) {
     EXPECT_NE(manager.getDevice("b_good"), nullptr);
     manager.shutdown();
 }
+
+// ---------- State, history and rooms surviving saves
+
+TEST_F(DeviceManagerTest, FlushedStateSurvivesAnUncleanStop) {
+    auto* manager = new DeviceManager(eventBus, *database);
+    ASSERT_TRUE(manager->initialize());
+    ASSERT_TRUE(manager->addDevice(std::make_shared<SwitchDevice>("lamp", "Lamp")));
+    ASSERT_TRUE(manager->setDeviceState("lamp", "on", true));
+    ASSERT_TRUE(manager->flushStateChanges());
+
+    // Read it back without any shutdown saving, as after a power cut
+    DeviceManager restarted(eventBus, *database);
+    ASSERT_TRUE(restarted.initialize());
+    EXPECT_EQ(restarted.getDevice("lamp")->getProperty("on"), true);
+    restarted.shutdown();
+
+    manager->shutdown();
+    delete manager;
+}
+
+TEST_F(DeviceManagerTest, UnflushedStateWaitsForTheNextWrite) {
+    DeviceManager manager(eventBus, *database);
+    ASSERT_TRUE(manager.initialize());
+    ASSERT_TRUE(manager.addDevice(std::make_shared<SwitchDevice>("lamp", "Lamp")));
+
+    const auto savedOn = [&] {
+        auto stmt = database->prepare(
+            "SELECT value FROM device_state WHERE device_id = 'lamp' AND property = 'on'");
+        stmt->step();
+        return stmt->getString(0);
+    };
+    ASSERT_TRUE(manager.setDeviceState("lamp", "on", true));
+    EXPECT_EQ(savedOn(), "false");
+    ASSERT_TRUE(manager.flushStateChanges());
+    EXPECT_EQ(savedOn(), "true");
+    manager.shutdown();
+}
+
+TEST_F(DeviceManagerTest, FlushingAfterARemovalKeepsTheOtherDevices) {
+    DeviceManager manager(eventBus, *database);
+    ASSERT_TRUE(manager.initialize());
+    ASSERT_TRUE(manager.addDevice(std::make_shared<SwitchDevice>("gone", "Gone")));
+    ASSERT_TRUE(manager.addDevice(std::make_shared<SwitchDevice>("kept", "Kept")));
+    ASSERT_TRUE(manager.setDeviceState("gone", "on", true));
+    ASSERT_TRUE(manager.setDeviceState("kept", "on", true));
+    ASSERT_TRUE(manager.removeDevice("gone"));
+
+    EXPECT_TRUE(manager.flushStateChanges());
+
+    auto stmt = database->prepare(
+        "SELECT value FROM device_state WHERE device_id = 'kept' AND property = 'on'");
+    ASSERT_TRUE(stmt->step());
+    EXPECT_EQ(stmt->getString(0), "true");
+    manager.shutdown();
+}
+
+TEST_F(DeviceManagerTest, SavingADeviceKeepsItsHistoryAndCreationTime) {
+    DeviceManager manager(eventBus, *database);
+    ASSERT_TRUE(manager.initialize());
+    auto device = std::make_shared<SwitchDevice>("lamp", "Lamp");
+    ASSERT_TRUE(manager.addDevice(device));
+    ASSERT_TRUE(database->execute(
+        "INSERT INTO sensor_history (device_id, property, value, timestamp) "
+        "VALUES ('lamp', 'power', 5, 1000)"));
+    ASSERT_TRUE(database->execute("UPDATE devices SET created_at = 1234 WHERE id = 'lamp'"));
+
+    device->setName("Renamed");
+    ASSERT_TRUE(manager.saveDevice(device));
+    ASSERT_TRUE(manager.saveAllDevices());
+
+    auto history = database->prepare("SELECT COUNT(*) FROM sensor_history WHERE device_id = 'lamp'");
+    ASSERT_TRUE(history->step());
+    EXPECT_EQ(history->getInt(0), 1);
+
+    auto row = database->prepare("SELECT name, created_at FROM devices WHERE id = 'lamp'");
+    ASSERT_TRUE(row->step());
+    EXPECT_EQ(row->getString(0), "Renamed");
+    EXPECT_EQ(row->getInt(1), 1234);
+    manager.shutdown();
+}
+
+TEST_F(DeviceManagerTest, DeletingARoomSticksThroughASave) {
+    {
+        DeviceManager manager(eventBus, *database);
+        ASSERT_TRUE(manager.initialize());
+        ASSERT_TRUE(manager.addRoom("kitchen_test", "Kitchen Test"));
+        auto device = std::make_shared<SwitchDevice>("lamp", "Lamp");
+        device->setRoom("kitchen_test");
+        ASSERT_TRUE(manager.addDevice(device));
+
+        ASSERT_TRUE(manager.deleteRoom("kitchen_test"));
+        EXPECT_EQ(manager.getDevice("lamp")->room(), "");
+        ASSERT_TRUE(manager.saveAllDevices());
+        manager.shutdown();
+    }
+
+    DeviceManager manager(eventBus, *database);
+    ASSERT_TRUE(manager.initialize());
+    EXPECT_EQ(manager.getDevice("lamp")->room(), "");
+    manager.shutdown();
+}
+
+TEST_F(DeviceManagerTest, RoomChangesReportFailures) {
+    DeviceManager manager(eventBus, *database);
+    ASSERT_TRUE(manager.initialize());
+
+    ASSERT_TRUE(manager.addRoom("den_test", "Den"));
+    EXPECT_FALSE(manager.addRoom("den_test", "Den again"));
+
+    EXPECT_TRUE(manager.updateRoom("den_test", "Study"));
+    EXPECT_FALSE(manager.updateRoom("no_such_room", "Nothing"));
+
+    EXPECT_TRUE(manager.deleteRoom("den_test"));
+    EXPECT_FALSE(manager.deleteRoom("den_test"));
+    manager.shutdown();
+}

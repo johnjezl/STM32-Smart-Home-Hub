@@ -332,6 +332,8 @@ if(GTEST_AVAILABLE)
     endif()
 
     add_test(NAME AllTests COMMAND smarthub_tests)
+    # These all listen on ports from the same range, so running them together can collide
+    set_tests_properties(AllTests WebServer WebAuth WebAPI PROPERTIES RESOURCE_LOCK web_ports)
 
     # ==== Code Coverage ====
 
