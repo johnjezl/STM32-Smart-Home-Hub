@@ -1463,6 +1463,12 @@ void WebServer::apiUpdateAutomation(struct mg_connection* c, const std::string& 
         if (!data.contains("enabled")) {
             automation.enabled = existing->enabled;
         }
+        if (!data.contains("description")) {
+            automation.description = existing->description;
+        }
+        if (!data.contains("condition")) {
+            automation.condition = existing->condition;
+        }
         automation.lastTriggeredAt = existing->lastTriggeredAt;
 
         if (m_automationMgr->updateAutomation(automation)) {
@@ -1528,7 +1534,9 @@ void WebServer::sendJsonWithHeaders(struct mg_connection* c, int status,
 }
 
 void WebServer::sendError(struct mg_connection* c, int status, const std::string& message) {
-    std::string json = "{\"error\":\"" + message + "\"}";
+    // Messages can quote what the client sent, which might not even be valid UTF-8
+    const std::string json = nlohmann::json{{"error", message}}.dump(
+        -1, ' ', false, nlohmann::json::error_handler_t::replace);
     sendJson(c, status, json);
 }
 

@@ -751,6 +751,26 @@ TEST_F(WebAuthTest, AutomationsThatCouldNeverRunAreRejected) {
         {{"name", "Long delay"},
          {"trigger", {{"type", "time"}, {"hour", 8}, {"minute", 0}}},
          {"actions", {{{"type", "delay"}, {"delayMs", 60001}}}}},
+        {{"name", "Delays add up"},
+         {"trigger", {{"type", "time"}, {"hour", 8}, {"minute", 0}}},
+         {"actions", {{{"type", "delay"}, {"delayMs", 40000}},
+                      {{"type", "delay"}, {"delayMs", 40000}}}}},
+        {{"name", "Huge interval"},
+         {"trigger", {{"type", "time_interval"}, {"interval_minutes", 525601}}},
+         {"actions", {action}}},
+        {{"name", "Both trigger forms"},
+         {"trigger", {{"type", "time"}, {"hour", 8}, {"minute", 0}}},
+         {"triggers", nlohmann::json::array()},
+         {"actions", {action}}},
+        {{"name", "Flat condition"},
+         {"trigger", {{"type", "time"}, {"hour", 8}, {"minute", 0}}},
+         {"condition", {{"device_id", "x"}, {"property", "on"}, {"value", true}}},
+         {"actions", {action}}},
+        {{"name", "Bad condition op"},
+         {"trigger", {{"type", "time"}, {"hour", 8}, {"minute", 0}}},
+         {"condition", {{"leaf", {{"device_id", "x"}, {"property", "on"}, {"op", ">"},
+                                  {"value", true}}}}},
+         {"actions", {action}}},
     };
     for (const auto& body : rejected) {
         RequestOptions options = admin;
@@ -758,6 +778,22 @@ TEST_F(WebAuthTest, AutomationsThatCouldNeverRunAreRejected) {
         EXPECT_EQ(request("POST", "/api/automations", options).status, 400) << body.dump();
     }
     EXPECT_EQ(request("GET", "/api/automations", admin).json().size(), 0u);
+
+    // A problem echoing what the client sent is still valid JSON
+    RequestOptions quoted = admin;
+    quoted.body = nlohmann::json{{"name", "Quote"},
+                                 {"trigger", {{"type", "a\"b"}}},
+                                 {"actions", {action}}}.dump();
+    const Response response = request("POST", "/api/automations", quoted);
+    EXPECT_EQ(response.status, 400);
+    EXPECT_NE(response.json()["error"].get<std::string>().find("a\"b"), std::string::npos);
+
+    // -1 is how a time trigger says any hour
+    RequestOptions wildcard = admin;
+    wildcard.body = nlohmann::json{{"name", "Hourly"},
+                                   {"trigger", {{"type", "time"}, {"hour", -1}, {"minute", 0}}},
+                                   {"actions", {action}}}.dump();
+    EXPECT_EQ(request("POST", "/api/automations", wildcard).status, 201);
 }
 
 TEST_F(WebAuthTest, UpdatingAnAutomationKeepsWhatTheRequestLeavesOut) {
@@ -767,7 +803,10 @@ TEST_F(WebAuthTest, UpdatingAnAutomationKeepsWhatTheRequestLeavesOut) {
 
     const nlohmann::json body = {
         {"name", "Morning"},
+        {"description", "Lights"},
         {"enabled", false},
+        {"condition", {{"leaf", {{"device_id", "x"}, {"property", "on"}, {"op", "eq"},
+                                 {"value", true}}}}},
         {"trigger", {{"type", "time"}, {"hour", 8}, {"minute", 0}}},
         {"actions", {{{"deviceId", "light"}, {"property", "on"}, {"value", true}}}},
     };
@@ -779,6 +818,8 @@ TEST_F(WebAuthTest, UpdatingAnAutomationKeepsWhatTheRequestLeavesOut) {
 
     nlohmann::json update = body;
     update.erase("enabled");
+    update.erase("description");
+    update.erase("condition");
     update["trigger"]["hour"] = 9;
     RequestOptions put = admin;
     put.body = update.dump();
@@ -786,6 +827,8 @@ TEST_F(WebAuthTest, UpdatingAnAutomationKeepsWhatTheRequestLeavesOut) {
 
     const nlohmann::json updated = request("GET", path, admin).json();
     EXPECT_EQ(updated["enabled"], false);
+    EXPECT_EQ(updated["description"], "Lights");
+    EXPECT_TRUE(updated.contains("condition"));
     EXPECT_EQ(updated["trigger"]["hour"], 9);
 
     update.erase("name");

@@ -628,7 +628,7 @@ class SmartHubApp {
             card.innerHTML = `
                 <div class="automation-info">
                     <div class="automation-name">${automation.name}</div>
-                    <div class="automation-trigger">${this.formatTriggerSummary(automation.trigger)}</div>
+                    <div class="automation-trigger">${this.formatTriggerSummary(automation.trigger || automation.triggers?.[0])}</div>
                 </div>
                 <div class="automation-controls">
                     <button class="automation-edit-btn admin-only" data-automation-id="${automation.id}" title="Edit">✏️</button>

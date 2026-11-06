@@ -11,6 +11,8 @@
 #include "smarthub/devices/Device.hpp"
 #include "smarthub/core/Logger.hpp"
 
+#include <cmath>
+
 namespace smarthub {
 namespace ui {
 
@@ -678,9 +680,16 @@ void AddAutomationScreen::onCreateAutomation() {
                     case 4: trigger.compareOp = CompareOp::Equal; break;
                 }
 
+                const std::string text = lv_textarea_get_text(m_triggerThresholdInput);
+                bool valid = false;
                 try {
-                    trigger.threshold = std::stod(lv_textarea_get_text(m_triggerThresholdInput));
+                    size_t used = 0;
+                    trigger.threshold = std::stod(text, &used);
+                    valid = used == text.size() && std::isfinite(trigger.threshold);
                 } catch (const std::exception&) {
+                    valid = false;
+                }
+                if (!valid) {
                     LOG_WARN("Automation threshold isn't a number");
                     lv_msgbox_create(nullptr, "Can't create automation",
                                      "The value must be a number.", nullptr, true);

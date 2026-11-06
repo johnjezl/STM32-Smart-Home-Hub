@@ -381,7 +381,7 @@ TEST(AutomationTest, JsonRoundTripKeepsEveryPart) {
     automation.actions.push_back(delay);
 
     const nlohmann::json json = automation.toJson();
-    EXPECT_EQ(json["trigger"]["device_id"], "a");  // Clients read the first from here
+    EXPECT_FALSE(json.contains("trigger"));
 
     const Automation copy = Automation::fromJson(json);
     ASSERT_EQ(copy.triggers.size(), 2u);
