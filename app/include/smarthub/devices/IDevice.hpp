@@ -162,6 +162,35 @@ inline std::string deviceTypeToString(DeviceType type) {
 }
 
 /**
+ * A name for showing a DeviceType to someone
+ */
+inline std::string deviceTypeLabel(DeviceType type) {
+    switch (type) {
+        case DeviceType::Switch:            return "Switch";
+        case DeviceType::Light:             return "Light";
+        case DeviceType::Dimmer:            return "Dimmer";
+        case DeviceType::ColorLight:        return "Color Light";
+        case DeviceType::Outlet:            return "Outlet";
+        case DeviceType::Thermostat:        return "Thermostat";
+        case DeviceType::TemperatureSensor: return "Temperature";
+        case DeviceType::HumiditySensor:    return "Humidity";
+        case DeviceType::MultiSensor:       return "Multi Sensor";
+        case DeviceType::MotionSensor:      return "Motion";
+        case DeviceType::ContactSensor:     return "Contact";
+        case DeviceType::PowerMeter:        return "Power Meter";
+        case DeviceType::SmokeSensor:       return "Smoke";
+        case DeviceType::WaterSensor:       return "Water Leak";
+        case DeviceType::Fan:               return "Fan";
+        case DeviceType::Blinds:            return "Blinds";
+        case DeviceType::Lock:              return "Lock";
+        case DeviceType::Doorbell:          return "Doorbell";
+        case DeviceType::Camera:            return "Camera";
+        case DeviceType::Speaker:           return "Speaker";
+        default:                            return "Device";
+    }
+}
+
+/**
  * Convert string to DeviceType
  */
 inline DeviceType stringToDeviceType(const std::string& str) {

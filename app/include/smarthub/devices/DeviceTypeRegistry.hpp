@@ -60,7 +60,7 @@ public:
                      const std::string& name,
                      const std::string& protocol = "local",
                      const std::string& protocolAddress = "",
-                     const nlohmann::json& config = {});
+                     const nlohmann::json& config = nlohmann::json::object());
 
     /**
      * Create a device by type name string
@@ -70,7 +70,7 @@ public:
                                  const std::string& name,
                                  const std::string& protocol = "local",
                                  const std::string& protocolAddress = "",
-                                 const nlohmann::json& config = {});
+                                 const nlohmann::json& config = nlohmann::json::object());
 
     /**
      * Get type name from enum

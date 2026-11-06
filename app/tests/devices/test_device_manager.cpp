@@ -635,3 +635,85 @@ TEST_F(DeviceManagerTest, ReplacingASensorsConfigKeepsItsOptions) {
     EXPECT_EQ(config.value("has_humidity", false), true);
     EXPECT_EQ(config.value("has_battery", true), false);
 }
+
+TEST_F(DeviceManagerTest, SensorsCanBeCreatedWithTheDefaultConfig) {
+    auto& registry = DeviceTypeRegistry::instance();
+    for (const char* type : {"temperature_sensor", "motion_sensor", "multi_sensor"}) {
+        SCOPED_TRACE(type);
+        EXPECT_NE(registry.create(smarthub::stringToDeviceType(type), "a", "A"), nullptr);
+        EXPECT_NE(registry.createFromTypeName(type, "b", "B"), nullptr);
+        EXPECT_NE(registry.createFromTypeName(type, "c", "C", "local", "", nullptr), nullptr);
+    }
+}
+
+TEST_F(DeviceManagerTest, DevicesAlwaysHaveAConfigObject) {
+    SwitchDevice device("s", "Switch");
+    EXPECT_EQ(device.getConfig().value("manufacturer", "none"), "none");
+}
+
+namespace {
+
+void addRow(Database& database, const std::string& id, const std::string& type,
+            const std::string& config, const std::vector<std::string>& properties) {
+    auto device = database.prepare(
+        "INSERT INTO devices (id, name, type, protocol, protocol_address, room, config) "
+        "VALUES (?, ?, ?, 'local', '', '', ?)");
+    device->bind(1, id);
+    device->bind(2, id);
+    device->bind(3, type);
+    device->bind(4, config);
+    device->execute();
+    for (const std::string& property : properties) {
+        auto state = database.prepare(
+            "INSERT INTO device_state (device_id, property, value, updated_at) VALUES (?, ?, '1', 0)");
+        state->bind(1, id);
+        state->bind(2, property);
+        state->execute();
+    }
+}
+
+}  // namespace
+
+TEST_F(DeviceManagerTest, UnrecognizedTypeAndConfigSurviveASave) {
+    addRow(*database, "future", "door_sensor", R"({"x":1})", {});
+    {
+        DeviceManager manager(eventBus, *database);
+        ASSERT_TRUE(manager.initialize());
+        EXPECT_EQ(manager.getDevice("future")->type(), DeviceType::Unknown);
+        ASSERT_TRUE(manager.saveAllDevices());
+        manager.shutdown();
+    }
+
+    auto stmt = database->prepare("SELECT type, config FROM devices WHERE id = 'future'");
+    ASSERT_TRUE(stmt->step());
+    EXPECT_EQ(stmt->getString(0), "door_sensor");
+    EXPECT_EQ(nlohmann::json::parse(stmt->getString(1)).value("x", 0), 1);
+}
+
+TEST_F(DeviceManagerTest, OlderRowsGetTheirSensorOptionsFromSavedState) {
+    addRow(*database, "old_climate", "multi_sensor", "{}", {"temperature", "humidity", "battery"});
+    addRow(*database, "old_temp", "temperature_sensor", "{}", {"temperature"});
+    addRow(*database, "old_motion", "multi_sensor", "{}", {"motion", "illuminance"});
+
+    DeviceManager manager(eventBus, *database);
+    ASSERT_TRUE(manager.initialize());
+
+    EXPECT_EQ(manager.getDevice("old_climate")->type(), DeviceType::MultiSensor);
+    EXPECT_TRUE(manager.getDevice("old_climate")->hasCapability(DeviceCapability::Battery));
+    EXPECT_FALSE(manager.getDevice("old_temp")->hasCapability(DeviceCapability::Humidity));
+    EXPECT_EQ(manager.getDevice("old_motion")->type(), DeviceType::MotionSensor);
+    EXPECT_TRUE(manager.getDevice("old_motion")->hasCapability(DeviceCapability::Illuminance));
+    manager.shutdown();
+}
+
+TEST_F(DeviceManagerTest, OneBadRowDoesNotLoseTheOthers) {
+    addRow(*database, "a_bad", "temperature_sensor", R"({"has_humidity":"yes","has_battery":false})", {});
+    addRow(*database, "b_good", "switch", "{}", {});
+
+    DeviceManager manager(eventBus, *database);
+    ASSERT_TRUE(manager.initialize());
+
+    EXPECT_EQ(manager.getDevice("a_bad"), nullptr);
+    EXPECT_NE(manager.getDevice("b_good"), nullptr);
+    manager.shutdown();
+}

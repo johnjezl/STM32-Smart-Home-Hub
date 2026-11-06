@@ -218,6 +218,7 @@ public:
      * Load all devices from database
      */
     void loadDevicesFromDatabase();
+    void restoreSensorOptions(const std::string& id, std::string& typeName, nlohmann::json& config);
 
 private:
     void onDeviceDiscovered(DevicePtr device);

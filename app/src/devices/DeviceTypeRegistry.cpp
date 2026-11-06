@@ -148,10 +148,12 @@ DevicePtr DeviceTypeRegistry::create(DeviceType type,
         return std::make_shared<Device>(id, name, type, protocol, protocolAddress);
     }
 
-    DevicePtr device = it->second.creator(id, name, protocol, protocolAddress, config);
+    // Creators read options from this, and a caller might have only a null value
+    const nlohmann::json options = config.is_object() ? config : nlohmann::json::object();
+    DevicePtr device = it->second.creator(id, name, protocol, protocolAddress, options);
     // Creators only read what they need, and the rest of the config has to survive too
-    if (device && config.is_object() && !config.empty()) {
-        device->setConfig(config);
+    if (device) {
+        device->setConfig(options);
     }
     return device;
 }
@@ -166,7 +168,13 @@ DevicePtr DeviceTypeRegistry::createFromTypeName(const std::string& typeName,
     if (it == m_nameToType.end()) {
         // Fall back to generic device
         LOG_WARN("Device %s has unknown type '%s'", id.c_str(), typeName.c_str());
-        return std::make_shared<Device>(id, name, DeviceType::Unknown, protocol, protocolAddress);
+        auto device = std::make_shared<Device>(id, name, DeviceType::Unknown, protocol, protocolAddress);
+        // A newer build's type mustn't be lost by saving it from this one
+        device->setUnrecognizedType(typeName);
+        if (config.is_object()) {
+            device->setConfig(config);
+        }
+        return device;
     }
     return create(it->second, id, name, protocol, protocolAddress, config);
 }
