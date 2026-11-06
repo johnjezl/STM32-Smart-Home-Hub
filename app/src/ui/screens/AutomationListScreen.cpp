@@ -137,7 +137,7 @@ void AutomationListScreen::refreshAutomationList() {
     for (const auto& automation : automations) {
         if (!automation) continue;
 
-        std::string triggerSummary = getTriggerSummary(automation->id);
+        std::string triggerSummary = getTriggerSummary(*automation);
 
         lv_obj_t* row = createAutomationRow(
             m_automationList,
@@ -319,13 +319,12 @@ void AutomationListScreen::onBackClicked() {
     m_screenManager.goBack();
 }
 
-std::string AutomationListScreen::getTriggerSummary(const std::string& automationId) {
-    auto automation = m_automationManager.getAutomation(automationId);
-    if (!automation || automation->triggers.empty()) {
+std::string AutomationListScreen::getTriggerSummary(const Automation& automation) {
+    if (automation.triggers.empty()) {
         return "No triggers";
     }
 
-    const auto& trigger = automation->triggers[0];
+    const auto& trigger = automation.triggers[0];
 
     switch (trigger.type) {
         case TriggerType::DeviceState:
