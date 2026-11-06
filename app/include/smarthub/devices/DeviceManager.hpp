@@ -22,15 +22,15 @@ class EventBus;
 class Database;
 class Device;
 
-/**
- * Device manager - central registry for all devices and protocols
- */
 /** One recorded sensor reading */
 struct SensorSample {
     int64_t timestamp;  // Unix seconds
     double value;
 };
 
+/**
+ * Device manager - central registry for all devices and protocols
+ */
 class DeviceManager {
 public:
     DeviceManager(EventBus& eventBus, Database& database);
@@ -222,13 +222,19 @@ public:
 
     /**
      * Recorded readings of a property, oldest first, averaged into at most maxPoints time slots.
-     * Readings from the last kStateSaveIntervalSeconds may not be included yet.
+     * Readings from the last kHistorySaveIntervalSeconds may not be included yet.
      */
     std::vector<SensorSample> sensorHistory(const std::string& deviceId, const std::string& property,
                                             int64_t fromTimestamp, int maxPoints) const;
-    // To limit wear on the SD card: at most one reading a minute per sensor, kept for a week,
-    // which is the longest the chart shows
+    /**
+     * Write sensor readings that haven't been saved yet, every kHistorySaveIntervalSeconds.
+     */
+    bool flushSensorSamples();
+
+    // To limit wear on the SD card: at most one reading a minute per sensor, saved together every
+    // few minutes, and kept for a week, which is the longest the chart shows
     static constexpr int64_t kHistorySampleIntervalSeconds = 60;
+    static constexpr int kHistorySaveIntervalSeconds = 300;
     static constexpr int64_t kHistoryRetentionSeconds = 7 * 24 * 3600;
 
     /**
@@ -297,7 +303,6 @@ private:
 
     void recordSensorSample(const std::string& deviceId, const std::string& property,
                             const nlohmann::json& value);
-    bool flushSensorSamples();
     std::thread m_stateWriter;
     std::condition_variable m_stateWriterWake;
     bool m_stateWriterStopping = false;

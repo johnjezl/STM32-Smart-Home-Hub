@@ -859,6 +859,20 @@ TEST_F(ZigbeeHandlerFlowTest, PairingADeviceWhenTheHubKeepsItDoesNotChangeItsId)
     EXPECT_EQ(discoveredCount(), 0u);
 }
 
+TEST_F(ZigbeeHandlerFlowTest, SensorsNoReadingValuesAreNotReported) {
+    ASSERT_NE(pair(CLIMATE), nullptr);
+
+    fake.reportAttribute(CLIMATE.nwkAddr, 1, zcl::cluster::TEMPERATURE_MEASUREMENT,
+                         zcl::attr::temperature::MEASURED_VALUE, zcl::datatype::INT16, {0x00, 0x80});
+    fake.reportAttribute(CLIMATE.nwkAddr, 1, zcl::cluster::RELATIVE_HUMIDITY,
+                         zcl::attr::humidity::MEASURED_VALUE, zcl::datatype::UINT16, {0xFF, 0xFF});
+    fake.reportAttribute(CLIMATE.nwkAddr, 1, zcl::cluster::TEMPERATURE_MEASUREMENT,
+                         zcl::attr::temperature::MEASURED_VALUE, zcl::datatype::INT16, {0x34, 0x08});
+
+    EXPECT_DOUBLE_EQ(waitForState(idOf(CLIMATE), "temperature").get<double>(), 21.0);
+    EXPECT_FALSE(stateOf(idOf(CLIMATE), "humidity").has_value());
+}
+
 TEST_F(ZigbeeHandlerFlowTest, UnknownDeviceGetsNoReporting) {
     auto device = pair(BASIC_ONLY);
     ASSERT_NE(device, nullptr);

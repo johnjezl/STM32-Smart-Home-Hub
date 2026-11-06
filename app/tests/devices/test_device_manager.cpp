@@ -1068,7 +1068,7 @@ protected:
 
 TEST_F(SensorHistoryTest, ReportIsRecorded) {
     protocol->simulateStateChange("t", "temperature", 21.5);
-    ASSERT_TRUE(manager->flushStateChanges());
+    ASSERT_TRUE(manager->flushSensorSamples());
 
     auto samples = history();
     ASSERT_EQ(samples.size(), 1u);
@@ -1080,14 +1080,14 @@ TEST_F(SensorHistoryTest, FrequentReportsAreLimitedForTheSdCard) {
     for (int i = 0; i < 10; i++) {
         protocol->simulateStateChange("t", "temperature", 20.0 + i);
     }
-    ASSERT_TRUE(manager->flushStateChanges());
+    ASSERT_TRUE(manager->flushSensorSamples());
     EXPECT_EQ(rowCount(), 1);
 }
 
 TEST_F(SensorHistoryTest, EachPropertyHasItsOwnLimit) {
     protocol->simulateStateChange("t", "temperature", 20.0);
     protocol->simulateStateChange("t", "humidity", 50.0);
-    ASSERT_TRUE(manager->flushStateChanges());
+    ASSERT_TRUE(manager->flushSensorSamples());
     EXPECT_EQ(history("temperature").size(), 1u);
     EXPECT_EQ(history("humidity").size(), 1u);
 }
@@ -1095,13 +1095,16 @@ TEST_F(SensorHistoryTest, EachPropertyHasItsOwnLimit) {
 TEST_F(SensorHistoryTest, OtherStateIsNotRecorded) {
     protocol->simulateStateChange("t", "networkAddress", 4660);
     protocol->simulateStateChange("t", "battery", 90);
+    protocol->simulateStateChange("t", "illuminance", 300);
     protocol->simulateStateChange("t", "temperature", "hot");
-    ASSERT_TRUE(manager->flushStateChanges());
+    protocol->simulateStateChange("t", "temperature", -327.68);  // A sensor's "no reading" value
+    protocol->simulateStateChange("t", "humidity", 655.35);
+    ASSERT_TRUE(manager->flushSensorSamples());
     EXPECT_EQ(rowCount(), 0);
 }
 
 TEST_F(SensorHistoryTest, FlushWithNothingNewWritesNothing) {
-    ASSERT_TRUE(manager->flushStateChanges());
+    ASSERT_TRUE(manager->flushSensorSamples());
     EXPECT_EQ(rowCount(), 0);
 }
 
@@ -1111,7 +1114,7 @@ TEST_F(SensorHistoryTest, ReadingFromARemovedDeviceDoesNotLoseOthers) {
     protocol->simulateStateChange("u", "temperature", 22.0);
     ASSERT_TRUE(manager->removeDevice("u"));
 
-    ASSERT_TRUE(manager->flushStateChanges());
+    ASSERT_TRUE(manager->flushSensorSamples());
 
     EXPECT_EQ(rowCount(), 1);
     EXPECT_EQ(history().size(), 1u);
@@ -1119,7 +1122,7 @@ TEST_F(SensorHistoryTest, ReadingFromARemovedDeviceDoesNotLoseOthers) {
 
 TEST_F(SensorHistoryTest, RemovingADeviceRemovesItsHistory) {
     protocol->simulateStateChange("t", "temperature", 21.0);
-    ASSERT_TRUE(manager->flushStateChanges());
+    ASSERT_TRUE(manager->flushSensorSamples());
     ASSERT_EQ(rowCount(), 1);
 
     ASSERT_TRUE(manager->removeDevice("t"));
@@ -1132,7 +1135,7 @@ TEST_F(SensorHistoryTest, OldReadingsArePruned) {
     insertRow(now - DeviceManager::kHistoryRetentionSeconds - 100, 1.0);
     insertRow(now - DeviceManager::kHistoryRetentionSeconds + 100, 2.0);
 
-    ASSERT_TRUE(manager->flushStateChanges());
+    ASSERT_TRUE(manager->flushSensorSamples());
 
     EXPECT_EQ(rowCount(), 1);
 }
@@ -1148,6 +1151,17 @@ TEST_F(SensorHistoryTest, QueryIsOldestFirstAndWithinTheRange) {
     ASSERT_EQ(samples.size(), 2u);
     EXPECT_DOUBLE_EQ(samples[0].value, 2.0);
     EXPECT_DOUBLE_EQ(samples[1].value, 3.0);
+}
+
+TEST_F(SensorHistoryTest, QueryLeavesOutRowsDatedInTheFuture) {
+    insertRow(std::time(nullptr) + 3600, 1.0);  // The clock was ahead when this was recorded
+    EXPECT_TRUE(history().empty());
+}
+
+TEST_F(SensorHistoryTest, SavingStateDoesNotSaveReadings) {
+    protocol->simulateStateChange("t", "temperature", 21.5);
+    ASSERT_TRUE(manager->flushStateChanges());
+    EXPECT_EQ(rowCount(), 0) << "they're saved together less often, to limit SD card writes";
 }
 
 TEST_F(SensorHistoryTest, QueryAveragesIntoTheNumberOfPointsAskedFor) {

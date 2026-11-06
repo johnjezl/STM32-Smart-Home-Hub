@@ -451,11 +451,12 @@ Delete a device.
 
 Get a sensor's recorded readings, oldest first, averaged into at most 240 time slots.
 
-Readings are recorded at most once a minute per sensor and kept for 7 days. The newest 30 seconds may not be included yet. Temperature is in Celsius, as sensors report it.
+Readings are recorded at most once a minute per sensor and kept for 7 days. The newest 5 minutes may not be included yet. Temperature is in Celsius, as sensors report it.
 
 **Parameters:**
 - `id` (path) - Device identifier
 - `hours` (query) - Number of hours of history, 1 to 168 (default: 24)
+- `property` (query) - `temperature` or `humidity` (default: the device's main reading)
 
 **Response (200 OK):**
 ```json
@@ -471,7 +472,7 @@ Readings are recorded at most once a minute per sensor and kept for 7 days. The 
 
 `property` is empty and `data` has nothing for a device without a recorded reading, like a motion sensor.
 
-**Errors:** 400 for an invalid `hours`, 404 for an unknown device.
+**Errors:** 400 for an invalid `hours` or `property`, 404 for an unknown device.
 
 ---
 

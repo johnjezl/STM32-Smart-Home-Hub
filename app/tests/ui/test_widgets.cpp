@@ -152,6 +152,50 @@ TEST(ChartSlot, PlacesPointsByTime) {
     EXPECT_EQ(chartSlot(now + 1, now, 3600, 60), -1) << "the clock moved";
 }
 
+TEST(ChartValues, JoinsReadingsThatAreCloseTogether) {
+    const uint64_t now = 1000000;
+    // A reading every 5 minutes on the one-hour view, whose points are about a minute apart
+    std::vector<DataPoint> data;
+    for (int i = 12; i >= 0; i--) {
+        data.push_back({now - i * 300, 70.0f});
+    }
+
+    const auto values = chartValues(data, now, 3600, 60);
+
+    for (const auto& value : values) {
+        ASSERT_TRUE(value.has_value());
+        EXPECT_FLOAT_EQ(*value, 70.0f);
+    }
+}
+
+TEST(ChartValues, InterpolatesBetweenReadings) {
+    const uint64_t now = 1000000;
+    const auto values = chartValues({{now - 1200, 60.0f}, {now, 80.0f}}, now, 3540, 60);
+    EXPECT_FLOAT_EQ(*values[39], 60.0f);
+    EXPECT_FLOAT_EQ(*values[49], 70.0f);
+    EXPECT_FLOAT_EQ(*values[59], 80.0f);
+    EXPECT_FALSE(values[38].has_value());
+}
+
+TEST(ChartValues, LongSilenceStaysAGap) {
+    const uint64_t now = 1000000;
+    const uint64_t day = 86400;
+    const auto values = chartValues({{now - day + 100, 70.0f}, {now - 3600, 72.0f}}, now, day, 60);
+    int drawn = 0;
+    for (const auto& value : values) {
+        drawn += value.has_value() ? 1 : 0;
+    }
+    EXPECT_EQ(drawn, 2);
+}
+
+TEST(ChartValues, ReadingsOutOfRangeAreLeftOut) {
+    const uint64_t now = 1000000;
+    const auto values = chartValues({{now - 7200, 1.0f}, {now + 50, 2.0f}}, now, 3600, 60);
+    for (const auto& value : values) {
+        EXPECT_FALSE(value.has_value());
+    }
+}
+
 TEST(RoomDataTest, DefaultValues) {
     // Test RoomData default construction
     RoomData data;

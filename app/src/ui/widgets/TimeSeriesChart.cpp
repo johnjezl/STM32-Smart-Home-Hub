@@ -10,6 +10,30 @@
 namespace smarthub {
 namespace ui {
 
+std::vector<std::optional<float>> chartValues(const std::vector<DataPoint>& data, uint64_t now,
+                                              uint64_t rangeSeconds, int points) {
+    std::vector<std::optional<float>> values(static_cast<size_t>(points));
+    int previousSlot = -1;
+    const DataPoint* previous = nullptr;
+    for (const DataPoint& point : data) {
+        const int slot = chartSlot(point.timestamp, now, rangeSeconds, points);
+        if (slot < 0) {
+            continue;
+        }
+        values[static_cast<size_t>(slot)] = point.value;
+        if (previous && slot > previousSlot + 1 &&
+            point.timestamp - previous->timestamp <= CHART_MAX_JOINED_GAP_SECONDS) {
+            for (int i = previousSlot + 1; i < slot; i++) {
+                const float t = static_cast<float>(i - previousSlot) / static_cast<float>(slot - previousSlot);
+                values[static_cast<size_t>(i)] = previous->value + (point.value - previous->value) * t;
+            }
+        }
+        previous = &point;
+        previousSlot = slot;
+    }
+    return values;
+}
+
 #ifdef SMARTHUB_ENABLE_LVGL
 
 TimeSeriesChart::TimeSeriesChart(lv_obj_t* parent, const ThemeManager& theme)
@@ -198,16 +222,11 @@ void TimeSeriesChart::updateChartData() {
         return;
     }
 
+    const auto values = chartValues(m_data, static_cast<uint64_t>(time(nullptr)),
+                                    timeRangeSeconds(m_timeRange), MAX_POINTS);
     for (int i = 0; i < MAX_POINTS; i++) {
-        lv_chart_set_value_by_id(m_chart, m_series, i, LV_CHART_POINT_NONE);
-    }
-    const uint64_t now = static_cast<uint64_t>(time(nullptr));
-    const uint64_t range = timeRangeSeconds(m_timeRange);
-    for (const DataPoint& point : m_data) {
-        const int slot = chartSlot(point.timestamp, now, range, MAX_POINTS);
-        if (slot >= 0) {
-            lv_chart_set_value_by_id(m_chart, m_series, slot, static_cast<lv_coord_t>(std::lround(point.value)));
-        }
+        lv_chart_set_value_by_id(m_chart, m_series, i,
+            values[i] ? static_cast<lv_coord_t>(std::lround(*values[i])) : LV_CHART_POINT_NONE);
     }
 
     lv_chart_refresh(m_chart);

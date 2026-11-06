@@ -1531,10 +1531,14 @@ TEST_F(WebAuthTest, SensorHistoryApiReturnsRecordedReadings) {
     EXPECT_DOUBLE_EQ(body["data"][0]["value"].get<double>(), 21.5);
 
     EXPECT_EQ(request("GET", "/api/devices/hist/history?hours=168", options).status, 200);
-    for (const char* bad : {"0", "169", "-1", "soon", "1x"}) {
+    for (const char* bad : {"0", "169", "-1", "soon", "1x", "", "99999999999999999999"}) {
         EXPECT_EQ(request("GET", std::string("/api/devices/hist/history?hours=") + bad,
                           options).status, 400) << bad;
     }
+
+    EXPECT_EQ(nlohmann::json::parse(
+        request("GET", "/api/devices/hist/history?property=humidity", options).body)["property"], "humidity");
+    EXPECT_EQ(request("GET", "/api/devices/hist/history?property=networkAddress", options).status, 400);
 
     EXPECT_EQ(request("GET", "/api/devices/nobody/history", options).status, 404);
     auto none = nlohmann::json::parse(

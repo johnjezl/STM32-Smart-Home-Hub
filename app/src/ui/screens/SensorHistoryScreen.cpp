@@ -118,8 +118,7 @@ void SensorHistoryScreen::createChart() {
     // Chart container
     m_content = lv_obj_create(m_container);
     constexpr int HEADER_HEIGHT = 60;
-    constexpr int SCREEN_HEIGHT = 480;
-    lv_obj_set_size(m_content, LV_PCT(100), SCREEN_HEIGHT - HEADER_HEIGHT);
+    lv_obj_set_size(m_content, LV_PCT(100), LV_VER_RES - HEADER_HEIGHT);
     lv_obj_align(m_content, LV_ALIGN_TOP_MID, 0, HEADER_HEIGHT);
     lv_obj_set_style_bg_opa(m_content, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(m_content, 0, 0);
