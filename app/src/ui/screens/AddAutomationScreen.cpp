@@ -12,6 +12,7 @@
 #include "smarthub/core/Logger.hpp"
 
 #include <cmath>
+#include <optional>
 
 namespace smarthub {
 namespace ui {
@@ -586,10 +587,8 @@ void AddAutomationScreen::updateNavigationButtons() {
 
 namespace {
 
-// A boolean, a whole finite number, or otherwise the text as typed
-nlohmann::json parseFormValue(const std::string& text) {
-    if (text == "true") return true;
-    if (text == "false") return false;
+// The text as a number, if all of it is one and it's finite
+std::optional<double> parseNumber(const std::string& text) {
     try {
         size_t used = 0;
         const double number = std::stod(text, &used);
@@ -597,6 +596,15 @@ nlohmann::json parseFormValue(const std::string& text) {
     } catch (const std::exception&) {
         // Not a number
     }
+    return std::nullopt;
+}
+
+// A boolean, a number, or otherwise the text as typed
+nlohmann::json parseFormValue(const std::string& text) {
+    if (text == "true") return true;
+    if (text == "false") return false;
+    const auto number = parseNumber(text);
+    if (number) return *number;
     return text;
 }
 
@@ -681,21 +689,14 @@ void AddAutomationScreen::onCreateAutomation() {
                     case 4: trigger.compareOp = CompareOp::Equal; break;
                 }
 
-                const std::string text = lv_textarea_get_text(m_triggerThresholdInput);
-                bool valid = false;
-                try {
-                    size_t used = 0;
-                    trigger.threshold = std::stod(text, &used);
-                    valid = used == text.size() && std::isfinite(trigger.threshold);
-                } catch (const std::exception&) {
-                    valid = false;
-                }
-                if (!valid) {
+                const auto threshold = parseNumber(lv_textarea_get_text(m_triggerThresholdInput));
+                if (!threshold) {
                     LOG_WARN("Automation threshold isn't a number");
                     lv_msgbox_create(nullptr, "Can't create automation",
                                      "The value must be a number.", nullptr, true);
                     return;
                 }
+                trigger.threshold = *threshold;
             }
             break;
     }

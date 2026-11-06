@@ -925,9 +925,21 @@ TEST_F(WebAuthTest, UpdatingAnAutomationKeepsWhatTheRequestLeavesOut) {
     EXPECT_TRUE(updated.contains("condition"));
     EXPECT_EQ(updated["trigger"]["hour"], 9);
 
+    // Sending back what GET returned works, even if an older id wouldn't be allowed now
+    update["id"] = "older.id";
+    put.body = update.dump();
+    EXPECT_EQ(request("PUT", path, put).status, 200);
+    update.erase("id");
+
     update.erase("name");
     put.body = update.dump();
     EXPECT_EQ(request("PUT", path, put).status, 400);
+
+    // Enabling needs to be asked for
+    RequestOptions enable = admin;
+    enable.body = "{}";
+    EXPECT_EQ(request("PUT", path + "/enable", enable).status, 400);
+    EXPECT_EQ(request("GET", path, admin).json()["enabled"], false);
 }
 
 TEST_F(WebAuthTest, OnlyControlPropertiesCanBeWritten) {

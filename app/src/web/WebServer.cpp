@@ -1421,6 +1421,8 @@ void WebServer::apiUpdateAutomation(struct mg_connection* c, const std::string& 
 
     try {
         auto data = nlohmann::json::parse(body);
+        data.erase("id");  // The URL names the automation
+
         // On the request itself first, because parsing it replaces unknown values with defaults
         std::string problem = Automation::validateJson(data);
         if (!problem.empty()) {
@@ -1483,7 +1485,11 @@ void WebServer::apiSetAutomationEnabled(struct mg_connection* c, const std::stri
 
     try {
         auto data = nlohmann::json::parse(body);
-        bool enabled = data.value("enabled", true);
+        if (!data.is_object() || !data.contains("enabled") || !data["enabled"].is_boolean()) {
+            sendError(c, 400, "enabled must be true or false");
+            return;
+        }
+        const bool enabled = data["enabled"].get<bool>();
 
         if (m_automationMgr->setEnabled(id, enabled)) {
             sendJson(c, 200, "{\"success\":true,\"enabled\":" +
