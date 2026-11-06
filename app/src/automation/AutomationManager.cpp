@@ -93,8 +93,9 @@ void AutomationManager::poll(uint64_t currentTimeMs) {
     // Check time triggers once per minute
     auto now = std::chrono::system_clock::now();
     std::time_t t = std::chrono::system_clock::to_time_t(now);
-    std::tm* tm = std::localtime(&t);
-    int currentMinute = tm->tm_min;
+    std::tm tm{};
+    localtime_r(&t, &tm);
+    int currentMinute = tm.tm_min;
 
     if (currentMinute != m_lastCheckedMinute) {
         m_lastCheckedMinute = currentMinute;
@@ -231,16 +232,17 @@ bool AutomationManager::evaluateTrigger(const Trigger& trigger,
 bool AutomationManager::evaluateTimeTrigger(const Trigger& trigger) const {
     auto now = std::chrono::system_clock::now();
     std::time_t t = std::chrono::system_clock::to_time_t(now);
-    std::tm* tm = std::localtime(&t);
+    std::tm tm{};
+    localtime_r(&t, &tm);
 
-    if (trigger.hour >= 0 && tm->tm_hour != trigger.hour) return false;
-    if (trigger.minute >= 0 && tm->tm_min != trigger.minute) return false;
+    if (trigger.hour >= 0 && tm.tm_hour != trigger.hour) return false;
+    if (trigger.minute >= 0 && tm.tm_min != trigger.minute) return false;
 
     // Check day of week if specified
     if (!trigger.daysOfWeek.empty()) {
         bool dayMatch = false;
         for (int day : trigger.daysOfWeek) {
-            if (tm->tm_wday == day) {
+            if (tm.tm_wday == day) {
                 dayMatch = true;
                 break;
             }

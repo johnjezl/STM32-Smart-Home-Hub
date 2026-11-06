@@ -305,7 +305,7 @@ void AddAutomationScreen::createDeviceStateTrigger() {
     m_triggerPropertyDropdown = lv_dropdown_create(m_triggerConfigContainer);
     lv_obj_set_size(m_triggerPropertyDropdown, 200, 40);
     lv_obj_align(m_triggerPropertyDropdown, LV_ALIGN_TOP_LEFT, 370, 22);
-    lv_dropdown_set_options(m_triggerPropertyDropdown, "on\nbrightness\ncolor\nmotion\ntemperature");
+    lv_dropdown_set_options(m_triggerPropertyDropdown, "on\nbrightness\nmotion\ntemperature");
     styleDropdown(m_triggerPropertyDropdown);
 
     lv_obj_t* valueLabel = lv_label_create(m_triggerConfigContainer);
@@ -507,7 +507,11 @@ void AddAutomationScreen::showStep(int step) {
             lv_obj_clear_flag(m_step2Container, LV_OBJ_FLAG_HIDDEN);
             showTriggerConfig(m_selectedTriggerType);
             break;
-        case 3: lv_obj_clear_flag(m_step3Container, LV_OBJ_FLAG_HIDDEN); break;
+        case 3:
+            // Devices are loaded each time the screen opens, after the widgets are created
+            populateDeviceDropdown(m_actionDeviceDropdown);
+            lv_obj_clear_flag(m_step3Container, LV_OBJ_FLAG_HIDDEN);
+            break;
     }
 
     updateNavigationButtons();
@@ -817,7 +821,7 @@ void AddAutomationScreen::populatePropertyDropdown(lv_obj_t* dropdown, const std
     if (!dropdown) return;
 
     // Default properties for now
-    lv_dropdown_set_options(dropdown, "on\nbrightness\ncolor\ntemperature\nmotion");
+    lv_dropdown_set_options(dropdown, "on\nbrightness\ntemperature\nhumidity\nmotion");
 }
 
 #endif // SMARTHUB_ENABLE_LVGL

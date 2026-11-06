@@ -759,6 +759,10 @@ TEST_F(WebAuthTest, AutomationsThatCouldNeverRunAreRejected) {
          {"trigger", {{"type", "time"}, {"hour", 8}, {"minute", 0}}},
          {"actions", {{{"type", "delay"}, {"delayMs", 1}},
                       {{"type", "delay"}, {"delayMs", 2147483647}}}}},
+        {{"name", "Old conditions field"},
+         {"trigger", {{"type", "time"}, {"hour", 8}, {"minute", 0}}},
+         {"conditions", nlohmann::json::array()},
+         {"actions", {action}}},
         {{"name", "Internal property"},
          {"trigger", {{"type", "device_state"}, {"device_id", "s"}, {"property", "_removed"}}},
          {"actions", {action}}},
@@ -838,6 +842,14 @@ TEST_F(WebAuthTest, AutomationsThatCouldNeverRunAreRejected) {
     const Response response = request("POST", "/api/automations", quoted);
     EXPECT_EQ(response.status, 400);
     EXPECT_NE(response.json()["error"].get<std::string>().find("a\"b"), std::string::npos);
+
+    // A duplicate id is the client's conflict, not a server failure
+    RequestOptions withId = admin;
+    withId.body = nlohmann::json{{"name", "Named"}, {"id", "night"},
+                                 {"trigger", {{"type", "time"}, {"hour", 8}, {"minute", 0}}},
+                                 {"actions", {action}}}.dump();
+    EXPECT_EQ(request("POST", "/api/automations", withId).status, 201);
+    EXPECT_EQ(request("POST", "/api/automations", withId).status, 409);
 
     // -1 is how a time trigger says any hour
     RequestOptions wildcard = admin;
