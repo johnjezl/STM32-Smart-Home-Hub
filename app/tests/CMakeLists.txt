@@ -267,6 +267,7 @@ if(GTEST_AVAILABLE)
     target_compile_definitions(test_shutdown PRIVATE SMARTHUB_BINARY="$<TARGET_FILE:smarthub>")
     add_dependencies(test_shutdown smarthub)
     add_test(NAME Shutdown COMMAND test_shutdown)
+    set_tests_properties(Shutdown PROPERTIES TIMEOUT 300)
 
     # ==== Automation Tests ====
 
