@@ -214,18 +214,29 @@ while (running) {
    - Check if trigger conditions match event
 
 3. **Evaluate Conditions**
-   - If automation has condition, evaluate recursively
+   - If automation has condition, evaluate recursively, on the thread that reported the change
    - AND groups short-circuit on first false
    - OR groups short-circuit on first true
+   - Conditions see the state when the trigger fired, before any action of an automation that
+     fired with it
 
-4. **Execute Actions**
-   - Execute actions sequentially
-   - Delay actions pause execution
-   - Device state actions call DeviceManager
+4. **Queue the Run**
+   - Runs go in a queue for one worker thread, so whoever changed the device doesn't wait
+   - A new trigger restarts an automation that's already queued or in a delay, so "light on, delay
+     60 s, light off" stays on until 60 seconds after the last trigger. A trigger that fires more
+     often than the delay never reaches the actions after it.
+   - An automation triggered more than 50 times in 10 seconds is skipped for the rest of that time
 
 5. **Update Last Triggered**
    - Record execution timestamp
    - Persist to database
+
+6. **Execute Actions**
+   - Execute actions sequentially on the worker
+   - A delay action puts the run back in the queue, so it doesn't hold up anything else
+   - Device state actions call DeviceManager
+   - Disabling or deleting an automation drops its remaining actions, even ones after a delay
+   - Runs in a delay are held in memory, so a restart loses them
 
 ## Database Schema
 

@@ -236,6 +236,7 @@ private:
     std::map<std::string, DevicePtr> m_devices;
 
     mutable std::mutex m_mutex;
+    std::mutex m_stateChangeMutex;
     bool m_discovering = false;
 };
 
