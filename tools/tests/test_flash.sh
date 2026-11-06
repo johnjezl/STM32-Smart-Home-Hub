@@ -30,13 +30,21 @@ case "$*" in
     "-dn -o SIZE,MODEL "*)    echo "1G Test Card" ;;
     "-nrs -o NAME,TYPE "*)    echo "$MOCK_ROOT_DISK disk" ;;
     "-dn -o NAME,TYPE")       echo "$MOCK_DISKS" | tr ',' '\n' | sed 's/$/ disk/' ;;
-    "-nr -o MOUNTPOINT "*)    echo "$MOCK_MOUNTED" ;;
+    "-nl -o MOUNTPOINTS "*)
+        # Gone once unmounted, unless a test says it stays
+        if [ -z "${MOCK_STAYS_MOUNTED:-}" ] && grep -q '^umount ' "$MOCK_LOG"; then exit 0; fi
+        printf '%b\n' "$MOCK_MOUNTED" ;;
     *)                        echo "mock lsblk" ;;
 esac
 MOCK
 cat > "$MOCKS/findmnt" <<'MOCK'
 #!/bin/bash
-[ "$4" = "/" ] && echo "/dev/rootpart"
+case "$4" in
+    /)    echo "${MOCK_ROOT_SOURCE:-/dev/rootpart} ext4" ;;
+    /var) [ -n "${MOCK_SEPARATE_VAR:-}" ] && echo "/dev/varpart ext4" ;;
+    /boot/efi) [ -n "${MOCK_AUTOMOUNT_EFI:-}" ] && printf 'systemd-1 autofs\n/dev/efipart vfat\n' ;;
+esac
+exit 0
 MOCK
 cat > "$MOCKS/sudo" <<'MOCK'
 #!/bin/bash
@@ -49,6 +57,7 @@ MOCK
 cat > "$MOCKS/umount" <<'MOCK'
 #!/bin/bash
 echo "umount $*" >> "$MOCK_LOG"
+[ -z "${MOCK_UMOUNT_FAILS:-}" ]
 MOCK
 chmod +x "$MOCKS"/*
 
@@ -116,6 +125,22 @@ check "refuses a reader with no card" '! wrote && said "no media"'
 echo "$BLOCK" | run MOCK_SIZE=100 "$FLASH" "$BLOCK"
 check "refuses a card the image doesn't fit on" '! wrote && said "fit"'
 
+echo "$BLOCK" | run MOCK_ROOT_DISK="$BLOCK_NAME" MOCK_SEPARATE_VAR=1 "$FLASH" "$BLOCK"
+check "still sees the root disk when /var is separate" '! wrote && said "holding this system"'
+
+echo "$BLOCK" | run MOCK_ROOT_SOURCE="rpool/ROOT/x" "$FLASH" "$BLOCK"
+check "stops if it can't tell which disk is the root" '! wrote && said "Can.t tell"'
+
+echo "$BLOCK" | run MOCK_AUTOMOUNT_EFI=1 "$FLASH" "$BLOCK"
+check "isn't stopped by an automount placeholder" 'wrote'
+
+ln -s "$BLOCK" "$TMP/alias"
+echo "$BLOCK" | run MOCK_ROOT_DISK="$BLOCK_NAME" "$FLASH" "$TMP/alias"
+check "sees through a name like /dev/disk/by-id to the disk" '! wrote && said "holding this system"'
+
+echo "$BLOCK" | run "$FLASH" "$TMP/alias"
+check "writes to the real device, and asks for its real name" 'wrote && grep -q "of=$BLOCK " "$TMP/log"'
+
 # ---- Confirmation ------------------------------------------------------------
 
 echo "y" | run "$FLASH" "$BLOCK"
@@ -145,8 +170,30 @@ rm -rf "${SYS:?}/$BLOCK_NAME"
 
 # ---- Unmounting --------------------------------------------------------------
 
-echo "$BLOCK" | run MOCK_MOUNTED="/media/card boot" "$FLASH" "$BLOCK"
-check "unmounts what's on the device, by mount point" 'grep -q "umount /media/card boot" "$TMP/log"'
+echo "$BLOCK" | run MOCK_MOUNTED="/media/john/NO NAME\\n/run/media/john/rootfs" "$FLASH" "$BLOCK"
+check "unmounts everything on the device, spaces and all" \
+    'wrote && grep -q "umount /media/john/NO NAME" "$TMP/log" && grep -q "umount /run/media/john/rootfs" "$TMP/log"'
+
+echo "$BLOCK" | run MOCK_MOUNTED="/media/card" MOCK_UMOUNT_FAILS=1 "$FLASH" "$BLOCK"
+check "stops with a reason if it can't unmount" '! wrote && said "unmount /media/card"'
+
+echo "$BLOCK" | run MOCK_MOUNTED="/media/card" MOCK_STAYS_MOUNTED=1 "$FLASH" "$BLOCK"
+check "won't write to what's still mounted" '! wrote && said "still mounted"'
+
+echo "$BLOCK" | run MOCK_MOUNTED="[SWAP]" "$FLASH" "$BLOCK"
+check "refuses a device being used for swap" '! wrote && said "in use"'
+
+echo "$BLOCK" | run MOCK_MOUNTED="/opt/data" "$FLASH" "$BLOCK"
+check "refuses a device mounted somewhere a card wouldn't be" '! wrote && said "in use, at /opt/data"'
+
+mkdir -p "$SYS/$BLOCK_NAME/holders/dm-0"
+echo "$BLOCK" | run "$FLASH" "$BLOCK"
+check "refuses a device LVM or encryption is using" '! wrote && said "in use by another"'
+rm -rf "${SYS:?}/$BLOCK_NAME"
+mkdir -p "$SYS/$BLOCK_NAME/part1/holders/dm-0"
+echo "$BLOCK" | run "$FLASH" "$BLOCK"
+check "refuses one whose partition is in use that way" '! wrote && said "in use by another"'
+rm -rf "${SYS:?}/$BLOCK_NAME"
 
 # ---- Choosing a device -------------------------------------------------------
 
@@ -163,8 +210,9 @@ fi
 
 # ---- No image ----------------------------------------------------------------
 
+: > "$TMP/log"
 echo "$BLOCK" | env PATH="$MOCKS:$PATH" MOCK_LOG="$TMP/log" SMARTHUB_IMAGE="$TMP/missing" "$FLASH" "$BLOCK" > "$TMP/out" 2>&1
-check "refuses with no image" 'said "Image not found"'
+check "refuses with no image" '! wrote && said "Image not found"'
 
 echo ""
 echo "$passed passed, $failed failed"
