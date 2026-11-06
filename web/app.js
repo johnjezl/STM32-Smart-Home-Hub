@@ -163,8 +163,11 @@ class SmartHubApp {
             if (response.ok) {
                 this.currentUser = await response.json();
                 this.showDashboard();
-            } else {
+            } else if (response.status === 401) {
                 this.showLogin();
+            } else {
+                // The session may be fine, so don't invite another login
+                this.showLogin('The hub could not check your login. Reload the page to try again.');
             }
         } catch (error) {
             this.showLogin('Connection error');

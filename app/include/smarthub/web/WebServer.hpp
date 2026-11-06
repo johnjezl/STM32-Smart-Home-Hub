@@ -126,6 +126,12 @@ public:
     void setLoginThrottle(int maxFailures, int windowSeconds);
 
     /**
+     * Add hostnames that login and first-run setup accept, beyond IP addresses
+     * and local names. Only for names you control: see isAllowedHostHeader.
+     */
+    void setAllowedHosts(const std::vector<std::string>& hosts);
+
+    /**
      * List of routes that don't require authentication
      */
     void setPublicRoutes(const std::vector<std::string>& routes);
@@ -214,6 +220,7 @@ private:
     int m_rateLimitPerMinute = 0;
     int m_loginMaxFailures = 0;
     int m_loginFailureWindowSeconds = 0;
+    std::vector<std::string> m_allowedHosts;
     std::vector<std::string> m_publicRoutes;
 
     // Additional managers

@@ -28,6 +28,7 @@ security:
   rate_limit_per_minute: 600     # per client IP, 0 to disable
   login_max_failures: 10         # failed logins per client IP, 0 to disable
   login_failure_window_seconds: 300
+  allowed_hosts: []              # extra names for the hub, such as hub.fritz.box
 
 # Display settings
 display:

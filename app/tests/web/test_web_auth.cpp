@@ -334,6 +334,18 @@ TEST_F(WebAuthTest, SetupRefusesPublicDnsNames) {
     EXPECT_EQ(request("GET", "/api/setup/status").json()["setupRequired"], true);
 }
 
+TEST_F(WebAuthTest, ConfiguredHostsAreAccepted) {
+    startApp("security:\n  allowed_hosts: [Hub.Fritz.Box]\n");
+
+    RequestOptions other(credentials(kAdminName, kAdminPassword));
+    other.host = "other.fritz.box";
+    EXPECT_EQ(request("POST", "/api/setup", other).status, 403);
+
+    RequestOptions configured(credentials(kAdminName, kAdminPassword));
+    configured.host = "hub.fritz.box:443";
+    EXPECT_EQ(request("POST", "/api/setup", configured).status, 201);
+}
+
 TEST_F(WebAuthTest, LoginRefusesPublicDnsNames) {
     startApp();
     setUpAdmin();
@@ -351,7 +363,8 @@ TEST_F(WebAuthTest, LoginRefusesPublicDnsNames) {
 TEST_F(WebAuthTest, SetupAcceptsLocalNames) {
     for (const char* host : {"192.168.1.5", "192.168.1.5:8443", "smarthub.local",
                              "SmartHub.LOCAL:443", "smarthub", "localhost:8080", "[fe80::1]:443",
-                             "hub.lan", "hub.home", "hub.internal", "hub.home.arpa"}) {
+                             "hub.lan", "hub.home", "hub.internal", "hub.home.arpa", "hub.localdomain",
+                             "smarthub.local."}) {
         startApp();
         RequestOptions local(credentials(kAdminName, kAdminPassword));
         local.host = host;
@@ -642,6 +655,32 @@ TEST_F(WebAuthTest, RegularUserCanReadAndControlButNotConfigure) {
         EXPECT_EQ(request(route.method, route.path, options).status, 403)
             << route.method << " " << route.path;
     }
+}
+
+TEST_F(WebAuthTest, OnlyControlPropertiesCanBeWritten) {
+    startApp();
+    RequestOptions admin;
+    admin.cookie = setUpAdmin();
+
+    admin.body = R"({"type":"temperature_sensor","name":"Hall","protocol":"local"})";
+    const Response created = request("POST", "/api/devices", admin);
+    ASSERT_EQ(created.status, 201) << created.body;
+    const std::string sensor = "/api/devices/" + created.json()["id"].get<std::string>();
+    admin.body = "";
+    const std::string before = request("GET", sensor, admin).json()["state"].dump();
+
+    // Forged readings and stored markup, from any role
+    for (const char* body :
+         {R"({"temperature":-40})", R"({"motion":true})", R"({"value":"<img src=x onerror=alert(1)>"})",
+          R"({"on":"yes"})", R"({"brightness":"<b>"})", R"({"color_h":"x"})",
+          R"({"on":true,"value":"x"})"}) {
+        RequestOptions options = admin;
+        options.body = body;
+        EXPECT_EQ(request("PUT", sensor, options).status, 400) << body;
+    }
+
+    // A rejected property keeps the rest of its request from being applied too
+    EXPECT_EQ(request("GET", sensor, admin).json()["state"].dump(), before);
 }
 
 TEST_F(WebAuthTest, AdministratorCanConfigure) {

@@ -195,6 +195,9 @@ bool Config::load(const std::string& path) {
             if (security["login_failure_window_seconds"]) {
                 m_loginFailureWindowSeconds = security["login_failure_window_seconds"].as<int>();
             }
+            if (security["allowed_hosts"]) {
+                m_allowedHosts = security["allowed_hosts"].as<std::vector<std::string>>();
+            }
         }
 
         if (config["logging"]) {
@@ -331,6 +334,7 @@ void Config::setDefaults() {
     m_rateLimitPerMinute = 600;
     m_loginMaxFailures = 10;
     m_loginFailureWindowSeconds = 300;
+    m_allowedHosts.clear();
     m_databasePath = "/var/lib/smarthub/smarthub.db";
     m_mqttBroker = "127.0.0.1";
     m_mqttPort = 1883;

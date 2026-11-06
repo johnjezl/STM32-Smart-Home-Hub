@@ -301,6 +301,7 @@ bool Application::initializeWebServer() {
         loginWindow = 300;
     }
     m_webServer->setLoginThrottle(m_config->loginMaxFailures(), loginWindow);
+    m_webServer->setAllowedHosts(m_config->allowedHosts());
 
     if (!m_webServer->start()) {
         return false;

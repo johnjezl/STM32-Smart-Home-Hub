@@ -28,7 +28,7 @@ Authorization: Bearer <api-token>
 There's no endpoint for creating tokens yet ([#36](https://github.com/johnjezl/STM32-Smart-Home-Hub/issues/36)).
 
 ### Roles
-A `user` can read everything except pending Zigbee devices, and can control devices with `PUT /api/devices/{id}`. All other requests that change something, and the Zigbee pairing routes, need an `admin` and otherwise get `403`.
+A `user` can read everything except pending Zigbee devices, and can control devices with `PUT /api/devices/{id}`. That route accepts only `on` (boolean) and the numbers `brightness`, `colorTemp` and `color_h`, `color_s`, `color_v`, `color_r`, `color_g`, `color_b`, for any role; anything else gets `400`. All other requests that change something, and the Zigbee pairing routes, need an `admin` and otherwise get `403`.
 
 ### Public Routes
 The following routes are accessible without authentication:

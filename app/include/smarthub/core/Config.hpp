@@ -76,6 +76,7 @@ public:
     int rateLimitPerMinute() const { return m_rateLimitPerMinute; }
     int loginMaxFailures() const { return m_loginMaxFailures; }
     int loginFailureWindowSeconds() const { return m_loginFailureWindowSeconds; }
+    const std::vector<std::string>& allowedHosts() const { return m_allowedHosts; }
 
     // Logging settings
     std::string logLevel() const { return m_logLevel; }
@@ -133,6 +134,7 @@ private:
     int m_rateLimitPerMinute = 600;
     int m_loginMaxFailures = 10;
     int m_loginFailureWindowSeconds = 300;
+    std::vector<std::string> m_allowedHosts;
 
     std::string m_logLevel = "info";
     std::string m_logFile = "/var/log/smarthub.log";

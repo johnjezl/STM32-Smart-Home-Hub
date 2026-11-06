@@ -215,7 +215,7 @@ TEST_F(WebServerTest, ApiSetDeviceState) {
     startServer();
     std::string response = curlPut(
         baseUrl() + "/api/devices/light1",
-        R"({"power":"on","brightness":75})"
+        R"({"on":true,"brightness":75})"
     );
 
     EXPECT_NE(response.find("success"), std::string::npos);

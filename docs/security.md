@@ -74,6 +74,7 @@ if (userMgr.authenticate("admin", "SecureP@ssw0rd!")) {
 |--------|---------|--------|
 | View devices, rooms and automations | Yes | Yes |
 | Control a device (`PUT /api/devices/{id}`) | Yes | Yes |
+| Write a sensor reading or other reported state | No | No |
 | Add, edit or remove devices and rooms | Yes | No |
 | Zigbee pairing | Yes | No |
 | Add, edit, enable or remove automations | Yes | No |
@@ -173,7 +174,7 @@ Web authentication is always required, including on the local network. A new hub
 
 Setup closes for good as soon as any account exists, even a disabled one. Until then, **anyone who can reach the hub on the network can claim it**, so create the administrator as soon as the hub is on the network. The hub logs a warning at startup while no account exists.
 
-Setup and login only accept a request addressed to an IP address, a name with no dots, or a name ending in `.local`, `.lan`, `.home`, `.internal` or `.home.arpa`. This stops a web page on another site from using your browser to reach the hub, by pointing its own domain at it (DNS rebinding).
+Setup and login only accept a request addressed to an IP address, a name with no dots, or a name ending in `.local`, `.localdomain`, `.lan`, `.home`, `.internal` or `.home.arpa`. This stops a web page on another site from using your browser to reach the hub, by pointing its own domain at it (DNS rebinding). To use another name, such as `hub.fritz.box`, add it to `allowed_hosts` in the configuration.
 
 `SetupManager` is a separate class for a fuller setup that also generates certificates and initializes the credential store. The application doesn't use it yet.
 
@@ -308,6 +309,7 @@ security:
   rate_limit_per_minute: 600
   login_max_failures: 10
   login_failure_window_seconds: 300
+  allowed_hosts: []
 ```
 
 ## Security Best Practices

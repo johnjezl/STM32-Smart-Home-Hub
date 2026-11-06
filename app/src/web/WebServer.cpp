@@ -81,9 +81,9 @@ void makeRoomFor(const std::string& ip, std::unordered_map<std::string, RateLimi
 // rebinding), and then counts as same-origin. Only names in public DNS can be
 // used for that, so the routes that create a session refuse them. Other routes
 // don't need this, because that page's origin has no session cookie to send.
-bool isLocalHostHeader(struct mg_http_message* hm) {
-    static const std::vector<std::string> kLocalSuffixes = {".local", ".lan", ".home", ".internal",
-                                                            ".home.arpa"};
+bool isAllowedHostHeader(struct mg_http_message* hm, const std::vector<std::string>& allowedHosts) {
+    static const std::vector<std::string> kLocalSuffixes = {".local", ".localdomain", ".lan", ".home",
+                                                            ".internal", ".home.arpa"};
 
     struct mg_str* header = mg_http_get_header(hm, "Host");
     if (!header) {
@@ -99,6 +99,12 @@ bool isLocalHostHeader(struct mg_http_message* hm) {
     }
     std::transform(host.begin(), host.end(), host.begin(),
                    [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+    if (host.back() == '.') {
+        host.pop_back();  // Fully qualified form of the same name
+    }
+    if (std::find(allowedHosts.begin(), allowedHosts.end(), host) != allowedHosts.end()) {
+        return true;
+    }
 
     const bool isIpv4 = host.find_first_not_of("0123456789.") == std::string::npos;
     const bool isSingleLabel = host.find('.') == std::string::npos;
@@ -111,6 +117,19 @@ bool isLocalHostHeader(struct mg_http_message* hm) {
                                   host.compare(host.size() - suffix.size(), suffix.size(),
                                                suffix) == 0;
                        });
+}
+
+// What the API can change on a device. Anything else on a device's state is
+// reported by the device: a client writing it could fake a sensor reading, set
+// off automations, or store a string the dashboard then has to display.
+bool isControllableProperty(const std::string& property, const nlohmann::json& value) {
+    static const std::vector<std::string> kNumeric = {"brightness", "colorTemp", "color_h", "color_s",
+                                                      "color_v", "color_r", "color_g", "color_b"};
+    if (property == "on") {
+        return value.is_boolean();
+    }
+    return value.is_number() &&
+           std::find(kNumeric.begin(), kNumeric.end(), property) != kNumeric.end();
 }
 
 AuthInfo authInfoFor(const security::User& user, bool isApiToken) {
@@ -329,6 +348,15 @@ void WebServer::setLoginThrottle(int maxFailures, int windowSeconds) {
     m_loginFailureWindowSeconds = windowSeconds;
 }
 
+void WebServer::setAllowedHosts(const std::vector<std::string>& hosts) {
+    m_allowedHosts.clear();
+    for (std::string host : hosts) {
+        std::transform(host.begin(), host.end(), host.begin(),
+                       [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+        m_allowedHosts.push_back(host);
+    }
+}
+
 void WebServer::setAutomationManager(AutomationManager* automationMgr) {
     m_automationMgr = automationMgr;
 }
@@ -377,7 +405,8 @@ AuthInfo WebServer::checkAuth(struct mg_http_message* hm) {
                     return authInfoFor(*user, false);
                 }
                 // No user can also mean a database error, which shouldn't end
-                // a good session. A removed user's session just expires.
+                // a good session: this request fails, but a reload recovers.
+                // A removed user's session just expires.
                 if (user) {
                     m_sessionMgr->destroySession(sessionToken);
                 }
@@ -775,6 +804,13 @@ void WebServer::apiSetDeviceState(struct mg_connection* c, const std::string& id
             return;
         }
 
+        for (auto& [key, value] : stateJson.items()) {
+            if (!isControllableProperty(key, value)) {
+                sendError(c, 400, "Can't set this property");
+                return;
+            }
+        }
+
         // Apply each state property, through the device's protocol
         for (auto& [key, value] : stateJson.items()) {
             if (!m_deviceManager.setDeviceState(id, key, value)) {
@@ -838,7 +874,7 @@ void WebServer::apiLogin(struct mg_connection* c, struct mg_http_message* hm) {
         return;
     }
 
-    if (!isLocalHostHeader(hm)) {
+    if (!isAllowedHostHeader(hm, m_allowedHosts)) {
         sendError(c, 403, kUseLocalAddress);
         return;
     }
@@ -934,7 +970,7 @@ void WebServer::apiSetup(struct mg_connection* c, struct mg_http_message* hm) {
         return;
     }
 
-    if (!isLocalHostHeader(hm)) {
+    if (!isAllowedHostHeader(hm, m_allowedHosts)) {
         sendError(c, 403, kUseLocalAddress);
         return;
     }
@@ -1482,6 +1518,7 @@ void WebServer::setTlsCert(const std::string&, const std::string&) {}
 void WebServer::setHttpRedirect(bool, int) {}
 void WebServer::setSecurityManagers(security::SessionManager*, security::ApiTokenManager*, security::UserManager*) {}
 void WebServer::setLoginThrottle(int, int) {}
+void WebServer::setAllowedHosts(const std::vector<std::string>&) {}
 void WebServer::setAutomationManager(AutomationManager*) {}
 void WebServer::setZigbeeHandler(zigbee::ZigbeeHandler*) {}
 void WebServer::setRateLimit(int) {}
