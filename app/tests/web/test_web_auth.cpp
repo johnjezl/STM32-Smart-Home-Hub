@@ -11,6 +11,7 @@
 #include <smarthub/core/Config.hpp>
 #include <smarthub/core/EventBus.hpp>
 #include <smarthub/database/Database.hpp>
+#include <smarthub/devices/Device.hpp>
 #include <smarthub/devices/DeviceManager.hpp>
 #include <smarthub/security/ApiTokenManager.hpp>
 #include <smarthub/security/CertManager.hpp>
@@ -608,6 +609,13 @@ TEST_F(WebAuthTest, RoomsSurviveADeviceReportingAnOddState) {
     m_app->deviceManager().getDevice("odd")->setState("on", "yes");
 
     EXPECT_EQ(request("GET", "/api/rooms", admin).status, 200);
+
+    // A device with no state at all
+    ASSERT_TRUE(m_app->deviceManager().addDevice(
+        std::make_shared<Device>("bare", "Bare", DeviceType::Custom)));
+    m_app->deviceManager().getDevice("bare")->setRoom("Kitchen");
+    EXPECT_EQ(request("GET", "/api/rooms", admin).status, 200);
+    EXPECT_EQ(request("GET", "/api/devices", admin).status, 200);
 
     // Text that isn't valid UTF-8 doesn't lose the whole list either
     m_app->deviceManager().getDevice("odd")->setState("note", std::string("bad\xFF"));

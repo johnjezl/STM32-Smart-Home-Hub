@@ -560,7 +560,16 @@ void WebServer::eventHandler(struct mg_connection* c, int ev, void* ev_data) {
         mg_tls_init(c, opts);
     } else if (ev == MG_EV_HTTP_MSG) {
         struct mg_http_message* hm = static_cast<struct mg_http_message*>(ev_data);
-        s_instance->handleHttpRequest(c, hm);
+        // An exception from here would end the whole program, not just this request
+        try {
+            s_instance->handleHttpRequest(c, hm);
+        } catch (const std::exception& e) {
+            LOG_ERROR("Request failed: %s", e.what());
+            s_instance->sendError(c, 500, "Internal error");
+        } catch (...) {
+            LOG_ERROR("Request failed with an unknown error");
+            s_instance->sendError(c, 500, "Internal error");
+        }
     }
 }
 
@@ -1012,9 +1021,8 @@ void WebServer::apiGetRooms(struct mg_connection* c) {
         auto devices = m_deviceManager.getDevicesByRoom(name);
         int activeCount = 0;
         for (const auto& dev : devices) {
-            // A device can report anything, so don't assume this is a boolean
-            const auto state = dev->getState();
-            if (state.value("on", nlohmann::json()) == true) {
+            // A device can report anything, or nothing, so don't assume this is a boolean
+            if (dev->getProperty("on") == true) {
                 activeCount++;
             }
         }
