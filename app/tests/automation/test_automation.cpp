@@ -16,6 +16,7 @@
 #include <smarthub/database/Database.hpp>
 #include <smarthub/core/EventBus.hpp>
 
+#include <atomic>
 #include <chrono>
 #include <memory>
 #include <thread>
@@ -564,6 +565,33 @@ TEST_F(AutomationManagerTest, ReEnablingAnEnabledAutomationKeepsItsCountdown) {
     ASSERT_TRUE(automationManager->setEnabled(automation.id, true));
     automationManager->poll(1 + 61 * minute);
     EXPECT_EQ(light->getProperty("on"), true);
+}
+
+TEST_F(AutomationManagerTest, StopFlagEndsADelayAndTheRemainingActions) {
+    automationManager->initialize();
+    auto light = std::make_shared<SwitchDevice>("light_001", "Light");
+    deviceManager->addDevice(light);
+    std::atomic<bool> stopFlag{false};
+    automationManager->setStopFlag(&stopFlag);
+
+    Trigger trigger;
+    trigger.type = TriggerType::TimeInterval;
+    trigger.intervalMinutes = 60;
+    Automation automation = lightOnWhen(trigger);
+    Action delay;
+    delay.type = ActionType::Delay;
+    delay.delayMs = 30000;
+    automation.actions.insert(automation.actions.begin(), delay);
+    ASSERT_TRUE(automationManager->addAutomation(automation));
+
+    const auto start = std::chrono::steady_clock::now();
+    std::thread running([&] { automationManager->triggerAutomation(automation.id); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    stopFlag = true;
+    running.join();
+
+    EXPECT_LT(std::chrono::steady_clock::now() - start, std::chrono::seconds(5));
+    EXPECT_NE(light->getProperty("on"), true);
 }
 
 TEST_F(AutomationManagerTest, ReturnedAutomationsAreCopies) {

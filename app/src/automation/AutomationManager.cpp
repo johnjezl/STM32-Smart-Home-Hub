@@ -209,10 +209,22 @@ void AutomationManager::checkIntervalTriggers(uint64_t currentTimeMs) {
     executeAll(runs);
 }
 
+bool AutomationManager::isStopping() {
+    const auto* stopFlag = m_stopFlag.load();
+    if (stopFlag && stopFlag->load()) {
+        return true;
+    }
+    std::lock_guard<std::mutex> lock(m_stopMutex);
+    return m_stopping;
+}
+
 void AutomationManager::executeAll(const std::vector<PendingRun>& runs) {
     // Unlocked: actions can wait on devices, and changing one publishes an event that
     // comes straight back to onDeviceStateChanged on this thread.
     for (const auto& run : runs) {
+        if (isStopping()) {
+            return;
+        }
         executeAutomation(run.automation, run.triggerInfo);
     }
 }
@@ -400,13 +412,16 @@ void AutomationManager::executeAutomation(const Automation& automation,
             // Older saved automations could have longer delays than validation allows
             const auto delayMs = std::min<int64_t>(action.delayMs, delayBudgetMs);
             delayBudgetMs -= delayMs;
-            {
+            // A signal handler can set the stop flag but can't wake this, so keep checking
+            const auto wakeAt = std::chrono::steady_clock::now() + std::chrono::milliseconds(delayMs);
+            while (std::chrono::steady_clock::now() < wakeAt && !isStopping()) {
                 std::unique_lock<std::mutex> lock(m_stopMutex);
-                if (m_stopSignal.wait_for(lock, std::chrono::milliseconds(delayMs),
-                                          [this] { return m_stopping; })) {
-                    LOG_INFO("Automation %s stopped by shutdown", automation.name.c_str());
-                    return;
-                }
+                m_stopSignal.wait_until(lock, std::min(wakeAt, std::chrono::steady_clock::now() +
+                                                                   std::chrono::milliseconds(100)));
+            }
+            if (isStopping()) {
+                LOG_INFO("Automation %s stopped by shutdown", automation.name.c_str());
+                return;
             }
 
             // It could have been turned off or removed during the wait. An edit doesn't stop
@@ -418,6 +433,9 @@ void AutomationManager::executeAutomation(const Automation& automation,
                 return;
             }
         } else {
+            if (isStopping()) {
+                return;
+            }
             executeAction(action);
         }
     }

@@ -37,6 +37,7 @@ Application::~Application() {
 
 bool Application::initialize() {
     LOG_INFO("SmartHub v%s initializing...", version());
+    m_shutDown = false;
 
     // Initialize in dependency order
     if (!initializeConfig()) {
@@ -122,6 +123,10 @@ void Application::run(const std::atomic<bool>& stopRequested) {
 
     m_running = true;
     LOG_INFO("SmartHub running");
+    if (m_automationManager) {
+        // The delays in time-based automations run on this thread, so they have to watch this
+        m_automationManager->setStopFlag(&stopRequested);
+    }
 
     // Publish system ready event
     SystemEvent readyEvent;
@@ -364,13 +369,6 @@ void Application::shutdownSubsystems() {
         m_automationManager->shutdown();
     }
 
-#ifdef SMARTHUB_ENABLE_LVGL
-    if (m_uiManager) {
-        m_uiManager->shutdown();
-        m_uiManager.reset();
-    }
-#endif
-
     if (m_webServer) {
         m_webServer->stop();
         m_webServer.reset();
@@ -390,10 +388,17 @@ void Application::shutdownSubsystems() {
         m_mqttClient.reset();
     }
 
-    // This joins the protocol threads, which are what call into the automation manager
+    // This joins the protocol threads, which call into automations and the UI's screens
     if (m_deviceManager) {
         m_deviceManager->shutdown();
     }
+
+#ifdef SMARTHUB_ENABLE_LVGL
+    if (m_uiManager) {
+        m_uiManager->shutdown();
+        m_uiManager.reset();
+    }
+#endif
 
     m_automationManager.reset();
     m_deviceManager.reset();
@@ -405,6 +410,7 @@ void Application::shutdownSubsystems() {
 
     m_eventBus.reset();
     m_config.reset();
+    m_initialized = false;
 }
 
 Config& Application::config() {
