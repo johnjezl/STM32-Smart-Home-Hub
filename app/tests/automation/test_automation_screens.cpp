@@ -221,8 +221,8 @@ TEST_F(AutomationScreenTest, AddAutomationScreenMultiStepWizard) {
     auto addAutomation = std::make_unique<AddAutomationScreen>(
         *screenManager, *themeManager, *automationManager, *deviceManager);
 
-    // Total steps should be 4
-    EXPECT_EQ(AddAutomationScreen::TOTAL_STEPS, 4);
+    // Name, trigger and action
+    EXPECT_EQ(AddAutomationScreen::TOTAL_STEPS, 3);
 
     screenManager->registerScreen("add_automation", std::move(addAutomation));
     EXPECT_TRUE(screenManager->hasScreen("add_automation"));
