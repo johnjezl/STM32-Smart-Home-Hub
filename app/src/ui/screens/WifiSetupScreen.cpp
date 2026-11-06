@@ -435,12 +435,12 @@ void WifiSetupScreen::onConnectClicked() {
 }
 
 // These callbacks run on the network manager's thread, so they only hand over to the UI thread.
-// A newer scan or connect makes an older one's result out of date.
+// A newer scan makes an older scan's result out of date, and the same goes for connects.
 network::NetworkManager::ScanCallback WifiSetupScreen::makeScanCallback() {
-    const int operation = ++m_networkOperation;
-    return [this, post = uiPoster(), operation](const std::vector<network::WifiNetwork>& networks) {
-        post([this, operation, networks] {
-            if (operation != m_networkOperation) return;
+    const int scan = ++m_latestScan;
+    return [this, post = uiPoster(), scan](const std::vector<network::WifiNetwork>& networks) {
+        post([this, scan, networks] {
+            if (scan != m_latestScan) return;
             m_networks = networks;
             m_scanning = false;
 
@@ -452,11 +452,10 @@ network::NetworkManager::ScanCallback WifiSetupScreen::makeScanCallback() {
 }
 
 network::NetworkManager::ConnectCallback WifiSetupScreen::makeConnectCallback() {
-    const int operation = ++m_networkOperation;
-    return [this, post = uiPoster(), operation](const network::ConnectionResult& result) {
-        post([this, operation, result] {
-            if (operation != m_networkOperation) return;
-            m_scanning = false;
+    const int connect = ++m_latestConnect;
+    return [this, post = uiPoster(), connect](const network::ConnectionResult& result) {
+        post([this, connect, result] {
+            if (connect != m_latestConnect) return;
 
             hideLoading();
             updateStatusBar();
