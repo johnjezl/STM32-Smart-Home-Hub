@@ -647,6 +647,20 @@ TEST_F(AutomationManagerTest, ATriggerWhoseConditionFailsLeavesARunInADelay) {
     EXPECT_EQ(light->getProperty("on"), true);
 }
 
+TEST_F(AutomationManagerTest, AutomationFiringTooOftenIsSkipped) {
+    automationManager->initialize();
+    Trigger trigger;
+    trigger.type = TriggerType::TimeInterval;
+    trigger.intervalMinutes = 60;
+    ASSERT_TRUE(automationManager->addAutomation(lightOnWhen(trigger)));
+
+    int queued = 0;
+    for (int i = 0; i < 60; ++i) {
+        queued += automationManager->triggerAutomation("runs_action") ? 1 : 0;
+    }
+    EXPECT_EQ(queued, 50);
+}
+
 TEST_F(AutomationManagerTest, DeletedAutomationDoesNotRunFromTheQueue) {
     automationManager->initialize();
     auto source = std::make_shared<SwitchDevice>("source", "Source");
@@ -1109,9 +1123,7 @@ TEST_F(AutomationManagerTest, TriggerDisabledAutomation) {
     automation.enabled = false;
     automationManager->addAutomation(automation);
 
-    // Manual trigger via triggerAutomation() works even for disabled automations
-    // (useful for testing). Disabled only affects automatic triggers.
-    EXPECT_TRUE(automationManager->triggerAutomation("disabled_trigger"));
+    EXPECT_FALSE(automationManager->triggerAutomation("disabled_trigger"));
 }
 
 TEST_F(AutomationManagerTest, TriggerNonexistentAutomation) {

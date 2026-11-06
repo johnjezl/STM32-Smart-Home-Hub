@@ -295,38 +295,43 @@ size_t DeviceManager::deviceCount() const {
 }
 
 void DeviceManager::startDiscovery(const std::string& protocol) {
-    std::lock_guard<std::mutex> lock(m_mutex);
+    // Copied so the handlers run unlocked: they wait on the radio, and that shouldn't hold up
+    // every other use of this class.
+    std::vector<std::pair<std::string, ProtocolHandlerPtr>> handlers;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_discovering = true;
 
-    m_discovering = true;
-
-    if (protocol.empty()) {
-        // Start discovery on all protocols
-        for (auto& [name, handler] : m_protocols) {
-            if (handler->supportsDiscovery()) {
-                LOG_INFO("Starting discovery on protocol: %s", name.c_str());
-                handler->startDiscovery();
+        for (const auto& [name, handler] : m_protocols) {
+            if ((protocol.empty() || name == protocol) && handler->supportsDiscovery()) {
+                handlers.emplace_back(name, handler);
             }
         }
-    } else {
-        // Start discovery on specific protocol
-        auto it = m_protocols.find(protocol);
-        if (it != m_protocols.end() && it->second->supportsDiscovery()) {
-            LOG_INFO("Starting discovery on protocol: %s", protocol.c_str());
-            it->second->startDiscovery();
-        }
+    }
+
+    for (const auto& [name, handler] : handlers) {
+        LOG_INFO("Starting discovery on protocol: %s", name.c_str());
+        handler->startDiscovery();
     }
 }
 
 void DeviceManager::stopDiscovery() {
-    std::lock_guard<std::mutex> lock(m_mutex);
+    std::vector<std::pair<std::string, ProtocolHandlerPtr>> handlers;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        for (const auto& [name, handler] : m_protocols) {
+            handlers.emplace_back(name, handler);
+        }
+    }
 
-    for (auto& [name, handler] : m_protocols) {
+    for (const auto& [name, handler] : handlers) {
         if (handler->isDiscovering()) {
             LOG_INFO("Stopping discovery on protocol: %s", name.c_str());
             handler->stopDiscovery();
         }
     }
 
+    std::lock_guard<std::mutex> lock(m_mutex);
     m_discovering = false;
 }
 
@@ -524,8 +529,13 @@ void DeviceManager::applyStateChange(const DevicePtr& device, const std::string&
                                      const nlohmann::json& value) {
     // Only publish real changes. A device's report confirming a command isn't news, and an
     // automation shouldn't keep re-triggering itself.
-    const nlohmann::json previous = device->getProperty(property);
-    device->setState(property, value);
+    // Together, because commands and device reports can arrive on different threads
+    nlohmann::json previous;
+    {
+        std::lock_guard<std::mutex> lock(m_stateChangeMutex);
+        previous = device->getProperty(property);
+        device->setState(property, value);
+    }
     if (previous != value) {
         DeviceStateEvent event;
         event.deviceId = device->id();

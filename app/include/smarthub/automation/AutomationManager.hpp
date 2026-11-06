@@ -79,6 +79,7 @@ public:
 
     /**
      * Manually trigger an automation. It runs on the worker thread.
+     * @return Whether it was queued, which needs it to be enabled and its condition to hold
      */
     bool triggerAutomation(const std::string& id);
 
@@ -133,7 +134,7 @@ private:
     };
     using RunQueue = std::multimap<std::chrono::steady_clock::time_point, Run>;
 
-    void enqueueRuns(std::vector<std::pair<Automation, std::string>> runs);
+    bool enqueueRuns(std::vector<std::pair<Automation, std::string>> runs);
     void workerLoop();
     void continueRun(Run run);
     void executeAction(const Action& action);
@@ -162,6 +163,11 @@ private:
     std::mutex m_queueMutex;
     std::condition_variable m_queueChanged;
     RunQueue m_runQueue;
+    struct RunRate {
+        std::chrono::steady_clock::time_point windowStart;
+        int runs = 0;
+    };
+    std::map<std::string, RunRate> m_runRates;
     bool m_stopping = false;
     bool m_workerBusy = false;
 

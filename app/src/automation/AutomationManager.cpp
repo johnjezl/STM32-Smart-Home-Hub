@@ -225,9 +225,14 @@ namespace {
 thread_local int t_runDepth = 0;
 constexpr int kMaxRunDepth = 8;
 
+// Far more than a sensor reporting every second needs, and enough to stop two automations
+// fighting over a device
+constexpr auto kRunRateWindow = std::chrono::seconds(10);
+constexpr int kMaxRunsPerWindow = 50;
+
 }  // namespace
 
-void AutomationManager::enqueueRuns(std::vector<std::pair<Automation, std::string>> runs) {
+bool AutomationManager::enqueueRuns(std::vector<std::pair<Automation, std::string>> runs) {
     // Conditions are about when the trigger fired. One that doesn't hold ignores the trigger,
     // and mustn't restart a run that's waiting to finish, such as to turn a light back off.
     runs.erase(std::remove_if(runs.begin(), runs.end(), [this](const auto& entry) {
@@ -240,21 +245,34 @@ void AutomationManager::enqueueRuns(std::vector<std::pair<Automation, std::strin
         return false;
     }), runs.end());
 
-    if (runs.empty()) {
-        return;
-    }
-
+    bool queued = false;
     {
         std::lock_guard<std::mutex> lock(m_queueMutex);
         for (auto& [automation, triggerInfo] : runs) {
             if (m_stopping || !m_worker.joinable()) {
-                return;
+                return queued;
             }
             if (t_runDepth >= kMaxRunDepth) {
                 LOG_ERROR("Automation '%s' not run: automations are triggering each other in a loop",
                           automation.name.c_str());
                 continue;
             }
+            // The depth limit can't see loops through a device: a radio's reports arrive on another
+            // thread, so they start again from zero. This catches those.
+            auto& rate = m_runRates[automation.id];
+            const auto now = std::chrono::steady_clock::now();
+            if (now - rate.windowStart >= kRunRateWindow) {
+                rate.windowStart = now;
+                rate.runs = 0;
+            }
+            if (++rate.runs > kMaxRunsPerWindow) {
+                if (rate.runs == kMaxRunsPerWindow + 1) {
+                    LOG_ERROR("Automation '%s' is firing too often, so skipping it for now",
+                              automation.name.c_str());
+                }
+                continue;
+            }
+
             // A new trigger restarts the automation, so the queue holds one run of each. Motion
             // turning a light on for a minute then stays on until a minute after the last motion.
             for (auto it = m_runQueue.begin(); it != m_runQueue.end();) {
@@ -266,9 +284,11 @@ void AutomationManager::enqueueRuns(std::vector<std::pair<Automation, std::strin
             run.triggerInfo = std::move(triggerInfo);
             run.depth = t_runDepth;
             m_runQueue.emplace(std::chrono::steady_clock::now(), std::move(run));
+            queued = true;
         }
     }
     m_queueChanged.notify_all();
+    return queued;
 }
 
 void AutomationManager::workerLoop() {
@@ -693,8 +713,7 @@ bool AutomationManager::triggerAutomation(const std::string& id) {
         runs.emplace_back(*it->second, "Manual");
     }
 
-    enqueueRuns(std::move(runs));
-    return true;
+    return enqueueRuns(std::move(runs));
 }
 
 size_t AutomationManager::automationCount() const {
