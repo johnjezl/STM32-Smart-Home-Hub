@@ -6,6 +6,10 @@
 
 #include "smarthub/automation/Automation.hpp"
 
+#include <cmath>
+#include <string>
+#include <vector>
+
 namespace smarthub {
 
 // Enum to string conversions
@@ -246,11 +250,10 @@ nlohmann::json Automation::toJson() const {
     j["description"] = description;
     j["enabled"] = enabled;
 
-    // "trigger" is always the first, and "triggers" lists them when there are more
-    if (!triggers.empty()) {
+    // "trigger" for the usual single trigger, and "triggers" when there are several
+    if (triggers.size() == 1) {
         j["trigger"] = triggers[0].toJson();
-    }
-    if (triggers.size() > 1) {
+    } else if (triggers.size() > 1) {
         nlohmann::json triggersArray = nlohmann::json::array();
         for (const auto& trigger : triggers) {
             triggersArray.push_back(trigger.toJson());
@@ -275,8 +278,11 @@ nlohmann::json Automation::toJson() const {
 
 namespace {
 
-// A delay runs on the thread that fired the automation, so a long one stalls that thread
-constexpr int kMaxDelayMs = 60000;
+// Delays run on the thread that fired the automation, so a long total stalls that thread
+constexpr int kMaxTotalDelayMs = 60000;
+
+// About a year, and small enough to convert to milliseconds safely
+constexpr int kMaxIntervalMinutes = 525600;
 
 std::string validateTrigger(const nlohmann::json& trigger) {
     if (!trigger.is_object()) return "a trigger must be an object";
@@ -295,23 +301,27 @@ std::string validateTrigger(const nlohmann::json& trigger) {
                 op != "lte") {
                 return "unknown compare_op: " + op;
             }
-            if (!trigger.contains("threshold") || !trigger["threshold"].is_number()) {
+            if (!trigger.contains("threshold") || !trigger["threshold"].is_number() ||
+                !std::isfinite(trigger["threshold"].get<double>())) {
                 return "sensor_threshold trigger needs a numeric threshold";
             }
         }
     } else if (type == "time") {
-        const int hour = trigger.value("hour", -1);
-        const int minute = trigger.value("minute", -1);
-        if (hour < 0 || hour > 23) return "time trigger needs an hour from 0 to 23";
-        if (minute < 0 || minute > 59) return "time trigger needs a minute from 0 to 59";
+        // -1 means any hour or any minute, and has to be asked for
+        const int hour = trigger.value("hour", -2);
+        const int minute = trigger.value("minute", -2);
+        if (hour < -1 || hour > 23) return "time trigger needs an hour from 0 to 23, or -1";
+        if (minute < -1 || minute > 59) return "time trigger needs a minute from 0 to 59, or -1";
         if (trigger.contains("days_of_week")) {
             for (const int day : trigger["days_of_week"].get<std::vector<int>>()) {
                 if (day < 0 || day > 6) return "days_of_week values must be from 0 to 6";
             }
         }
     } else if (type == "time_interval") {
-        if (trigger.value("interval_minutes", 0) <= 0) {
-            return "time_interval trigger needs a positive interval_minutes";
+        const int minutes = trigger.value("interval_minutes", 0);
+        if (minutes <= 0 || minutes > kMaxIntervalMinutes) {
+            return "time_interval trigger needs an interval_minutes from 1 to " +
+                   std::to_string(kMaxIntervalMinutes);
         }
     } else {
         return "unknown trigger type: " + type;
@@ -335,18 +345,46 @@ std::string validateAction(const nlohmann::json& action) {
         }
     } else if (type == "delay") {
         const int delayMs = action.value("delayMs", action.value("delay_ms", 0));
-        if (delayMs <= 0 || delayMs > kMaxDelayMs) {
-            return "delay action needs a delayMs from 1 to " + std::to_string(kMaxDelayMs);
-        }
+        if (delayMs <= 0) return "delay action needs a positive delayMs";
     } else {
         return "unknown action type: " + type;
     }
     return "";
 }
 
-// "triggers" lists every trigger when it's present, and "trigger" is the only one otherwise
+std::string validateCondition(const nlohmann::json& condition) {
+    if (!condition.is_object()) return "a condition must be an object";
+
+    if (condition.value("is_group", false)) {
+        const std::string op = condition.value("group_op", "and");
+        if (op != "and" && op != "or") return "unknown group_op: " + op;
+        if (!condition.contains("children") || !condition["children"].is_array()) {
+            return "a condition group needs children";
+        }
+        for (const auto& child : condition["children"]) {
+            const std::string problem = validateCondition(child);
+            if (!problem.empty()) return problem;
+        }
+        return "";
+    }
+
+    if (!condition.contains("leaf") || !condition["leaf"].is_object()) {
+        return "a condition needs a leaf, or is_group and children";
+    }
+    const auto& leaf = condition["leaf"];
+    if (leaf.value("device_id", "").empty()) return "a condition needs a device_id";
+    if (leaf.value("property", "").empty()) return "a condition needs a property";
+    const std::string op = leaf.value("op", "");
+    if (op != "eq" && op != "neq" && op != "gt" && op != "gte" && op != "lt" && op != "lte") {
+        return "unknown condition op: " + op;
+    }
+    if (!leaf.contains("value")) return "a condition needs a value";
+    return "";
+}
+
+// "trigger" for a single trigger, or "triggers" for several
 nlohmann::json triggerList(const nlohmann::json& j) {
-    if (j.contains("triggers") && j["triggers"].is_array() && !j["triggers"].empty()) {
+    if (j.contains("triggers") && j["triggers"].is_array()) {
         return j["triggers"];
     }
     nlohmann::json triggers = nlohmann::json::array();
@@ -361,6 +399,9 @@ nlohmann::json triggerList(const nlohmann::json& j) {
 std::string Automation::validateJson(const nlohmann::json& j) {
     if (j.value("name", "").empty()) return "name is required";
 
+    if (j.contains("trigger") && j.contains("triggers")) {
+        return "send either trigger or triggers, not both";
+    }
     const nlohmann::json triggers = triggerList(j);
     if (triggers.empty()) return "at least one trigger is required";
     for (const auto& trigger : triggers) {
@@ -371,8 +412,20 @@ std::string Automation::validateJson(const nlohmann::json& j) {
     if (!j.contains("actions") || !j["actions"].is_array() || j["actions"].empty()) {
         return "at least one action is required";
     }
+    int totalDelayMs = 0;
     for (const auto& action : j["actions"]) {
         const std::string problem = validateAction(action);
+        if (!problem.empty()) return problem;
+        if (action.value("type", "") == "delay") {
+            totalDelayMs += action.value("delayMs", action.value("delay_ms", 0));
+            if (totalDelayMs > kMaxTotalDelayMs) {
+                return "delays can total at most " + std::to_string(kMaxTotalDelayMs) + " ms";
+            }
+        }
+    }
+
+    if (j.contains("condition") && !j["condition"].is_null()) {
+        const std::string problem = validateCondition(j["condition"]);
         if (!problem.empty()) return problem;
     }
     return "";

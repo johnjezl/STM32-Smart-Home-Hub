@@ -161,7 +161,7 @@ void AutomationManager::checkIntervalTriggers(uint64_t currentTimeMs) {
 
             for (const auto& trigger : automation->triggers) {
                 if (trigger.type == TriggerType::TimeInterval && trigger.intervalMinutes > 0) {
-                    uint64_t intervalMs = trigger.intervalMinutes * 60 * 1000;
+                    uint64_t intervalMs = static_cast<uint64_t>(trigger.intervalMinutes) * 60 * 1000;
                     uint64_t lastCheck = m_lastIntervalCheck[id];
 
                     if (lastCheck == 0) {

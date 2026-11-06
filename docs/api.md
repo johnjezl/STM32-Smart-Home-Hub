@@ -614,7 +614,17 @@ Create a new automation.
 | time_interval | interval_minutes | Triggers every N minutes |
 | sensor_threshold | deviceId, property, compare_op, threshold | Triggers on each change where the value meets the threshold |
 
-`compare_op` is one of `eq`, `neq`, `gt`, `gte`, `lt` or `lte`. An action can also be `{"type": "delay", "delayMs": 500}`, and `condition` is an optional object that must hold for the actions to run.
+`compare_op` is one of `eq`, `neq`, `gt`, `gte`, `lt` or `lte`. In a `time` trigger, an `hour` or `minute` of -1 means any. An automation with several triggers uses a `triggers` array instead of `trigger`.
+
+An action can also be `{"type": "delay", "delayMs": 500}`. Delays can total at most 60 seconds.
+
+`condition` is optional, and must hold for the actions to run:
+
+```json
+{"leaf": {"device_id": "light1", "property": "on", "op": "eq", "value": true}}
+```
+
+To combine conditions, use `{"is_group": true, "group_op": "and", "children": [ ... ]}`, where `group_op` is `and` or `or`.
 
 **Response (200 OK):**
 ```json
@@ -665,6 +675,8 @@ Update an automation.
   "actions": [ ... ]
 }
 ```
+
+`name`, the trigger and `actions` are required. Leaving out `enabled`, `description` or `condition` keeps the current value.
 
 **Response (200 OK):**
 ```json
