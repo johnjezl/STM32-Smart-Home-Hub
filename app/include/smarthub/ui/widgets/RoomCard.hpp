@@ -27,6 +27,11 @@ struct RoomData {
     std::string climate;          // Such as "72°F / 45%"; empty if the room has no such sensors
     int activeDevices = 0;        // Number of active lights/switches
     bool motionDetected = false;  // Outlines the card
+
+    bool operator==(const RoomData& other) const {
+        return id == other.id && name == other.name && climate == other.climate &&
+               activeDevices == other.activeDevices && motionDetected == other.motionDetected;
+    }
 };
 
 /**
@@ -94,6 +99,8 @@ private:
 #endif
 
     std::string m_roomId;
+    RoomData m_shown;
+    bool m_hasShown = false;
     ClickCallback m_onClick;
 };
 

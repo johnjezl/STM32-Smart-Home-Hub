@@ -4,6 +4,7 @@
 
 #include <smarthub/devices/SensorDisplay.hpp>
 
+#include <cmath>
 #include <cstdio>
 
 namespace smarthub {
@@ -22,6 +23,13 @@ std::optional<bool> boolIn(const nlohmann::json& state, const char* key) {
         return std::nullopt;
     }
     return state[key].get<bool>();
+}
+
+// printf rounds ties to even, which would show 72°F here and 73°F on the web for 72.5°F
+double roundHalfUp(double value, int decimals) {
+    const double scale = std::pow(10.0, decimals);
+    const double rounded = std::round(value * scale) / scale;
+    return rounded == 0.0 ? 0.0 : rounded;  // No "-0°F"
 }
 
 bool reportsTemperature(DeviceType type) {
@@ -49,14 +57,14 @@ std::optional<double> humidityPercent(const nlohmann::json& state) {
 std::string temperatureText(const std::optional<double>& fahrenheit, int decimals) {
     if (!fahrenheit) return "--°F";
     char buf[32];
-    std::snprintf(buf, sizeof(buf), "%.*f°F", decimals, *fahrenheit);
+    std::snprintf(buf, sizeof(buf), "%.*f°F", decimals, roundHalfUp(*fahrenheit, decimals));
     return buf;
 }
 
 std::string humidityText(const std::optional<double>& percent) {
     if (!percent) return "--%";
     char buf[16];
-    std::snprintf(buf, sizeof(buf), "%.0f%%", *percent);
+    std::snprintf(buf, sizeof(buf), "%.0f%%", roundHalfUp(*percent, 0));
     return buf;
 }
 
@@ -104,10 +112,18 @@ RoomSensors summarizeRoomSensors(const std::vector<DevicePtr>& devices) {
         }
         if (type == DeviceType::MotionSensor) {
             room.hasMotionSensor = true;
-            room.motionDetected = room.motionDetected || boolIn(state, "motion").value_or(false);
+            if (const auto motion = boolIn(state, "motion")) {
+                room.motionReported = true;
+                room.motionDetected = room.motionDetected || *motion;
+            }
         }
     }
     return room;
+}
+
+std::string roomMotionText(const RoomSensors& sensors) {
+    if (!sensors.motionReported) return "--";
+    return sensors.motionDetected ? "Motion" : "Clear";
 }
 
 std::string roomClimateText(const RoomSensors& sensors) {

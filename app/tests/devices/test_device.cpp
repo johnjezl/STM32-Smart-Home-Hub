@@ -383,6 +383,9 @@ TEST(SensorDisplay, TemperatureWithHumidityIsAMultiSensor) {
 
 TEST(SensorDisplay, MotionSensorReadsMotion) {
     MotionSensor sensor("m", "M");
+    EXPECT_EQ(sensorValueText(sensor.type(), sensor.getState()), "--");
+
+    sensor.setMotionDetected(false);
     EXPECT_EQ(sensorValueText(sensor.type(), sensor.getState()), "Clear");
 
     sensor.setMotionDetected(true);
@@ -444,4 +447,24 @@ TEST(SensorDisplay, MotionFromAnySensorInTheRoom) {
     const RoomSensors room = summarizeRoomSensors(devices);
     EXPECT_TRUE(room.hasMotionSensor);
     EXPECT_TRUE(room.motionDetected);
+}
+
+TEST(SensorDisplay, RoomIsNotClearBeforeItsMotionSensorReports) {
+    auto sensor = std::make_shared<MotionSensor>("m", "M");
+    std::vector<DevicePtr> devices{sensor};
+    EXPECT_TRUE(summarizeRoomSensors(devices).hasMotionSensor);
+    EXPECT_EQ(roomMotionText(summarizeRoomSensors(devices)), "--");
+
+    sensor->setMotionDetected(false);
+    EXPECT_EQ(roomMotionText(summarizeRoomSensors(devices)), "Clear");
+    sensor->setMotionDetected(true);
+    EXPECT_EQ(roomMotionText(summarizeRoomSensors(devices)), "Motion");
+}
+
+TEST(SensorDisplay, RoundsTheSameWayAsTheWebDashboard) {
+    // Compare with "should round the same way as the LCD" in web/tests/test_app.js
+    EXPECT_EQ(temperatureText(72.5), "73°F");
+    EXPECT_EQ(temperatureText(72.25, 1), "72.3°F");
+    EXPECT_EQ(humidityText(44.5), "45%");
+    EXPECT_EQ(temperatureText(-0.04), "0°F");
 }

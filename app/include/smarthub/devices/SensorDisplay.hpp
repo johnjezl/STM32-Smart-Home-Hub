@@ -22,6 +22,7 @@ struct RoomSensors {
     bool hasHumiditySensor = false;
     std::optional<double> humidity;
     bool hasMotionSensor = false;
+    bool motionReported = false;
     bool motionDetected = false;
 
     bool any() const { return hasTemperatureSensor || hasHumiditySensor || hasMotionSensor; }
@@ -38,6 +39,9 @@ std::string temperatureText(const std::optional<double>& fahrenheit, int decimal
 
 /** "45%" or "--%" */
 std::string humidityText(const std::optional<double>& percent);
+
+/** "Motion" or "Clear", or "--" before any motion sensor in the room has reported */
+std::string roomMotionText(const RoomSensors& sensors);
 
 /** One device's current value, such as "72.5°F / 45%", "Motion" or "Closed". "--" with no reading. */
 std::string sensorValueText(DeviceType type, const nlohmann::json& state);

@@ -434,6 +434,8 @@ class SmartHubApp {
     }
 
     renderRooms() {
+        this.refreshRoomDetail();
+
         const container = document.getElementById('rooms-grid');
         container.innerHTML = '';
 
@@ -448,7 +450,7 @@ class SmartHubApp {
         }
 
         this.rooms.forEach(room => {
-            const roomDevices = [...this.devices, ...this.sensors].filter(d => d.room === room.name);
+            const roomDevices = this.devicesInRoom(room);
             const activeCount = roomDevices.filter(d => d.state?.on).length;
             const sensors = SensorDisplay.roomSensors(roomDevices);
 
@@ -481,13 +483,21 @@ class SmartHubApp {
 
             container.appendChild(card);
         });
+    }
 
-        // Keep an open room detail current as readings arrive
-        if (this.detailRoomId) {
-            const room = this.rooms.find(r => r.id === this.detailRoomId);
-            if (room) {
-                this.renderRoomDetail(room);
-            }
+    // The LCD assigns a device to a room by id and this dashboard by name
+    devicesInRoom(room) {
+        return [...this.devices, ...this.sensors].filter(d => d.room === room.name || d.room === room.id);
+    }
+
+    // Keeps an open room detail current as readings arrive, and closes it if the room was deleted
+    refreshRoomDetail() {
+        if (!this.detailRoomId) return;
+        const room = this.rooms.find(r => r.id === this.detailRoomId);
+        if (room) {
+            this.renderRoomDetail(room);
+        } else {
+            this.closeAllModals();
         }
     }
 
@@ -500,7 +510,7 @@ class SmartHubApp {
     renderRoomDetail(room) {
         document.getElementById('room-detail-name').textContent = room.name;
 
-        const roomDevices = [...this.devices, ...this.sensors].filter(d => d.room === room.name);
+        const roomDevices = this.devicesInRoom(room);
         const sensors = SensorDisplay.roomSensors(roomDevices);
 
         document.getElementById('room-sensor-panel').classList.toggle('hidden',
@@ -515,7 +525,7 @@ class SmartHubApp {
         document.getElementById('room-motion-section').classList.toggle('hidden', !sensors.hasMotionSensor);
         document.getElementById('room-motion-indicator').classList.toggle('active', sensors.motionDetected);
         const motionLabel = document.getElementById('room-motion-label');
-        motionLabel.textContent = sensors.motionDetected ? 'Motion' : 'Clear';
+        motionLabel.textContent = SensorDisplay.roomMotionText(sensors);
         motionLabel.classList.toggle('active', sensors.motionDetected);
 
         document.getElementById('room-empty-devices').classList.toggle('hidden', roomDevices.length > 0);
@@ -1520,12 +1530,15 @@ class SmartHubApp {
                 this.showToast(`${on ? 'Turned on' : 'Turned off'}`, 'success');
             } else {
                 this.showToast('Failed to update device', 'error');
-                this.renderDevices();  // Put the control back to the real state
+                // Put the controls back to the real state
+                this.renderDevices();
+                this.refreshRoomDetail();
             }
         } catch (error) {
             console.error('Toggle error:', error);
             this.showToast('Connection error', 'error');
             this.renderDevices();
+            this.refreshRoomDetail();
         }
     }
 
@@ -1552,7 +1565,9 @@ class SmartHubApp {
                 await this.applyDeviceResponse(deviceId, response);
             } else {
                 this.showToast('Failed to update device', 'error');
-                this.renderDevices();  // Put the control back to the real state
+                // Put the controls back to the real state
+                this.renderDevices();
+                this.refreshRoomDetail();
             }
         } catch (error) {
             console.error('Brightness error:', error);
