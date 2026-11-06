@@ -177,6 +177,15 @@ TEST(ChartValues, InterpolatesBetweenReadings) {
     EXPECT_FALSE(values[38].has_value());
 }
 
+TEST(ChartValues, NeighbouringPointsOnALongViewAreJoined) {
+    const uint64_t now = 1000000;
+    const uint64_t week = 7 * 86400;
+    const uint64_t slot = week / 59;
+    // Averaged points whose timing skips a slot, from a sensor that never stopped reporting
+    const auto values = chartValues({{now - 3 * slot, 70.0f}, {now - slot, 72.0f}}, now, week, 60);
+    EXPECT_TRUE(values[57].has_value());
+}
+
 TEST(ChartValues, LongSilenceStaysAGap) {
     const uint64_t now = 1000000;
     const uint64_t day = 86400;
