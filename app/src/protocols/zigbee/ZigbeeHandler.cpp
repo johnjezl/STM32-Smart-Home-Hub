@@ -158,6 +158,11 @@ bool ZigbeeHandler::initialize() {
         std::lock_guard<std::mutex> lock(m_pairingMutex);
         m_stopPairing = false;
     }
+    {
+        std::lock_guard<std::mutex> lock(m_enrollMutex);
+        m_stopEnrolling = false;
+        m_enrollQueue.clear();
+    }
 
     LOG_INFO("Initializing Zigbee handler on %s at %d baud", port.c_str(), baudRate);
 
@@ -192,6 +197,8 @@ bool ZigbeeHandler::initialize() {
                uint8_t command, const std::vector<uint8_t>& payload) {
             onCommandReceived(nwkAddr, endpoint, cluster, command, payload);
         });
+
+    m_enrollThread = std::thread(&ZigbeeHandler::enrollWorker, this);
 
     // Initialize coordinator
     if (!m_coordinator->initialize()) {
@@ -258,7 +265,7 @@ void ZigbeeHandler::shutdown() {
         m_savedDevices.clear();
         m_addressChecks.clear();
         m_lastAddressLookup.clear();
-        m_deviceTypes.clear();
+        m_zoneAlarms.clear();
     }
 
     m_initialized = false;
@@ -536,7 +543,11 @@ void ZigbeeHandler::restoreDevice(const IDevice& device) {
         m_ieeeToDeviceId[*ieeeAddr] = device.id();
         m_deviceIdToIeee[device.id()] = *ieeeAddr;
         m_savedDevices[*ieeeAddr] = device.id();
-        m_deviceTypes[*ieeeAddr] = device.type();
+        std::optional<uint16_t> zoneType;
+        if (state.contains("zoneType") && state["zoneType"].is_number_integer()) {
+            zoneType = static_cast<uint16_t>(state["zoneType"].get<int>());
+        }
+        m_zoneAlarms[*ieeeAddr] = zoneAlarmFor(device.type(), zoneType);
         if (state.contains("endpoint") && state["endpoint"].is_number_integer()) {
             const int endpoint = state["endpoint"].get<int>();
             if (endpoint >= 1 && endpoint <= 240) {
@@ -574,7 +585,7 @@ void ZigbeeHandler::forgetDevice(const std::string& deviceId) {
     m_ieeeToDeviceId.erase(ieeeAddr);
     m_deviceEndpoints.erase(ieeeAddr);
     m_savedDevices.erase(ieeeAddr);
-    m_deviceTypes.erase(ieeeAddr);
+    m_zoneAlarms.erase(ieeeAddr);
     m_addressChecks.erase(std::remove(m_addressChecks.begin(), m_addressChecks.end(), ieeeAddr),
                           m_addressChecks.end());
 }
@@ -688,6 +699,15 @@ void ZigbeeHandler::stopPairing() {
     for (auto& [ieeeAddr, task] : tasks) {
         task.thread.join();
     }
+
+    {
+        std::lock_guard<std::mutex> lock(m_enrollMutex);
+        m_stopEnrolling = true;
+    }
+    m_enrollCv.notify_all();
+    if (m_enrollThread.joinable()) {
+        m_enrollThread.join();
+    }
 }
 
 bool ZigbeeHandler::pairingStopped() {
@@ -788,8 +808,17 @@ uint64_t ZigbeeHandler::pairDevice(uint64_t ieeeAddr) {
         }
     }
 
-    fetchDeviceDetails(ieeeAddr);
-    if (pairingStopped()) {
+    const bool fetched = fetchDeviceDetails(ieeeAddr);
+    {
+        // Announcing during those reads means they went to an old address, so start over
+        std::lock_guard<std::mutex> lock(m_pairingMutex);
+        auto task = m_pairingTasks.find(ieeeAddr);
+        if (m_stopPairing || task == m_pairingTasks.end() || task->second.attempt != attempt) {
+            return attempt;
+        }
+    }
+    if (!fetched) {
+        reportPairingFailure(ieeeAddr, "Device did not say what kind of sensor it is. Try re-pairing.");
         return attempt;
     }
     finishPairing(ieeeAddr);
@@ -807,10 +836,10 @@ void ZigbeeHandler::reportPairingFailure(uint64_t ieeeAddr, const std::string& m
     }
 }
 
-void ZigbeeHandler::fetchDeviceDetails(uint64_t ieeeAddr) {
+bool ZigbeeHandler::fetchDeviceDetails(uint64_t ieeeAddr) {
     const auto info = m_coordinator->getDevice(ieeeAddr);
     if (!info) {
-        return;  // It left
+        return true;  // It left, which the next step handles
     }
 
     const auto endpointWith = [&](uint16_t cluster) -> std::optional<uint8_t> {
@@ -830,16 +859,16 @@ void ZigbeeHandler::fetchDeviceDetails(uint64_t ieeeAddr) {
     }
 
     if (savedDeviceId(ieeeAddr) || pairingStopped()) {
-        return;  // What it is hasn't changed
+        return true;  // What it is hasn't changed
     }
 
     std::string manufacturer;
     std::string model;
     if (const auto basicEndpoint = endpointWith(zcl::cluster::BASIC)) {
-        for (const ZclAttributeValue& attr : m_coordinator->readAttributes(
-                 info->networkAddress, *basicEndpoint, zcl::cluster::BASIC,
-                 {zcl::attr::basic::MANUFACTURER_NAME, zcl::attr::basic::MODEL_ID},
-                 m_pairingReadTimeoutMs)) {
+        const auto attributes = m_coordinator->readAttributes(
+            info->networkAddress, *basicEndpoint, zcl::cluster::BASIC,
+            {zcl::attr::basic::MANUFACTURER_NAME, zcl::attr::basic::MODEL_ID}, m_pairingReadTimeoutMs);
+        for (const ZclAttributeValue& attr : attributes.value_or(std::vector<ZclAttributeValue>{})) {
             if (attr.attributeId == zcl::attr::basic::MANUFACTURER_NAME) {
                 manufacturer = attr.asString();
             } else if (attr.attributeId == zcl::attr::basic::MODEL_ID) {
@@ -849,18 +878,60 @@ void ZigbeeHandler::fetchDeviceDetails(uint64_t ieeeAddr) {
     }
 
     std::optional<uint16_t> zoneType;
-    if (zoneEndpoint && !pairingStopped()) {
-        for (const ZclAttributeValue& attr : m_coordinator->readAttributes(
-                 info->networkAddress, *zoneEndpoint, zcl::cluster::IAS_ZONE,
-                 {zcl::attr::ias_zone::ZONE_TYPE}, m_pairingReadTimeoutMs)) {
-            zoneType = attr.asUint16();
+    std::optional<uint16_t> zoneStatus;
+    if (zoneEndpoint) {
+        // It decides what the device is for good, so it's worth a second try, and not worth guessing
+        std::optional<std::vector<ZclAttributeValue>> attributes;
+        for (int attempt = 0; attempt < 2 && !attributes && !pairingStopped(); attempt++) {
+            attributes = m_coordinator->readAttributes(
+                info->networkAddress, *zoneEndpoint, zcl::cluster::IAS_ZONE,
+                {zcl::attr::ias_zone::ZONE_TYPE, zcl::attr::ias_zone::ZONE_STATUS},
+                m_pairingReadTimeoutMs);
+        }
+        if (!attributes) {
+            return false;
+        }
+        for (const ZclAttributeValue& attr : *attributes) {
+            if (attr.attributeId == zcl::attr::ias_zone::ZONE_TYPE) {
+                zoneType = attr.asUint16();
+            } else if (attr.attributeId == zcl::attr::ias_zone::ZONE_STATUS) {
+                zoneStatus = attr.asUint16();
+            }
         }
         if (!zoneType) {
-            LOG_WARN("Zone type of 0x%016" PRIX64 " unknown; assuming a motion sensor", ieeeAddr);
+            LOG_WARN("0x%016" PRIX64 " has no zone type; assuming a motion sensor", ieeeAddr);
         }
     }
 
-    m_coordinator->setDeviceDetails(ieeeAddr, manufacturer, model, zoneType);
+    m_coordinator->setDeviceDetails(ieeeAddr, manufacturer, model, zoneType, zoneStatus);
+    return true;
+}
+
+ZigbeeHandler::ZoneAlarm ZigbeeHandler::zoneAlarmFor(DeviceType type, std::optional<uint16_t> zoneType) {
+    if (type == DeviceType::ContactSensor) {
+        return ZoneAlarm::Open;
+    }
+    // A leak or smoke alarm isn't motion, and mustn't set off what motion sets off
+    if (type == DeviceType::MotionSensor && (!zoneType || *zoneType == zcl::zone_type::MOTION_SENSOR)) {
+        return ZoneAlarm::Motion;
+    }
+    return ZoneAlarm::Other;
+}
+
+void ZigbeeHandler::enrollWorker() {
+    constexpr uint8_t kZoneId = 1;
+    std::unique_lock<std::mutex> lock(m_enrollMutex);
+    for (;;) {
+        m_enrollCv.wait(lock, [this] { return m_stopEnrolling || !m_enrollQueue.empty(); });
+        if (m_stopEnrolling) {
+            return;
+        }
+        const auto [nwkAddr, endpoint] = m_enrollQueue.front();
+        m_enrollQueue.pop_front();
+        lock.unlock();
+        m_coordinator->sendZoneEnrollResponse(nwkAddr, endpoint, kZoneId);
+        lock.lock();
+    }
 }
 
 void ZigbeeHandler::enrollIasZone(uint16_t nwkAddr, uint8_t endpoint) {
@@ -885,18 +956,18 @@ void ZigbeeHandler::notifyZoneStatus(const std::string& deviceId, uint64_t ieeeA
     notifyState(deviceId, "tamper", (status & 0x04) != 0);
     notifyState(deviceId, "lowBattery", (status & 0x08) != 0);
 
-    DeviceType type = DeviceType::Unknown;
+    ZoneAlarm meaning = ZoneAlarm::Other;
     {
         std::lock_guard<std::mutex> lock(m_deviceMutex);
-        auto it = m_deviceTypes.find(ieeeAddr);
-        if (it != m_deviceTypes.end()) {
-            type = it->second;
+        auto it = m_zoneAlarms.find(ieeeAddr);
+        if (it != m_zoneAlarms.end()) {
+            meaning = it->second;
         }
     }
-    if (type == DeviceType::MotionSensor) {
+    if (meaning == ZoneAlarm::Motion) {
         notifyState(deviceId, "motion", alarm);
-    } else if (type == DeviceType::ContactSensor) {
-        notifyState(deviceId, "contact", !alarm);  // A contact sensor's alarm means it's open
+    } else if (meaning == ZoneAlarm::Open) {
+        notifyState(deviceId, "contact", !alarm);
     }
 }
 
@@ -920,7 +991,6 @@ void ZigbeeHandler::finishPairing(uint64_t ieeeAddr) {
             std::lock_guard<std::mutex> lock(m_deviceMutex);
             m_ieeeToDeviceId[ieeeAddr] = *savedId;
             m_deviceIdToIeee[*savedId] = ieeeAddr;
-            m_deviceTypes.emplace(ieeeAddr, savedType);
             if (savedEndpoint) {
                 m_deviceEndpoints[ieeeAddr] = *savedEndpoint;
             }
@@ -945,6 +1015,19 @@ void ZigbeeHandler::finishPairing(uint64_t ieeeAddr) {
     if (endpoint) {
         device->setState("endpoint", static_cast<int>(*endpoint));  // Commands need it after a restart
     }
+    if (deviceInfo->zoneType) {
+        device->setState("zoneType", static_cast<int>(*deviceInfo->zoneType));
+    }
+    // The state it's in now, as a door might not move for days
+    if (deviceInfo->zoneStatus) {
+        const bool alarm = (*deviceInfo->zoneStatus & 0x03) != 0;
+        const ZoneAlarm meaning = zoneAlarmFor(type, deviceInfo->zoneType);
+        if (meaning == ZoneAlarm::Motion) {
+            device->setState("motion", alarm);
+        } else if (meaning == ZoneAlarm::Open) {
+            device->setState("contact", !alarm);
+        }
+    }
 
     // Store mapping
     std::string deviceId = device->id();
@@ -952,7 +1035,7 @@ void ZigbeeHandler::finishPairing(uint64_t ieeeAddr) {
         std::lock_guard<std::mutex> lock(m_deviceMutex);
         m_ieeeToDeviceId[ieeeAddr] = deviceId;
         m_deviceIdToIeee[deviceId] = ieeeAddr;
-        m_deviceTypes[ieeeAddr] = type;
+        m_zoneAlarms[ieeeAddr] = zoneAlarmFor(type, deviceInfo->zoneType);
         if (endpoint) {
             m_deviceEndpoints[ieeeAddr] = *endpoint;
         }
@@ -1120,8 +1203,11 @@ void ZigbeeHandler::onCommandReceived(uint16_t nwkAddr, uint8_t endpoint,
     // A device asks during pairing, before it has an id
     constexpr uint8_t kZoneEnrollRequest = 0x01;
     if (cluster == zcl::cluster::IAS_ZONE && command == kZoneEnrollRequest) {
-        constexpr uint8_t kZoneId = 1;
-        m_coordinator->sendZoneEnrollResponse(nwkAddr, endpoint, kZoneId);
+        {
+            std::lock_guard<std::mutex> lock(m_enrollMutex);
+            m_enrollQueue.emplace_back(nwkAddr, endpoint);
+        }
+        m_enrollCv.notify_all();
         return;
     }
 
@@ -1303,10 +1389,13 @@ DeviceType ZigbeeHandler::inferDeviceType(const ZigbeeDeviceInfo& info) {
         return DeviceType::ColorLight;
     } else if (hasLevel && hasOnOff) {
         return DeviceType::Dimmer;
+    } else if (hasOccupancy) {
+        // Before temperature: motion sensors often measure it too, but not the other way around
+        return DeviceType::MotionSensor;
     } else if (hasTemperature || hasHumidity) {
         // Prioritize temperature sensor for sensors with temp/humidity clusters
         return DeviceType::TemperatureSensor;
-    } else if (hasIasZone || hasOccupancy) {
+    } else if (hasIasZone) {
         return DeviceType::MotionSensor;
     } else if (hasOnOff) {
         return DeviceType::Switch;

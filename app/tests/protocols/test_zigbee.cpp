@@ -6,6 +6,9 @@
  */
 
 #include <gtest/gtest.h>
+#include <cstdio>
+#include <unistd.h>
+#include <fstream>
 #include <smarthub/protocols/zigbee/ZnpFrame.hpp>
 #include <smarthub/protocols/zigbee/ZnpTransport.hpp>
 #include <smarthub/protocols/zigbee/ZigbeeCoordinator.hpp>
@@ -796,4 +799,22 @@ TEST(ZigbeeProtocolTest, HandlerCreation) {
     auto handler = std::make_unique<ZigbeeHandler>(eventBus, config);
     EXPECT_NE(handler, nullptr);
     EXPECT_EQ(handler->name(), "zigbee");
+}
+
+TEST(ZigbeeDeviceDatabase, UnknownNamesMatchNothing) {
+    ZigbeeDeviceDatabase db;
+    const std::string path = "/tmp/test_zigbee_names_" + std::to_string(getpid()) + ".json";
+    {
+        std::ofstream file(path);
+        file << R"({"devices":[{"manufacturer":"IKEA","model":"Bulb","deviceType":"dimmer"},
+                               {"manufacturer":"Acme","model":"Door","deviceType":"contact_sensor"}]})";
+    }
+    ASSERT_TRUE(db.load(path));
+    std::remove(path.c_str());
+
+    EXPECT_FALSE(db.lookup("", "").has_value());
+    EXPECT_FALSE(db.lookup("IKEA", "").has_value());
+    EXPECT_FALSE(db.lookup("", "Bulb").has_value());
+    ASSERT_TRUE(db.lookup("Acme", "Door").has_value());
+    EXPECT_EQ(db.lookup("Acme", "Door")->deviceType, DeviceType::ContactSensor);
 }

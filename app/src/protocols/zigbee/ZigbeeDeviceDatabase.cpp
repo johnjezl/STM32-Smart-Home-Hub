@@ -82,6 +82,11 @@ bool ZigbeeDeviceDatabase::loadFromJson(const nlohmann::json& json) {
 std::optional<ZigbeeDeviceEntry> ZigbeeDeviceDatabase::lookup(
     const std::string& manufacturer, const std::string& model) const {
 
+    // The partial match below would find anything in an empty name
+    if (manufacturer.empty() || model.empty()) {
+        return std::nullopt;
+    }
+
     std::string key = makeKey(manufacturer, model);
     auto it = m_index.find(key);
     if (it != m_index.end()) {
@@ -148,6 +153,8 @@ DeviceType ZigbeeDeviceDatabase::parseDeviceType(const std::string& typeStr) con
         return DeviceType::ColorLight;
     } else if (lower == "temperature" || lower == "temperature_sensor" || lower == "temp") {
         return DeviceType::TemperatureSensor;
+    } else if (lower == "contact" || lower == "contact_sensor" || lower == "door") {
+        return DeviceType::ContactSensor;
     } else if (lower == "motion" || lower == "motion_sensor" || lower == "occupancy") {
         return DeviceType::MotionSensor;
     }

@@ -288,8 +288,11 @@ When a device joins without a database entry, the handler infers the type from c
 | On/Off + Level + Color | ColorLight |
 | On/Off + Level | Dimmer |
 | On/Off only | Switch |
+| Occupancy | MotionSensor |
 | Temperature | TemperatureSensor |
-| IAS Zone / Occupancy | MotionSensor |
+| IAS Zone | By its Zone Type: `0x0015` is ContactSensor, anything else is MotionSensor |
+
+An IAS Zone device's Zone Type is read during pairing and comes first. If it doesn't answer, pairing fails rather than guess. Only a motion zone's alarm sets `motion`, so a leak sensor can't set off motion automations, though it still appears as a motion sensor until there's a type for it.
 
 ## Commands
 

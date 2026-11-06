@@ -10,6 +10,7 @@
 #include "ZigbeeCoordinator.hpp"
 #include "ZigbeeDeviceDatabase.hpp"
 #include <map>
+#include <utility>
 #include <deque>
 #include <chrono>
 #include <atomic>
@@ -143,7 +144,7 @@ private:
     std::optional<uint64_t> deviceIdToIeee(const std::string& deviceId) const;
     std::optional<std::string> savedDeviceId(uint64_t ieeeAddr) const;
     static std::optional<uint64_t> parseIeeeAddress(std::string text);
-    void fetchDeviceDetails(uint64_t ieeeAddr);
+    bool fetchDeviceDetails(uint64_t ieeeAddr);  // False if pairing shouldn't go on
     void enrollIasZone(uint16_t nwkAddr, uint8_t endpoint);
     void notifyZoneStatus(const std::string& deviceId, uint64_t ieeeAddr, uint16_t status);
     void lookUpNetworkAddress(uint64_t ieeeAddr);  // Caller keeps the coordinator from going away
@@ -203,7 +204,18 @@ private:
     // Devices the hub keeps, IEEE to device id. Announcing again doesn't make one of these new, and
     // this outlives a leave, because the hub still has the device when it rejoins.
     std::map<uint64_t, std::string> m_savedDevices;
-    std::map<uint64_t, DeviceType> m_deviceTypes;  // To say what an IAS zone alarm means
+    enum class ZoneAlarm { Other, Motion, Open };  // What an IAS zone's alarm means
+    std::map<uint64_t, ZoneAlarm> m_zoneAlarms;
+    static ZoneAlarm zoneAlarmFor(DeviceType type, std::optional<uint16_t> zoneType);
+
+    // Answers devices that ask to enroll. The radio's reply has to be waited for, which the thread
+    // that receives their requests can't do, as it would be the one receiving that reply.
+    void enrollWorker();
+    std::thread m_enrollThread;
+    std::mutex m_enrollMutex;
+    std::condition_variable m_enrollCv;
+    std::deque<std::pair<uint16_t, uint8_t>> m_enrollQueue;
+    bool m_stopEnrolling = false;
     std::deque<uint64_t> m_addressChecks;  // Saved addresses still to confirm
     std::chrono::steady_clock::time_point m_lastAddressCheck{};
     std::map<uint64_t, std::chrono::steady_clock::time_point> m_lastAddressLookup;

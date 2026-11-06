@@ -39,6 +39,7 @@ struct FakeZigbeeDevice {
     std::string manufacturer = {};
     std::string model = {};
     std::optional<uint16_t> zoneType = {};
+    std::optional<uint16_t> zoneStatus = {};
     /** Doesn't answer Read Attributes at all, rather than saying it has no such attribute */
     bool ignoresReads = false;
 };
@@ -377,6 +378,12 @@ private:
                 zcl.push_back(zcl::datatype::ENUM16);
                 zcl.push_back(static_cast<uint8_t>(*device->second.zoneType & 0xFF));
                 zcl.push_back(static_cast<uint8_t>(*device->second.zoneType >> 8));
+            } else if (cluster == zcl::cluster::IAS_ZONE && attrId == zcl::attr::ias_zone::ZONE_STATUS &&
+                       device->second.zoneStatus) {
+                zcl.push_back(zcl::status::SUCCESS);
+                zcl.push_back(zcl::datatype::BITMAP16);
+                zcl.push_back(static_cast<uint8_t>(*device->second.zoneStatus & 0xFF));
+                zcl.push_back(static_cast<uint8_t>(*device->second.zoneStatus >> 8));
             } else {
                 zcl.push_back(zcl::status::UNSUPPORTED_ATTRIBUTE);
             }

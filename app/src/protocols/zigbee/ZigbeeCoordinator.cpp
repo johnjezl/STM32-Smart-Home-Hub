@@ -364,13 +364,13 @@ std::optional<ZclAttributeValue> ZigbeeCoordinator::readAttribute(
         uint16_t nwkAddr, uint8_t endpoint, uint16_t cluster, uint16_t attrId) {
     constexpr int kTimeoutMs = 3000;
     auto values = readAttributes(nwkAddr, endpoint, cluster, {attrId}, kTimeoutMs);
-    if (values.empty()) {
+    if (!values || values->empty()) {
         return std::nullopt;
     }
-    return values.front();
+    return values->front();
 }
 
-std::vector<ZclAttributeValue> ZigbeeCoordinator::readAttributes(
+std::optional<std::vector<ZclAttributeValue>> ZigbeeCoordinator::readAttributes(
         uint16_t nwkAddr, uint8_t endpoint, uint16_t cluster,
         const std::vector<uint16_t>& attributes, int timeoutMs) {
     // Build ZCL Read Attributes frame
@@ -388,7 +388,7 @@ std::vector<ZclAttributeValue> ZigbeeCoordinator::readAttributes(
     {
         std::lock_guard<std::mutex> lock(m_readMutex);
         if (m_readsCancelled) {
-            return {};
+            return std::nullopt;
         }
         m_pendingReads[key];  // Before sending, as the answer can arrive before request() returns
     }
@@ -413,7 +413,10 @@ std::vector<ZclAttributeValue> ZigbeeCoordinator::readAttributes(
             return m_readsCancelled || m_pendingReads[key].answered;
         });
     }
-    std::vector<ZclAttributeValue> values = std::move(m_pendingReads[key].values);
+    std::optional<std::vector<ZclAttributeValue>> values;
+    if (m_pendingReads[key].answered) {
+        values = std::move(m_pendingReads[key].values);
+    }
     m_pendingReads.erase(key);
     return values;
 }
@@ -478,7 +481,8 @@ void ZigbeeCoordinator::handleReadAttributesRsp(uint16_t srcAddr, uint8_t transS
 }
 
 void ZigbeeCoordinator::setDeviceDetails(uint64_t ieeeAddr, const std::string& manufacturer,
-                                         const std::string& model, std::optional<uint16_t> zoneType) {
+                                         const std::string& model, std::optional<uint16_t> zoneType,
+                                         std::optional<uint16_t> zoneStatus) {
     std::lock_guard<std::mutex> lock(m_deviceMutex);
     auto it = m_devices.find(ieeeAddr);
     if (it == m_devices.end()) {
@@ -487,6 +491,7 @@ void ZigbeeCoordinator::setDeviceDetails(uint64_t ieeeAddr, const std::string& m
     if (!manufacturer.empty()) it->second.manufacturer = manufacturer;
     if (!model.empty()) it->second.model = model;
     if (zoneType) it->second.zoneType = zoneType;
+    if (zoneStatus) it->second.zoneStatus = zoneStatus;
 }
 
 bool ZigbeeCoordinator::sendZoneEnrollResponse(uint16_t nwkAddr, uint8_t endpoint, uint8_t zoneId) {
@@ -505,7 +510,10 @@ bool ZigbeeCoordinator::sendZoneEnrollResponse(uint16_t nwkAddr, uint8_t endpoin
     req.appendByte(15);
     req.appendByte(static_cast<uint8_t>(zclFrame.size()));
     req.appendBytes(zclFrame);
-    return m_transport->send(req);
+
+    // Not send(): another AF request could take this one's response for its own
+    auto rsp = m_transport->request(req);
+    return rsp && rsp->getByte(0) == 0;
 }
 
 bool ZigbeeCoordinator::writeAttribute(uint16_t nwkAddr, uint8_t endpoint,
