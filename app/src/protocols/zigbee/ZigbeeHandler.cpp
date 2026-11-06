@@ -1116,13 +1116,22 @@ void ZigbeeHandler::finishPairing(uint64_t ieeeAddr) {
             if (savedEndpoint) {
                 m_deviceEndpoints[ieeeAddr] = *savedEndpoint;
             }
-            // Merged, as an endpoint that didn't answer this time still has what it had
             auto& known = m_clusterEndpoints[ieeeAddr];
-            for (const auto& [cluster, endpoints] : clusterEndpointsOf(*deviceInfo, savedEndpoint)) {
-                auto& list = known[cluster];
-                for (uint8_t endpoint : endpoints) {
-                    if (std::find(list.begin(), list.end(), endpoint) == list.end()) {
-                        list.push_back(endpoint);
+            const ClusterEndpoints answered = clusterEndpointsOf(*deviceInfo, savedEndpoint);
+            const bool complete = std::all_of(
+                deviceInfo->endpoints.begin(), deviceInfo->endpoints.end(), [&](uint8_t endpoint) {
+                    return !isApplicationEndpoint(endpoint) || deviceInfo->inClusters.count(endpoint) > 0;
+                });
+            if (complete) {
+                known = answered;
+            } else {
+                // One didn't answer, and still has what it had, so this can't be the whole picture
+                for (const auto& [cluster, endpoints] : answered) {
+                    auto& list = known[cluster];
+                    for (uint8_t endpoint : endpoints) {
+                        if (std::find(list.begin(), list.end(), endpoint) == list.end()) {
+                            list.push_back(endpoint);
+                        }
                     }
                 }
             }
