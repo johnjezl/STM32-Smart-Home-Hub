@@ -1057,8 +1057,8 @@ void WebServer::sendPasswordResults() {
                 if (result.isLogin && result.status == 401) {
                     recordLoginFailure(result.clientIp);
                 }
-            } catch (const std::exception& e) {
-                LOG_ERROR("Failed to count a failed login: %s", e.what());
+            } catch (...) {
+                LOG_ERROR("Failed to count a failed login");
             }
 
             // Only after that's counted, so the next attempt from this IP sees it
