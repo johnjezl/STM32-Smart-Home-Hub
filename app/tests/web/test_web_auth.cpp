@@ -218,6 +218,14 @@ protected:
         return "session=" + response.sessionCookie();
     }
 
+    // Only the status, for calling from several threads: request() shares a headers file
+    int postStatus(const std::string& path, const std::string& body) const {
+        return std::atoi(shellOutput(
+            "curl -s --max-time 30 -o /dev/null -w '%{http_code}' -X POST "
+            "-H 'Content-Type: application/json' --data-binary " + shellQuote(body) + " " +
+            shellQuote("http://127.0.0.1:" + std::to_string(s_port) + path)).c_str());
+    }
+
     // Adds an account through the database the application is using
     void addUser(const std::string& username, const std::string& password,
                  const std::string& role) {
@@ -685,6 +693,70 @@ TEST_F(WebAuthTest, OnlyApiResponsesRefuseCaching) {
     startApp();
     EXPECT_TRUE(request("GET", "/api/setup/status").hasHeader("Cache-Control: no-store"));
     EXPECT_FALSE(request("GET", "/index.html").hasHeader("no-store"));
+}
+
+TEST_F(WebAuthTest, OnlyOneOfTwoSetupsAtOnceSucceeds) {
+    startApp();
+
+    std::vector<int> statuses(4);
+    std::vector<std::thread> clients;
+    for (size_t i = 0; i < statuses.size(); ++i) {
+        clients.emplace_back([&, i] {
+            statuses[i] = postStatus("/api/setup", credentials("admin" + std::to_string(i), kAdminPassword));
+        });
+    }
+    for (auto& client : clients) {
+        client.join();
+    }
+
+    int created = 0;
+    for (const int status : statuses) {
+        created += status == 201 ? 1 : 0;
+        EXPECT_TRUE(status == 201 || status == 409 || status == 503) << status;
+    }
+    EXPECT_EQ(created, 1);
+}
+
+TEST_F(WebAuthTest, ManyLoginsAtOnceAllGetAnAnswer) {
+    startApp();
+    setUpAdmin();
+
+    std::vector<int> statuses(12);
+    std::vector<std::thread> clients;
+    for (size_t i = 0; i < statuses.size(); ++i) {
+        clients.emplace_back([&, i] {
+            statuses[i] = postStatus("/api/auth/login", credentials(kAdminName, kAdminPassword));
+        });
+    }
+    for (auto& client : clients) {
+        client.join();
+    }
+
+    int succeeded = 0;
+    for (const int status : statuses) {
+        succeeded += status == 200 ? 1 : 0;
+        EXPECT_TRUE(status == 200 || status == 503) << status;
+    }
+    EXPECT_GE(succeeded, 1);
+}
+
+TEST_F(WebAuthTest, ClientHangingUpDuringALoginStillCountsAndLeavesTheServerWorking) {
+    startApp("security:\n  login_max_failures: 2\n  login_failure_window_seconds: 300\n");
+    setUpAdmin();
+
+    // Gone long before the hash finishes
+    const std::string hangUp =
+        "curl -s --max-time 0.001 -o /dev/null -X POST -H 'Content-Type: application/json' "
+        "--data-binary " + shellQuote(credentials(kAdminName, "Wrong-Password-1")) +
+        " " + shellQuote("http://127.0.0.1:" + std::to_string(s_port) + "/api/auth/login");
+    for (int attempt = 0; attempt < 3; ++attempt) {
+        shellOutput(hangUp);
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    }
+
+    EXPECT_EQ(request("GET", "/api/setup/status").status, 200);
+    const int status = login(kAdminName, "Wrong-Password-1").status;
+    EXPECT_TRUE(status == 401 || status == 429) << status;
 }
 
 TEST_F(WebAuthTest, OnlyTheExactSessionCookieIsAccepted) {

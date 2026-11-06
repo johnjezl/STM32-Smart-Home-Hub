@@ -286,11 +286,18 @@ bool WebServer::start() {
 
     m_running = true;
 
+    {
+        std::lock_guard<std::mutex> lock(m_passwordMutex);
+        m_passwordWorkerStopping = false;
+    }
+    m_passwordWorker = std::thread(&WebServer::passwordWorkerLoop, this);
+
     // Start server thread
     m_thread = std::thread([this]() {
         auto lastCleanup = std::chrono::steady_clock::now();
         while (m_running) {
             mg_mgr_poll(m_mgr, 100);
+            sendPasswordResults();
 
             // Expired sessions only get removed if someone uses them, unless this does it
             const auto now = std::chrono::steady_clock::now();
@@ -311,6 +318,18 @@ void WebServer::stop() {
     if (m_thread.joinable()) {
         m_thread.join();
     }
+
+    // Waits for a hash in progress, which uses the security managers
+    {
+        std::lock_guard<std::mutex> lock(m_passwordMutex);
+        m_passwordWorkerStopping = true;
+        m_passwordJobs.clear();
+    }
+    m_passwordWake.notify_all();
+    if (m_passwordWorker.joinable()) {
+        m_passwordWorker.join();
+    }
+    m_passwordResults.clear();
 
     if (m_mgr) {
         mg_mgr_free(m_mgr);
@@ -904,21 +923,129 @@ void WebServer::apiLogin(struct mg_connection* c, struct mg_http_message* hm) {
         return;
     }
 
+    PasswordJob job;
+    job.username = std::move(username);
+    job.password = std::move(password);
+    job.clientIp = clientIp;
+    queuePasswordJob(c, std::move(job));
+}
+
+bool WebServer::queuePasswordJob(struct mg_connection* c, PasswordJob job) {
+    // Each one takes over a second on the board, so more than this is someone hammering it
+    constexpr size_t kMaxQueuedPasswordJobs = 4;
+
+    job.connectionId = c->id;
+    {
+        std::lock_guard<std::mutex> lock(m_passwordMutex);
+        if (m_passwordJobs.size() >= kMaxQueuedPasswordJobs) {
+            sendJsonWithHeaders(c, 503, "{\"error\":\"Too many logins in progress\"}",
+                                "Retry-After: 5\r\n");
+            return false;
+        }
+        m_passwordJobs.push_back(std::move(job));
+    }
+    m_passwordWake.notify_one();
+    return true;
+}
+
+void WebServer::passwordWorkerLoop() {
+    std::unique_lock<std::mutex> lock(m_passwordMutex);
+    while (true) {
+        m_passwordWake.wait(lock, [this] {
+            return m_passwordWorkerStopping || !m_passwordJobs.empty();
+        });
+        if (m_passwordWorkerStopping) {
+            return;
+        }
+
+        PasswordJob job = std::move(m_passwordJobs.front());
+        m_passwordJobs.pop_front();
+
+        lock.unlock();
+        PasswordResult result;
+        try {
+            result = runPasswordJob(job);
+        } catch (const std::exception& e) {
+            LOG_ERROR("Password check failed: %s", e.what());
+            result.status = 500;
+            result.error = "Internal error";
+        }
+        result.connectionId = job.connectionId;
+        result.clientIp = job.clientIp;
+        lock.lock();
+
+        m_passwordResults.push_back(std::move(result));
+    }
+}
+
+WebServer::PasswordResult WebServer::runPasswordJob(const PasswordJob& job) {
+    PasswordResult result;
+
+    if (job.isSetup) {
+        // Checked again here, because this is what puts setups in order. Two at once must not both
+        // create an administrator.
+        if (m_userMgr->hasAnyUser()) {
+            result.status = 409;
+            result.error = "Setup has already been completed";
+            return result;
+        }
+        if (m_userMgr->createUser(job.username, job.password, "admin")) {
+            LOG_INFO("First-run setup created administrator: %s", job.username.c_str());
+            result.user = m_userMgr->getUser(job.username);
+        }
+        if (!result.user) {
+            result.status = 500;
+            result.error = "Failed to create account";
+        }
+        return result;
+    }
+
     // A malformed username can't belong to an account, so skip the lookup.
     // That also keeps control characters out of the failure log.
-    std::optional<security::User> user;
-    if (security::UserManager::validateUsername(username).empty() &&
-        m_userMgr->authenticate(username, password)) {
-        user = m_userMgr->getUser(username);
+    result.isLogin = true;
+    if (security::UserManager::validateUsername(job.username).empty() &&
+        m_userMgr->authenticate(job.username, job.password)) {
+        result.user = m_userMgr->getUser(job.username);
+    }
+    if (!result.user) {
+        result.status = 401;
+        result.error = "Invalid username or password";
+    }
+    return result;
+}
+
+void WebServer::sendPasswordResults() {
+    std::vector<PasswordResult> results;
+    {
+        std::lock_guard<std::mutex> lock(m_passwordMutex);
+        results.swap(m_passwordResults);
     }
 
-    if (!user) {
-        recordLoginFailure(clientIp);
-        sendError(c, 401, "Invalid username or password");
-        return;
-    }
+    for (const PasswordResult& result : results) {
+        // Counted even if the client has gone, or hanging up would make guesses free
+        if (result.isLogin && !result.user) {
+            recordLoginFailure(result.clientIp);
+        }
 
-    startSession(c, *user, 200);
+        struct mg_connection* c = m_mgr->conns;
+        while (c && c->id != result.connectionId) {
+            c = c->next;
+        }
+        if (!c || c->is_closing) {
+            continue;
+        }
+
+        try {
+            if (result.user) {
+                startSession(c, *result.user, result.isLogin ? 200 : 201);
+            } else {
+                sendError(c, result.status, result.error);
+            }
+        } catch (const std::exception& e) {
+            LOG_ERROR("Failed to answer a login: %s", e.what());
+            sendError(c, 500, "Internal error");
+        }
+    }
 }
 
 void WebServer::apiLogout(struct mg_connection* c, struct mg_http_message* hm) {
@@ -1000,19 +1127,12 @@ void WebServer::apiSetup(struct mg_connection* c, struct mg_http_message* hm) {
         }
     }
 
-    if (!m_userMgr->createUser(username, password, "admin")) {
-        sendError(c, 500, "Failed to create account");
-        return;
-    }
-
-    auto user = m_userMgr->getUser(username);
-    if (!user) {
-        sendError(c, 500, "Failed to create account");
-        return;
-    }
-
-    LOG_INFO("First-run setup created administrator: %s", username.c_str());
-    startSession(c, *user, 201);
+    PasswordJob job;
+    job.isSetup = true;
+    job.username = std::move(username);
+    job.password = std::move(password);
+    job.clientIp = getClientIp(c);
+    queuePasswordJob(c, std::move(job));
 }
 
 void WebServer::apiGetRooms(struct mg_connection* c) {
