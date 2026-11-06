@@ -256,10 +256,13 @@ std::optional<ZnpFrame> ZnpTransport::request(const ZnpFrame& frame, int timeout
     }
 
     // A second caller would overwrite the response this one is waiting for. Waiting has a limit,
-    // so requests can't pile up behind an unresponsive radio.
+    // so requests can't pile up behind an unresponsive radio. It's longer than the usual 5 s
+    // request, so a short request isn't reported as failed just because the radio was busy.
+    // Not std::timed_mutex, because TSan can't follow it and reports false errors.
+    constexpr auto kMaxQueueWait = std::chrono::seconds(6);
     {
         std::unique_lock<std::mutex> slotLock(m_requestSlotMutex);
-        if (!m_requestSlotFreed.wait_for(slotLock, std::chrono::milliseconds(timeoutMs),
+        if (!m_requestSlotFreed.wait_for(slotLock, kMaxQueueWait,
                                          [this] { return !m_requestInProgress; })) {
             LOG_WARN("Timeout waiting for an earlier request before {}", frame.toString());
             return std::nullopt;

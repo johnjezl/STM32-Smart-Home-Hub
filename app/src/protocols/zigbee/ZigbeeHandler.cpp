@@ -688,11 +688,12 @@ void ZigbeeHandler::finishPairing(uint64_t ieeeAddr) {
             std::lock_guard<std::mutex> lock(m_deviceMutex);
             m_pendingDevice = device;
         }
-        // Held during the call, so clearing the callback waits for it, and whoever set it can
-        // be destroyed afterwards. Recursive in case the callback clears itself.
+        // Held during the call, so clearing the callback waits for it. Recursive, and a copy, in
+        // case the callback clears itself.
         std::lock_guard<std::recursive_mutex> lock(m_pendingCallbackMutex);
-        if (m_pendingDeviceCb) {
-            m_pendingDeviceCb(device);
+        const DeviceDiscoveredCallback callback = m_pendingDeviceCb;
+        if (callback) {
+            callback(device);
         }
     } else {
         // Not in discovery mode - auto-add the device

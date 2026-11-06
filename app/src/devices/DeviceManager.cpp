@@ -210,10 +210,16 @@ bool DeviceManager::removeDevice(const std::string& id) {
     }
 
     // Unlocked, because handlers can call back into this class
-    DeviceStateEvent event;
-    event.deviceId = id;
-    event.property = "_removed";
-    m_eventBus.publish(event);
+    try {
+        DeviceStateEvent event;
+        event.deviceId = id;
+        event.property = "_removed";
+        m_eventBus.publish(event);
+    } catch (const std::exception& e) {
+        LOG_ERROR("Exception publishing device event: %s", e.what());
+    } catch (...) {
+        LOG_ERROR("Unknown exception publishing device event");
+    }
 
     return true;
 }

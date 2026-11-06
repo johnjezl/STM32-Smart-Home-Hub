@@ -606,15 +606,42 @@ TEST_F(AutomationManagerTest, ANewTriggerRestartsARunInADelay) {
     auto light = std::make_shared<SwitchDevice>("light_001", "Light");
     deviceManager->addDevice(source);
     deviceManager->addDevice(light);
-    ASSERT_TRUE(automationManager->addAutomation(delayedLightOn(400)));
+    ASSERT_TRUE(automationManager->addAutomation(delayedLightOn(3000)));
 
     ASSERT_TRUE(deviceManager->setDeviceState("source", "on", true));
-    std::this_thread::sleep_for(std::chrono::milliseconds(250));
+    std::this_thread::sleep_for(std::chrono::milliseconds(2000));
     ASSERT_TRUE(deviceManager->setDeviceState("source", "on", false));
 
     // The first run would be finished by now, if it hadn't been restarted
-    std::this_thread::sleep_for(std::chrono::milliseconds(250));
+    std::this_thread::sleep_for(std::chrono::milliseconds(1500));
     EXPECT_NE(light->getProperty("on"), true);
+
+    automationManager->waitForRuns();
+    EXPECT_EQ(light->getProperty("on"), true);
+}
+
+TEST_F(AutomationManagerTest, ATriggerWhoseConditionFailsLeavesARunInADelay) {
+    automationManager->initialize();
+    auto source = std::make_shared<SwitchDevice>("source", "Source");
+    auto gate = std::make_shared<SwitchDevice>("gate", "Gate");
+    auto light = std::make_shared<SwitchDevice>("light_001", "Light");
+    deviceManager->addDevice(source);
+    deviceManager->addDevice(gate);
+    deviceManager->addDevice(light);
+    ASSERT_TRUE(deviceManager->setDeviceState("gate", "on", true));
+
+    Automation automation = delayedLightOn(300);
+    Condition condition;
+    condition.leaf.deviceId = "gate";
+    condition.leaf.property = "on";
+    condition.leaf.op = CompareOp::Equal;
+    condition.leaf.value = true;
+    automation.condition = condition;
+    ASSERT_TRUE(automationManager->addAutomation(automation));
+
+    ASSERT_TRUE(deviceManager->setDeviceState("source", "on", true));
+    ASSERT_TRUE(deviceManager->setDeviceState("gate", "on", false));
+    ASSERT_TRUE(deviceManager->setDeviceState("source", "on", false));
 
     automationManager->waitForRuns();
     EXPECT_EQ(light->getProperty("on"), true);
