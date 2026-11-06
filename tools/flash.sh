@@ -38,14 +38,19 @@ is_removable() {
 
 # The disks this system is running from, through any partitions, RAID or LVM. Dies if it can't tell.
 system_disks() {
-    local mountpoint source fstype
+    local mountpoint source fstype ancestors
     for mountpoint in / /boot /boot/efi /home /usr /var; do
         while read -r source fstype; do
             case "$fstype" in
-                tmpfs | autofs | overlay | squashfs) continue ;;
+                tmpfs | autofs | overlay | squashfs | nfs | nfs4 | cifs | smb3 | fuse.*) continue ;;
             esac
             case "$source" in
-                /dev/*) lsblk -nrs -o NAME,TYPE "${source%%\[*}" | awk '$2 == "disk" { print $1 }' ;;
+                /dev/*)
+                    ancestors=$(lsblk -nrs -o NAME,TYPE "${source%%\[*}" | awk '$2 == "disk" { print $1 }') ||
+                        die "Can't tell which disk holds $mountpoint ($source)"
+                    [ -n "$ancestors" ] || die "Can't tell which disk holds $mountpoint ($source)"
+                    echo "$ancestors"
+                    ;;
                 *) die "Can't tell which disk holds $mountpoint ($source)" ;;
             esac
         done < <(findmnt -nr -o SOURCE,FSTYPE "$mountpoint" || true)
@@ -53,14 +58,17 @@ system_disks() {
 }
 
 # Where the device and its partitions are mounted, one to a line. List mode, as raw mode escapes
-# spaces, and a card labelled "NO NAME" is common.
+# spaces, and a card labelled "NO NAME" is common. Fails rather than say nothing is mounted, if
+# this lsblk doesn't know the column.
 mounts_of() {
-    lsblk -nl -o MOUNTPOINTS "$1" | sed '/^[[:space:]]*$/d'
+    local mounts
+    mounts=$(lsblk -nl -o MOUNTPOINTS "$1") || return 1
+    sed '/^[[:space:]]*$/d' <<< "$mounts"
 }
 
 refuse_unless_safe() {
     local device="$1"
-    local name type size disks mountpoint
+    local name type size disks mountpoint mounts
     name=$(basename "$device")
 
     [ -b "$device" ] || die "$device is not a block device"
@@ -84,13 +92,14 @@ refuse_unless_safe() {
 
     # Mounted where a desktop mounts a card is fine, as it gets unmounted. Anywhere else, it's
     # probably something this system is using, however removable it is.
+    mounts=$(mounts_of "$device") || die "Can't tell whether $device is mounted"
     while read -r mountpoint; do
         case "$mountpoint" in
             /media/* | /run/media/*) ;;
             "") ;;
             *) die "$device is in use, at $mountpoint" ;;
         esac
-    done < <(mounts_of "$device")
+    done <<< "$mounts"
 
     size=$(lsblk -bdn -o SIZE "$device" | tr -d ' ')
     [ "${size:-0}" -gt 0 ] || die "$device has no media in it"
@@ -147,13 +156,15 @@ if [ "$confirm" != "$DEVICE" ]; then
 fi
 
 echo "Unmounting partitions..."
-mapfile -t MOUNTS < <(mounts_of "$DEVICE")
+MOUNT_LIST=$(mounts_of "$DEVICE") || die "Can't tell whether $DEVICE is mounted"
+mapfile -t MOUNTS <<< "$MOUNT_LIST"
 for mountpoint in "${MOUNTS[@]}"; do
-    sudo umount "$mountpoint" || die "Couldn't unmount $mountpoint"
+    if [ -n "$mountpoint" ]; then
+        sudo umount "$mountpoint" || die "Couldn't unmount $mountpoint"
+    fi
 done
-if [ -n "$(mounts_of "$DEVICE")" ]; then
-    die "$DEVICE is still mounted"
-fi
+MOUNT_LIST=$(mounts_of "$DEVICE") || die "Can't tell whether $DEVICE is mounted"
+[ -z "$MOUNT_LIST" ] || die "$DEVICE is still mounted"
 
 echo "Flashing..."
 sudo dd if="$IMAGE" of="$DEVICE" bs=4M conv=fsync status=progress
