@@ -57,6 +57,8 @@ public:
     void onDestroy() override;
 
 private:
+    friend struct AddDeviceScreenTestAccess;
+
 #ifdef SMARTHUB_ENABLE_LVGL
     void createHeader();
     void createContent();

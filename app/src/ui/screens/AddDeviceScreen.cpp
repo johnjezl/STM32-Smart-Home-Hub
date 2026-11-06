@@ -625,30 +625,27 @@ void AddDeviceScreen::startZigbeePairing() {
     // Subscribe to device detection events for status updates
     m_eventSubscriptionId = m_eventBus.subscribe("device.state",
         [this](const Event& evt) {
+            // This runs on whichever thread published the event, so only UI tasks use the screen
             const auto& event = static_cast<const DeviceStateEvent&>(evt);
-            if (event.property == "_detecting" && m_isPairing) {
-                // Device detected, waiting for details - update UI on main thread
-                LOG_INFO("Device detected, retrieving info...");
-                lv_async_call([](void* userData) {
-                    auto* self = static_cast<AddDeviceScreen*>(userData);
-                    if (self && self->m_pairStatusLabel && self->m_isPairing) {
-                        lv_label_set_text(self->m_pairStatusLabel, "Device found! Getting details...");
-                        lv_obj_set_style_text_color(self->m_pairStatusLabel, self->m_theme.textPrimary(), 0);
+            if (event.property == "_detecting") {
+                postToUi([this] {
+                    if (m_pairStatusLabel && m_isPairing) {
+                        LOG_INFO("Device detected, retrieving info...");
+                        lv_label_set_text(m_pairStatusLabel, "Device found! Getting details...");
+                        lv_obj_set_style_text_color(m_pairStatusLabel, m_theme.textPrimary(), 0);
                     }
-                }, this);
-            } else if (event.property == "_pairing_error" && m_isPairing) {
-                // Pairing failed - update UI on main thread
-                LOG_ERROR("Pairing error received");
-                lv_async_call([](void* userData) {
-                    auto* self = static_cast<AddDeviceScreen*>(userData);
-                    if (self && self->m_isPairing) {
-                        self->stopZigbeePairing();
-                        if (self->m_pairStatusLabel) {
-                            lv_label_set_text(self->m_pairStatusLabel, "Pairing failed. Try again.");
-                            lv_obj_set_style_text_color(self->m_pairStatusLabel, self->m_theme.error(), 0);
+                });
+            } else if (event.property == "_pairing_error") {
+                postToUi([this] {
+                    if (m_isPairing) {
+                        LOG_ERROR("Pairing error received");
+                        stopZigbeePairing();
+                        if (m_pairStatusLabel) {
+                            lv_label_set_text(m_pairStatusLabel, "Pairing failed. Try again.");
+                            lv_obj_set_style_text_color(m_pairStatusLabel, m_theme.error(), 0);
                         }
                     }
-                }, this);
+                });
             }
         });
 
@@ -656,8 +653,9 @@ void AddDeviceScreen::startZigbeePairing() {
     // This prevents auto-adding and lets us show device in wizard
     m_deviceManager.setPendingDeviceCallback("zigbee",
         [this](DevicePtr device) {
+            // This runs on the pairing thread
             LOG_INFO("Pending device callback: received device %s", device->id().c_str());
-            onZigbeeDeviceDiscovered(device);
+            postToUi([this, device] { onZigbeeDeviceDiscovered(device); });
         });
 
     // Start discovery via device manager
@@ -712,34 +710,28 @@ void AddDeviceScreen::onZigbeeDeviceDiscovered(DevicePtr device) {
         m_discoveredModel = model.get<std::string>();
     }
 
-    // Auto-fill device name if empty (do this before async call)
+    // Auto-fill device name if empty
     if (m_deviceName.empty() && !m_discoveredModel.empty()) {
         m_deviceName = m_discoveredModel;
     }
 
-    // Schedule UI updates on main thread - LVGL is not thread-safe
-    lv_async_call([](void* userData) {
-        auto* self = static_cast<AddDeviceScreen*>(userData);
-        if (!self) return;
+    // Stop pairing mode and update UI
+    stopZigbeePairing();
 
-        // Stop pairing mode and update UI
-        self->stopZigbeePairing();
+    // Show discovered device info
+    char infoText[128];
+    snprintf(infoText, sizeof(infoText), "Found: %s %s",
+             m_discoveredManufacturer.c_str(), m_discoveredModel.c_str());
+    lv_label_set_text(m_discoveredDeviceLabel, infoText);
+    lv_obj_clear_flag(m_discoveredDeviceLabel, LV_OBJ_FLAG_HIDDEN);
 
-        // Show discovered device info
-        char infoText[128];
-        snprintf(infoText, sizeof(infoText), "Found: %s %s",
-                 self->m_discoveredManufacturer.c_str(), self->m_discoveredModel.c_str());
-        lv_label_set_text(self->m_discoveredDeviceLabel, infoText);
-        lv_obj_clear_flag(self->m_discoveredDeviceLabel, LV_OBJ_FLAG_HIDDEN);
+    lv_label_set_text(m_pairStatusLabel, "Device found! Complete setup to add it.");
+    lv_obj_set_style_text_color(m_pairStatusLabel, m_theme.success(), 0);
 
-        lv_label_set_text(self->m_pairStatusLabel, "Device found! Complete setup to add it.");
-        lv_obj_set_style_text_color(self->m_pairStatusLabel, self->m_theme.success(), 0);
-
-        // Auto-fill the address field
-        if (self->m_zigbeeAddressInput) {
-            lv_textarea_set_text(self->m_zigbeeAddressInput, self->m_discoveredIeeeAddress.c_str());
-        }
-    }, this);
+    // Auto-fill the address field
+    if (m_zigbeeAddressInput) {
+        lv_textarea_set_text(m_zigbeeAddressInput, m_discoveredIeeeAddress.c_str());
+    }
 
     // Auto-select device type based on discovered device
     if (m_selectedType == DeviceType::Unknown && m_pendingDevice) {

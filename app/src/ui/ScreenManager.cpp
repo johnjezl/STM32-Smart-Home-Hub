@@ -215,7 +215,29 @@ void ScreenManager::clearHistory() {
     }
 }
 
+void ScreenManager::postToUi(std::function<void()> task) {
+    std::lock_guard<std::mutex> lock(m_postedTasksMutex);
+    m_postedTasks.push_back(std::move(task));
+}
+
+void ScreenManager::runPostedTasks() {
+    std::vector<std::function<void()>> tasks;
+    {
+        std::lock_guard<std::mutex> lock(m_postedTasksMutex);
+        tasks.swap(m_postedTasks);
+    }
+    for (const auto& task : tasks) {
+        try {
+            task();
+        } catch (const std::exception& e) {
+            LOG_ERROR("UI task failed: %s", e.what());
+        }
+    }
+}
+
 void ScreenManager::update(uint32_t deltaMs) {
+    runPostedTasks();
+
     // Track transition completion
     if (m_transitionInProgress) {
         if (deltaMs >= m_transitionRemainingMs) {

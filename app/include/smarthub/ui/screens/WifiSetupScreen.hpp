@@ -58,6 +58,8 @@ public:
     void onDestroy() override;
 
 private:
+    friend struct AddDeviceScreenTestAccess;
+
 #ifdef SMARTHUB_ENABLE_LVGL
     void createHeader();
     void createStatusBar();
@@ -71,6 +73,7 @@ private:
 
     void onNetworkSelected(const network::WifiNetwork& network);
     void onConnectClicked();
+    void onConnectFinished(const network::ConnectionResult& result);
     void onCancelClicked();
     void onPasswordEntered(const std::string& password);
 

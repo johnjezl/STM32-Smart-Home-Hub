@@ -11,6 +11,8 @@
 #include <map>
 #include <stack>
 #include <functional>
+#include <vector>
+#include <mutex>
 
 #ifdef SMARTHUB_ENABLE_LVGL
 #include <lvgl.h>
@@ -145,6 +147,13 @@ public:
     void update(uint32_t deltaMs);
 
     /**
+     * Run a task on the UI thread, during the next update(). LVGL isn't thread-safe, so this is
+     * how other threads get anything done to the screen. Safe to call from any thread.
+     * Screens should use Screen::postToUi, which also handles the screen being destroyed.
+     */
+    void postToUi(std::function<void()> task);
+
+    /**
      * Get reference to UIManager
      */
     UIManager& uiManager() { return m_uiManager; }
@@ -161,6 +170,11 @@ public:
     bool isTransitioning() const { return m_transitionInProgress; }
 
 private:
+    void runPostedTasks();
+
+    std::mutex m_postedTasksMutex;
+    std::vector<std::function<void()>> m_postedTasks;
+
     void performTransition(Screen* from, Screen* to, TransitionType type);
 
     UIManager& m_uiManager;
