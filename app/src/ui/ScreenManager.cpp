@@ -99,7 +99,6 @@ bool ScreenManager::unregisterScreen(const std::string& name) {
         m_currentScreen.clear();
     }
 
-
     return true;
 }
 
@@ -160,11 +159,12 @@ bool ScreenManager::goBack(TransitionType transition) {
         return false;
     }
 
-    std::string previousScreen = m_history.top();
-    m_history.pop();
-
     // Show previous screen without pushing current to stack
-    return showScreen(previousScreen, transition, false);
+    if (!showScreen(m_history.top(), transition, false)) {
+        return false;
+    }
+    m_history.pop();
+    return true;
 }
 
 void ScreenManager::goHome(TransitionType transition) {

@@ -915,7 +915,7 @@ void UIManager::update() {
 
     lv_tick_inc(elapsed);
 
-    // Update screen manager (for screen animations and updates)
+    // Run tasks from other threads and the current screen's updates
     if (m_screenManager) {
         m_screenManager->update(elapsed);
     }
