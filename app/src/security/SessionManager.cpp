@@ -7,17 +7,10 @@
 
 #include <algorithm>
 #include <chrono>
-#include <random>
 #include <sstream>
 #include <iomanip>
 
-// OpenSSL for secure random
-#if __has_include(<openssl/rand.h>)
 #include <openssl/rand.h>
-#define HAVE_OPENSSL 1
-#else
-#define HAVE_OPENSSL 0
-#endif
 
 namespace smarthub::security {
 
@@ -39,6 +32,9 @@ std::string SessionManager::createSession(int userId,
 
     // Generate token
     std::string token = generateToken();
+    if (token.empty()) {
+        return "";
+    }
 
     // Get current time
     auto now = std::chrono::system_clock::now();
@@ -177,39 +173,20 @@ size_t SessionManager::sessionCount() const {
 }
 
 std::string SessionManager::generateToken() {
-#if HAVE_OPENSSL
     // Generate 32 bytes (256 bits) of random data
     unsigned char bytes[32];
     if (RAND_bytes(bytes, sizeof(bytes)) != 1) {
+        // No login is better than a login with a guessable token
         LOG_ERROR("Failed to generate random token");
-        // Fallback to less secure method
-        goto fallback;
+        return "";
     }
 
-    {
-        // Convert to hex string
-        std::stringstream ss;
-        ss << std::hex << std::setfill('0');
-        for (unsigned char byte : bytes) {
-            ss << std::setw(2) << static_cast<int>(byte);
-        }
-        return ss.str();
-    }
-
-fallback:
-#endif
-    // Fallback: use random_device (less cryptographically secure)
-    std::random_device rd;
-    std::mt19937_64 gen(rd());
-    std::uniform_int_distribution<uint64_t> dis;
-
+    // Convert to hex string
     std::stringstream ss;
     ss << std::hex << std::setfill('0');
-    ss << std::setw(16) << dis(gen);
-    ss << std::setw(16) << dis(gen);
-    ss << std::setw(16) << dis(gen);
-    ss << std::setw(16) << dis(gen);
-
+    for (unsigned char byte : bytes) {
+        ss << std::setw(2) << static_cast<int>(byte);
+    }
     return ss.str();
 }
 

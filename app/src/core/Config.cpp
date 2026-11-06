@@ -284,6 +284,16 @@ bool Config::load(const std::string& path) {
     if (settings.count("security.login_failure_window_seconds")) {
         m_loginFailureWindowSeconds = std::stoi(settings["security.login_failure_window_seconds"]);
     }
+    if (settings.count("security.allowed_hosts")) {
+        std::stringstream hosts(settings["security.allowed_hosts"]);
+        std::string host;
+        while (std::getline(hosts, host, ',')) {
+            host = trim(host);
+            if (!host.empty()) {
+                m_allowedHosts.push_back(host);
+            }
+        }
+    }
     if (settings.count("logging.level")) {
         m_logLevel = settings["logging.level"];
     }

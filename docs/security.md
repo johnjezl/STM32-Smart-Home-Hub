@@ -207,7 +207,7 @@ Protected routes require authentication via:
 Requests without valid credentials get `401`. Requests from a user without the required role get `403`.
 
 **Public Routes** (no auth required):
-- `/api/auth/login`
+- `/api/auth/login` and `/api/auth/logout`
 - `/api/system/status`
 - `/api/setup` and `/api/setup/status` (setup refuses to run once an account exists)
 - Static files (non-API routes)

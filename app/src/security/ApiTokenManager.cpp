@@ -11,13 +11,8 @@
 #include <iomanip>
 
 // OpenSSL for hashing and random
-#if __has_include(<openssl/sha.h>)
 #include <openssl/sha.h>
 #include <openssl/rand.h>
-#define HAVE_OPENSSL 1
-#else
-#define HAVE_OPENSSL 0
-#endif
 
 namespace smarthub::security {
 
@@ -352,7 +347,6 @@ int ApiTokenManager::cleanupExpired() {
 }
 
 std::string ApiTokenManager::generateToken() {
-#if HAVE_OPENSSL
     unsigned char bytes[TOKEN_BYTES];
     if (RAND_bytes(bytes, sizeof(bytes)) != 1) {
         LOG_ERROR("Failed to generate random token");
@@ -366,14 +360,9 @@ std::string ApiTokenManager::generateToken() {
         ss << std::setw(2) << static_cast<int>(byte);
     }
     return ss.str();
-#else
-    LOG_ERROR("OpenSSL not available for token generation");
-    return "";
-#endif
 }
 
 std::string ApiTokenManager::hashToken(const std::string& token) {
-#if HAVE_OPENSSL
     unsigned char hash[SHA256_DIGEST_LENGTH];
     SHA256(reinterpret_cast<const unsigned char*>(token.c_str()),
            token.length(), hash);
@@ -385,10 +374,6 @@ std::string ApiTokenManager::hashToken(const std::string& token) {
         ss << std::setw(2) << static_cast<int>(byte);
     }
     return ss.str();
-#else
-    // Fallback - not secure
-    return token;
-#endif
 }
 
 std::string ApiTokenManager::getTokenPrefix(const std::string& token) {

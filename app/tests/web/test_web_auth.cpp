@@ -222,12 +222,13 @@ TEST_F(WebAuthTest, ProtectedRoutesRejectAnonymousRequests) {
     }
     EXPECT_EQ(request("PUT", "/api/devices/light1", {R"({"on":true})"}).status, 401);
     EXPECT_EQ(request("POST", "/api/rooms", {R"({"name":"Den"})"}).status, 401);
-    EXPECT_EQ(request("POST", "/api/auth/logout").status, 401);
 }
 
 TEST_F(WebAuthTest, PublicRoutesNeedNoCredentials) {
     startApp();
     setUpAdmin();
+
+    EXPECT_EQ(request("POST", "/api/auth/logout").status, 200);
 
     EXPECT_EQ(request("GET", "/api/system/status").status, 200);
     EXPECT_EQ(request("GET", "/api/setup/status").status, 200);
@@ -515,6 +516,21 @@ TEST_F(WebAuthTest, DisablingAUserEndsTheirSession) {
     // It stays ended if the account is enabled again
     ASSERT_TRUE(users.setUserEnabled("guest", true));
     EXPECT_EQ(request("GET", "/api/devices", guest).status, 401);
+}
+
+TEST_F(WebAuthTest, LogoutWorksEvenIfTheAccountIsGone) {
+    startApp();
+    setUpAdmin();
+    addUser("guest", "Guest-Pass-1", "user");
+    RequestOptions guest;
+    guest.cookie = loginCookie("guest", "Guest-Pass-1");
+
+    security::UserManager users(m_app->database());
+    ASSERT_TRUE(users.deleteUser("guest"));
+
+    const Response logout = request("POST", "/api/auth/logout", guest);
+    EXPECT_EQ(logout.status, 200);
+    EXPECT_TRUE(logout.hasHeader("Max-Age=0"));
 }
 
 TEST_F(WebAuthTest, RemovingAUserEndsTheirSession) {

@@ -12,14 +12,8 @@
 #include <regex>
 #include <cstring>
 
-// OpenSSL for password hashing
-#if __has_include(<openssl/evp.h>)
 #include <openssl/evp.h>
 #include <openssl/rand.h>
-#define HAVE_OPENSSL 1
-#else
-#define HAVE_OPENSSL 0
-#endif
 
 namespace smarthub::security {
 
@@ -431,7 +425,6 @@ std::string UserManager::validateUsername(const std::string& username) {
 
 std::string UserManager::hashPassword(const std::string& password,
                                        const std::string& salt) {
-#if HAVE_OPENSSL
     std::string useSalt = salt;
 
     // Generate salt if not provided
@@ -470,29 +463,15 @@ std::string UserManager::hashPassword(const std::string& password,
     // Return format: salt$iterations$hash
     return useSalt + "$" + std::to_string(PBKDF2_ITERATIONS) + "$" + hashBase64;
 
-#else
-    // Fallback: simple SHA-256 (not recommended for production)
-    LOG_WARN("OpenSSL not available - using weak password hashing");
-    return salt + "$1$" + password;  // Insecure fallback
-#endif
 }
 
 std::string UserManager::generateSalt(size_t length) {
-#if HAVE_OPENSSL
     std::vector<unsigned char> bytes(length);
     if (RAND_bytes(bytes.data(), static_cast<int>(length)) != 1) {
         LOG_ERROR("Failed to generate random salt");
         return "";
     }
     return base64Encode(bytes.data(), length);
-#else
-    // Fallback: use random() (not cryptographically secure)
-    std::string result;
-    for (size_t i = 0; i < length; i++) {
-        result += static_cast<char>('a' + (random() % 26));
-    }
-    return result;
-#endif
 }
 
 bool UserManager::secureCompare(const std::string& a, const std::string& b) {

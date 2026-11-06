@@ -33,6 +33,7 @@ A `user` can read everything except pending Zigbee devices, and can control devi
 ### Public Routes
 The following routes are accessible without authentication:
 - `POST /api/auth/login`
+- `POST /api/auth/logout`
 - `GET /api/system/status`
 - `GET /api/setup/status`
 - `POST /api/setup`, until the first account exists
@@ -391,7 +392,7 @@ Properties vary by device type:
 |------------|------------|
 | switch | on (boolean) |
 | dimmer | on (boolean), brightness (0-100) |
-| color_light | on, brightness, colorTemp (1000-10000 kelvin), color_h (0-360), color_s and color_v (0-100), color_r, color_g and color_b (0-255) |
+| color_light | on, brightness, colorTemp (1000-10000 kelvin). On `local` devices also color_h (0-360), color_s and color_v (0-100), color_r, color_g and color_b (0-255) |
 
 **Response (200 OK):**
 ```json

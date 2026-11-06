@@ -535,7 +535,9 @@ bool WebServer::isPublicRoute(const std::string& uri) const {
 
     // Default public routes
     // The setup routes check for themselves that no account exists yet.
-    if (uri == "/api/auth/login" || uri == "/api/system/status" ||
+    // Logout too: it has to end the session named by the cookie even if the
+    // account can't be looked up right now.
+    if (uri == "/api/auth/login" || uri == "/api/auth/logout" || uri == "/api/system/status" ||
         uri == "/api/setup" || uri == "/api/setup/status") {
         return true;
     }
@@ -550,9 +552,6 @@ bool WebServer::requiresAdmin(const std::string& method, const std::string& uri)
         return true;
     }
     if (method == "GET" || method == "HEAD") {
-        return false;
-    }
-    if (uri == "/api/auth/logout") {
         return false;
     }
     // Controlling a device, PUT /api/devices/{id}, is open to every user.

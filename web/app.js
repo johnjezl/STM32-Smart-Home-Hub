@@ -290,7 +290,7 @@ class SmartHubApp {
                 method: 'POST',
                 credentials: 'include'
             });
-            if (!response.ok && response.status !== 401) {
+            if (!response.ok) {
                 this.showToast('Could not log out. Please try again.', 'error');
                 return;
             }
@@ -304,6 +304,11 @@ class SmartHubApp {
     }
 
     showScreen(id) {
+        // Passwords shouldn't outlive the screen they were typed on
+        for (const field of ['password', 'setup-password', 'setup-confirm']) {
+            document.getElementById(field).value = '';
+        }
+
         for (const screen of ['setup-screen', 'login-screen', 'dashboard-screen']) {
             document.getElementById(screen).classList.toggle('hidden', screen !== id);
         }
@@ -314,7 +319,6 @@ class SmartHubApp {
     }
 
     showLogin(message = '') {
-        document.getElementById('password').value = '';
         document.getElementById('login-error').textContent = message;
         this.showScreen('login-screen');
     }
@@ -324,11 +328,6 @@ class SmartHubApp {
 
         document.getElementById('user-name').textContent = this.currentUser.username || 'User';
         document.body.classList.toggle('is-admin', this.isAdmin());
-
-        // These hold passwords, which shouldn't outlive the login
-        document.getElementById('password').value = '';
-        document.getElementById('setup-password').value = '';
-        document.getElementById('setup-confirm').value = '';
 
         this.loadData();
         this.startRefresh();
