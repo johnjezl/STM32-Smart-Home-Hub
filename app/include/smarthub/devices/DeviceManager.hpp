@@ -10,6 +10,9 @@
 #include <string>
 #include <memory>
 #include <vector>
+#include <utility>
+#include <thread>
+#include <condition_variable>
 #include <map>
 #include <mutex>
 
@@ -205,6 +208,13 @@ public:
     bool saveAllDevices();
 
     /**
+     * Write state changes that haven't been saved yet. Changes are saved every
+     * kStateSaveIntervalSeconds, as one write, to limit wear on the SD card.
+     */
+    bool flushStateChanges();
+    static constexpr int kStateSaveIntervalSeconds = 30;
+
+    /**
      * Save a single device to database
      */
     bool saveDevice(const DevicePtr& device);
@@ -238,6 +248,25 @@ private:
 
     mutable std::mutex m_mutex;
     std::mutex m_stateChangeMutex;
+
+    // State changes waiting to be saved: (device, property) -> value as JSON
+    struct StateRow {
+        std::string deviceId;
+        std::string property;
+        std::string value;
+    };
+    bool writeStateRows(const std::vector<StateRow>& rows);
+    void markStateChanged(const std::string& deviceId, const std::string& property,
+                          const nlohmann::json& value);
+    void stateWriterLoop();
+    void stopStateWriter();
+
+    std::mutex m_stateWriteMutex;
+    std::map<std::pair<std::string, std::string>, std::string> m_unsavedState;
+    std::thread m_stateWriter;
+    std::mutex m_stateWriterMutex;
+    std::condition_variable m_stateWriterWake;
+    bool m_stateWriterStopping = false;
     bool m_discovering = false;
 };
 

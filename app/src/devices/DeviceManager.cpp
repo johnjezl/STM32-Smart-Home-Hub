@@ -2,6 +2,7 @@
  * SmartHub Device Manager Implementation
  */
 
+#include <chrono>
 #include <optional>
 #include <set>
 #include <smarthub/devices/DeviceManager.hpp>
@@ -30,6 +31,14 @@ bool DeviceManager::initialize() {
 
     loadDevicesFromDatabase();
 
+    {
+        std::lock_guard<std::mutex> lock(m_stateWriterMutex);
+        m_stateWriterStopping = false;
+    }
+    if (!m_stateWriter.joinable()) {
+        m_stateWriter = std::thread(&DeviceManager::stateWriterLoop, this);
+    }
+
     LOG_INFO("Device manager initialized with %zu devices", m_devices.size());
     return true;
 }
@@ -39,6 +48,9 @@ void DeviceManager::shutdown() {
 
     // Stop discovery
     stopDiscovery();
+
+    // Everything's about to be saved, so it doesn't need the regular writes any more
+    stopStateWriter();
 
     // Save device states
     saveAllDevices();
@@ -205,6 +217,13 @@ bool DeviceManager::removeDevice(const std::string& id) {
         }
 
         LOG_INFO("Removing device: %s", id.c_str());
+
+        {
+            std::lock_guard<std::mutex> stateLock(m_stateWriteMutex);
+            for (auto entry = m_unsavedState.begin(); entry != m_unsavedState.end();) {
+                entry = entry->first.first == id ? m_unsavedState.erase(entry) : std::next(entry);
+            }
+        }
 
         deleteDeviceFromDatabase(id);
         m_devices.erase(it);
@@ -538,6 +557,8 @@ void DeviceManager::applyStateChange(const DevicePtr& device, const std::string&
         device->setState(property, value);
     }
     if (previous != value) {
+        markStateChanged(device->id(), property, value);
+
         DeviceStateEvent event;
         event.deviceId = device->id();
         event.property = property;
@@ -552,48 +573,11 @@ bool DeviceManager::saveAllDevices() {
 
     LOG_DEBUG("Saving %zu devices to database", m_devices.size());
 
+    bool saved = true;
     for (const auto& [id, device] : m_devices) {
-        try {
-            // Save device info
-            auto stmt = m_database.prepare(
-                "INSERT OR REPLACE INTO devices "
-                "(id, name, type, protocol, protocol_address, room, config) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)");
-
-            if (stmt && stmt->isValid()) {
-                stmt->bind(1, device->id());
-                stmt->bind(2, device->name());
-                stmt->bind(3, device->typeString());
-                stmt->bind(4, device->protocol());
-                stmt->bind(5, device->protocolAddress());
-                stmt->bind(6, device->room());
-                // Ensure config is valid JSON object
-                auto config = device->getConfig();
-                stmt->bind(7, config.is_object() ? config.dump() : "{}");
-                stmt->execute();
-            }
-
-            // Save current state
-            nlohmann::json state = device->getState();
-            for (auto& [prop, val] : state.items()) {
-                auto stateStmt = m_database.prepare(
-                    "INSERT OR REPLACE INTO device_state "
-                    "(device_id, property, value, updated_at) "
-                    "VALUES (?, ?, ?, strftime('%s', 'now'))");
-
-                if (stateStmt && stateStmt->isValid()) {
-                    stateStmt->bind(1, device->id());
-                    stateStmt->bind(2, prop);
-                    stateStmt->bind(3, val.dump());
-                    stateStmt->execute();
-                }
-            }
-        } catch (const std::exception& e) {
-            LOG_ERROR("Failed to save device %s: %s", id.c_str(), e.what());
-        }
+        saved = saveDevice(device) && saved;
     }
-
-    return true;
+    return saved;
 }
 
 bool DeviceManager::saveDevice(const DevicePtr& device) {
@@ -602,39 +586,41 @@ bool DeviceManager::saveDevice(const DevicePtr& device) {
     }
 
     try {
-        // Save device info
+        // An upsert, because INSERT OR REPLACE deletes the row first, and that would delete the
+        // device's state and history with it, and reset when it was created.
         auto stmt = m_database.prepare(
-            "INSERT OR REPLACE INTO devices "
-            "(id, name, type, protocol, protocol_address, room, config) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)");
+            "INSERT INTO devices (id, name, type, protocol, protocol_address, room, config) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(id) DO UPDATE SET "
+            "name = excluded.name, type = excluded.type, protocol = excluded.protocol, "
+            "protocol_address = excluded.protocol_address, room = excluded.room, "
+            "config = excluded.config, updated_at = strftime('%s', 'now')");
 
-        if (stmt && stmt->isValid()) {
-            stmt->bind(1, device->id());
-            stmt->bind(2, device->name());
-            stmt->bind(3, device->typeString());
-            stmt->bind(4, device->protocol());
-            stmt->bind(5, device->protocolAddress());
-            stmt->bind(6, device->room());
-            // Ensure config is valid JSON object
-            auto config = device->getConfig();
-            stmt->bind(7, config.is_object() ? config.dump() : "{}");
-            stmt->execute();
+        if (!stmt || !stmt->isValid()) {
+            return false;
+        }
+        stmt->bind(1, device->id());
+        stmt->bind(2, device->name());
+        stmt->bind(3, device->typeString());
+        stmt->bind(4, device->protocol());
+        stmt->bind(5, device->protocolAddress());
+        stmt->bind(6, device->room());
+        // Ensure config is valid JSON object
+        const auto config = device->getConfig();
+        stmt->bind(7, config.is_object() ? config.dump() : "{}");
+        if (!stmt->execute()) {
+            LOG_ERROR("Failed to save device %s", device->id().c_str());
+            return false;
         }
 
         // Save current state
-        nlohmann::json state = device->getState();
-        for (auto& [prop, val] : state.items()) {
-            auto stateStmt = m_database.prepare(
-                "INSERT OR REPLACE INTO device_state "
-                "(device_id, property, value, updated_at) "
-                "VALUES (?, ?, ?, strftime('%s', 'now'))");
-
-            if (stateStmt && stateStmt->isValid()) {
-                stateStmt->bind(1, device->id());
-                stateStmt->bind(2, prop);
-                stateStmt->bind(3, val.dump());
-                stateStmt->execute();
-            }
+        std::vector<StateRow> rows;
+        const nlohmann::json state = device->getState();
+        for (const auto& [property, value] : state.items()) {
+            rows.push_back({device->id(), property, value.dump()});
+        }
+        if (!writeStateRows(rows)) {
+            return false;
         }
 
         LOG_DEBUG("Saved device to database: %s", device->id().c_str());
@@ -643,6 +629,106 @@ bool DeviceManager::saveDevice(const DevicePtr& device) {
     } catch (const std::exception& e) {
         LOG_ERROR("Failed to save device %s: %s", device->id().c_str(), e.what());
         return false;
+    }
+}
+
+bool DeviceManager::writeStateRows(const std::vector<StateRow>& rows) {
+    if (rows.empty()) {
+        return true;
+    }
+
+    // One statement per batch, so each batch is one write to the SD card
+    std::string sql = "INSERT INTO device_state (device_id, property, value, updated_at) VALUES ";
+    for (size_t i = 0; i < rows.size(); ++i) {
+        sql += i == 0 ? "(?, ?, ?, strftime('%s', 'now'))" : ", (?, ?, ?, strftime('%s', 'now'))";
+    }
+    sql += " ON CONFLICT(device_id, property) DO UPDATE SET "
+           "value = excluded.value, updated_at = excluded.updated_at";
+
+    auto stmt = m_database.prepare(sql);
+    if (!stmt || !stmt->isValid()) {
+        return false;
+    }
+    int parameter = 1;
+    for (const StateRow& row : rows) {
+        stmt->bind(parameter++, row.deviceId);
+        stmt->bind(parameter++, row.property);
+        stmt->bind(parameter++, row.value);
+    }
+    return stmt->execute();
+}
+
+void DeviceManager::markStateChanged(const std::string& deviceId, const std::string& property,
+                                     const nlohmann::json& value) {
+    std::lock_guard<std::mutex> lock(m_stateWriteMutex);
+    m_unsavedState[{deviceId, property}] = value.dump();
+}
+
+bool DeviceManager::flushStateChanges() {
+    std::map<std::pair<std::string, std::string>, std::string> unsaved;
+    {
+        std::lock_guard<std::mutex> lock(m_stateWriteMutex);
+        unsaved.swap(m_unsavedState);
+    }
+
+    // SQLite allows a limited number of parameters in one statement, three to a row here
+    constexpr size_t kRowsPerBatch = 500;
+    bool saved = true;
+    std::vector<StateRow> batch;
+    const auto writeBatch = [&] {
+        if (writeStateRows(batch)) {
+            batch.clear();
+            return;
+        }
+        // Probably a device removed since it changed, which shouldn't lose the others
+        for (const StateRow& row : batch) {
+            if (!writeStateRows({row})) {
+                std::lock_guard<std::mutex> lock(m_mutex);
+                if (m_devices.count(row.deviceId) > 0) {
+                    LOG_ERROR("Failed to save %s.%s", row.deviceId.c_str(), row.property.c_str());
+                    saved = false;
+                }
+            }
+        }
+        batch.clear();
+    };
+
+    for (const auto& [key, value] : unsaved) {
+        batch.push_back({key.first, key.second, value});
+        if (batch.size() == kRowsPerBatch) {
+            writeBatch();
+        }
+    }
+    writeBatch();
+    return saved;
+}
+
+void DeviceManager::stateWriterLoop() {
+    std::unique_lock<std::mutex> lock(m_stateWriterMutex);
+    while (!m_stateWriterStopping) {
+        m_stateWriterWake.wait_for(lock, std::chrono::seconds(kStateSaveIntervalSeconds),
+                                   [this] { return m_stateWriterStopping; });
+        if (m_stateWriterStopping) {
+            break;
+        }
+        lock.unlock();
+        try {
+            flushStateChanges();
+        } catch (const std::exception& e) {
+            LOG_ERROR("Failed to save device state: %s", e.what());
+        }
+        lock.lock();
+    }
+}
+
+void DeviceManager::stopStateWriter() {
+    {
+        std::lock_guard<std::mutex> lock(m_stateWriterMutex);
+        m_stateWriterStopping = true;
+    }
+    m_stateWriterWake.notify_all();
+    if (m_stateWriter.joinable()) {
+        m_stateWriter.join();
     }
 }
 
@@ -815,9 +901,10 @@ bool DeviceManager::addRoom(const std::string& id, const std::string& name) {
         if (stmt && stmt->isValid()) {
             stmt->bind(1, id);
             stmt->bind(2, name);
-            stmt->execute();
-            LOG_INFO("Added room: %s (%s)", name.c_str(), id.c_str());
-            return true;
+            if (stmt->execute()) {
+                LOG_INFO("Added room: %s (%s)", name.c_str(), id.c_str());
+                return true;
+            }
         }
     } catch (const std::exception& e) {
         LOG_ERROR("Failed to add room %s: %s", id.c_str(), e.what());
@@ -829,14 +916,15 @@ bool DeviceManager::addRoom(const std::string& id, const std::string& name) {
 bool DeviceManager::updateRoom(const std::string& id, const std::string& name) {
     try {
         auto stmt = m_database.prepare(
-            "UPDATE rooms SET name = ? WHERE id = ?");
+            "UPDATE rooms SET name = ? WHERE id = ? RETURNING id");
 
         if (stmt && stmt->isValid()) {
             stmt->bind(1, name);
             stmt->bind(2, id);
-            stmt->execute();
-            LOG_INFO("Updated room: %s -> %s", id.c_str(), name.c_str());
-            return true;
+            if (stmt->step()) {  // A row back means the room exists
+                LOG_INFO("Updated room: %s -> %s", id.c_str(), name.c_str());
+                return true;
+            }
         }
     } catch (const std::exception& e) {
         LOG_ERROR("Failed to update room %s: %s", id.c_str(), e.what());
@@ -847,24 +935,35 @@ bool DeviceManager::updateRoom(const std::string& id, const std::string& name) {
 
 bool DeviceManager::deleteRoom(const std::string& id) {
     try {
+        std::lock_guard<std::mutex> lock(m_mutex);
+
         // First, unassign devices from this room
         auto updateStmt = m_database.prepare(
             "UPDATE devices SET room = '' WHERE room = ?");
+        if (!updateStmt || !updateStmt->isValid()) {
+            return false;
+        }
+        updateStmt->bind(1, id);
+        if (!updateStmt->execute()) {
+            return false;
+        }
 
-        if (updateStmt && updateStmt->isValid()) {
-            updateStmt->bind(1, id);
-            updateStmt->execute();
+        // And in memory, or the next save would put them back
+        for (const auto& [deviceId, device] : m_devices) {
+            if (device->room() == id) {
+                device->setRoom("");
+            }
         }
 
         // Delete the room
         auto stmt = m_database.prepare(
-            "DELETE FROM rooms WHERE id = ?");
-
+            "DELETE FROM rooms WHERE id = ? RETURNING id");
         if (stmt && stmt->isValid()) {
             stmt->bind(1, id);
-            stmt->execute();
-            LOG_INFO("Deleted room: %s", id.c_str());
-            return true;
+            if (stmt->step()) {  // A row back means the room existed
+                LOG_INFO("Deleted room: %s", id.c_str());
+                return true;
+            }
         }
     } catch (const std::exception& e) {
         LOG_ERROR("Failed to delete room %s: %s", id.c_str(), e.what());
