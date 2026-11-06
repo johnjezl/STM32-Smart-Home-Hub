@@ -711,8 +711,16 @@ TEST_F(WebAuthTest, AutomationCreatedThroughTheApiRunsOnADeviceChange) {
     turnOn.body = R"({"on":true})";
     ASSERT_EQ(request("PUT", "/api/devices/" + source, turnOn).status, 200);
 
-    const Response state = request("GET", "/api/devices/" + target, admin);
-    ASSERT_EQ(state.status, 200) << state.body;
+    // The action runs on the automation worker, a moment after this request returns
+    Response state;
+    for (int attempt = 0; attempt < 50; ++attempt) {
+        state = request("GET", "/api/devices/" + target, admin);
+        ASSERT_EQ(state.status, 200) << state.body;
+        if (state.json()["state"]["on"] == true) {
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
     EXPECT_EQ(state.json()["state"]["on"], true) << state.body;
 }
 

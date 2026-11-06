@@ -35,8 +35,6 @@ AutomationManager::~AutomationManager() {
 bool AutomationManager::initialize() {
     if (m_initialized) return true;
 
-    m_stopping = false;
-
     LOG_INFO("Initializing automation manager");
 
     loadFromDatabase();
@@ -47,6 +45,9 @@ bool AutomationManager::initialize() {
     std::tm startTm{};
     localtime_r(&startTime, &startTm);
     m_lastCheckedMinute = startTm.tm_min;
+
+    m_stopping = false;
+    m_worker = std::thread(&AutomationManager::workerLoop, this);
 
     m_initialized = true;
 
@@ -60,19 +61,24 @@ void AutomationManager::shutdown() {
 
     LOG_INFO("Shutting down automation manager");
 
-    // Runs notice this before their next action, or during a delay
-    m_stopping = true;
-
     if (m_eventSubscription > 0) {
         m_eventBus.unsubscribe(m_eventSubscription);
         m_eventSubscription = 0;
     }
 
-    // Manual and timed runs don't go through the event bus, so wait for those too
-    while (m_activeRuns > 0) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    RunQueue dropped;
+    {
+        std::lock_guard<std::mutex> lock(m_queueMutex);
+        m_stopping = true;
+        dropped.swap(m_runQueue);
     }
-    m_stopFlag = nullptr;
+    m_queueChanged.notify_all();
+    if (m_worker.joinable()) {
+        m_worker.join();
+    }
+    for (const auto& [due, run] : dropped) {
+        LOG_INFO("Automation %s stopped by shutdown", run.automation.name.c_str());
+    }
 
     m_initialized = false;
 }
@@ -128,10 +134,10 @@ void AutomationManager::onDeviceStateChanged(const std::string& deviceId,
                                               const std::string& property,
                                               const nlohmann::json& value,
                                               const nlohmann::json& previousValue) {
-    // Internal events such as _removed, which are published under DeviceManager's lock
+    // Internal events such as _removed aren't changes to a device
     if (!property.empty() && property[0] == '_') return;
 
-    std::vector<PendingRun> runs;
+    std::vector<std::pair<Automation, std::string>> runs;
     {
         std::lock_guard<std::mutex> lock(m_mutex);
 
@@ -145,17 +151,17 @@ void AutomationManager::onDeviceStateChanged(const std::string& deviceId,
                 }
 
                 if (evaluateTrigger(trigger, deviceId, property, value, previousValue)) {
-                    runs.push_back({*automation, "DeviceState:" + deviceId + "." + property});
+                    runs.emplace_back(*automation, "DeviceState:" + deviceId + "." + property);
                     break;  // Only trigger once per automation
                 }
             }
         }
     }
-    executeAll(runs);
+    enqueueRuns(std::move(runs));
 }
 
 void AutomationManager::checkTimeTriggers() {
-    std::vector<PendingRun> runs;
+    std::vector<std::pair<Automation, std::string>> runs;
     {
         std::lock_guard<std::mutex> lock(m_mutex);
 
@@ -164,17 +170,17 @@ void AutomationManager::checkTimeTriggers() {
 
             for (const auto& trigger : automation->triggers) {
                 if (trigger.type == TriggerType::Time && evaluateTimeTrigger(trigger)) {
-                    runs.push_back({*automation, "Time"});
+                    runs.emplace_back(*automation, "Time");
                     break;
                 }
             }
         }
     }
-    executeAll(runs);
+    enqueueRuns(std::move(runs));
 }
 
 void AutomationManager::checkIntervalTriggers(uint64_t currentTimeMs) {
-    std::vector<PendingRun> runs;
+    std::vector<std::pair<Automation, std::string>> runs;
     {
         std::lock_guard<std::mutex> lock(m_mutex);
 
@@ -197,31 +203,92 @@ void AutomationManager::checkIntervalTriggers(uint64_t currentTimeMs) {
                         // Triggers due together run the automation once
                         if (!due) {
                             due = true;
-                            runs.push_back({*automation, "Interval:" +
-                                            std::to_string(trigger.intervalMinutes) + "min"});
+                            runs.emplace_back(*automation, "Interval:" + std::to_string(trigger.intervalMinutes) + "min");
                         }
                     }
                 }
             }
         }
     }
-    executeAll(runs);
+    enqueueRuns(std::move(runs));
 }
 
-bool AutomationManager::isStopping() const {
-    const auto* stopFlag = m_stopFlag.load();
-    return m_stopping || (stopFlag && stopFlag->load());
-}
+namespace {
 
-void AutomationManager::executeAll(const std::vector<PendingRun>& runs) {
-    // Unlocked: actions can wait on devices, and changing one publishes an event that
-    // comes straight back to onDeviceStateChanged on this thread.
-    for (const auto& run : runs) {
-        if (isStopping()) {
-            return;
-        }
-        executeAutomation(run.automation, run.triggerInfo);
+// How many automations in a row led to what this thread is running. Actions can trigger other
+// automations, and opposing ones would otherwise go on forever.
+thread_local int t_runDepth = 0;
+constexpr int kMaxRunDepth = 8;
+
+// More than this waiting means automations are firing far faster than they can run
+constexpr size_t kMaxQueuedRuns = 256;
+
+}  // namespace
+
+void AutomationManager::enqueueRuns(std::vector<std::pair<Automation, std::string>> runs) {
+    if (runs.empty()) {
+        return;
     }
+
+    {
+        std::lock_guard<std::mutex> lock(m_queueMutex);
+        for (auto& [automation, triggerInfo] : runs) {
+            if (m_stopping || !m_worker.joinable()) {
+                return;
+            }
+            if (t_runDepth >= kMaxRunDepth) {
+                LOG_ERROR("Automation '%s' not run: automations are triggering each other in a loop",
+                          automation.name.c_str());
+                continue;
+            }
+            if (m_runQueue.size() >= kMaxQueuedRuns) {
+                LOG_ERROR("Automation '%s' not run: too many runs are waiting",
+                          automation.name.c_str());
+                continue;
+            }
+
+            Run run;
+            run.automation = std::move(automation);
+            run.triggerInfo = std::move(triggerInfo);
+            run.depth = t_runDepth;
+            m_runQueue.emplace(std::chrono::steady_clock::now(), std::move(run));
+        }
+    }
+    m_queueChanged.notify_all();
+}
+
+void AutomationManager::workerLoop() {
+    std::unique_lock<std::mutex> lock(m_queueMutex);
+    while (!m_stopping) {
+        if (m_runQueue.empty()) {
+            m_queueChanged.wait(lock);
+            continue;
+        }
+
+        const auto next = m_runQueue.begin();
+        if (next->first > std::chrono::steady_clock::now()) {
+            m_queueChanged.wait_until(lock, next->first);
+            continue;
+        }
+
+        Run run = std::move(next->second);
+        m_runQueue.erase(next);
+        m_workerBusy = true;
+
+        // Unlocked: actions can wait on devices, and changing one publishes an event that comes
+        // straight back to onDeviceStateChanged on this thread.
+        lock.unlock();
+        continueRun(std::move(run));
+        lock.lock();
+
+        m_workerBusy = false;
+        m_queueChanged.notify_all();
+    }
+}
+
+void AutomationManager::waitForRuns() {
+    std::unique_lock<std::mutex> lock(m_queueMutex);
+    m_queueChanged.wait(lock, [this] { return m_stopping || (m_runQueue.empty() && !m_workerBusy); });
 }
 
 bool AutomationManager::evaluateTrigger(const Trigger& trigger,
@@ -360,85 +427,63 @@ bool AutomationManager::compareValues(const nlohmann::json& actual,
                                     : (actual.dump() != expected.dump());
 }
 
-void AutomationManager::executeAutomation(const Automation& automation,
-                                           const std::string& triggerInfo) {
-    if (!automation.enabled) return;
+void AutomationManager::continueRun(Run run) {
+    const Automation& automation = run.automation;
 
-    struct ActiveRun {
-        std::atomic<int>& count;
-        explicit ActiveRun(std::atomic<int>& runs) : count(runs) { ++count; }
-        ~ActiveRun() { --count; }
-    };
-    const ActiveRun activeRun(m_activeRuns);
+    // Whatever this run's actions trigger counts as one further along
+    t_runDepth = run.depth + 1;
+    struct ResetDepth {
+        ~ResetDepth() { t_runDepth = 0; }
+    } resetDepth;
 
-    // Actions can trigger other automations on this thread. Opposing ones would
-    // otherwise go on until the stack ran out.
-    thread_local int depth = 0;
-    constexpr int MAX_DEPTH = 8;
-    if (depth >= MAX_DEPTH) {
-        LOG_ERROR("Automation '%s' not run: automations are triggering each other in a loop",
-                  automation.name.c_str());
-        return;
-    }
-    ++depth;
-    struct LeaveDepth {
-        ~LeaveDepth() { --depth; }
-    } leaveDepth;
+    if (run.nextAction == 0) {
+        if (!automation.enabled) return;
 
-    // Check condition if present
-    if (automation.condition.has_value()) {
-        if (!evaluateCondition(*automation.condition)) {
-            LOG_DEBUG("Automation '%s' condition not met, skipping",
-                     automation.name.c_str());
+        if (automation.condition.has_value() && !evaluateCondition(*automation.condition)) {
+            LOG_DEBUG("Automation '%s' condition not met, skipping", automation.name.c_str());
             return;
         }
-    }
 
-    LOG_INFO("Executing automation: %s (trigger: %s)",
-             automation.name.c_str(), triggerInfo.c_str());
+        LOG_INFO("Executing automation: %s (trigger: %s)",
+                 automation.name.c_str(), run.triggerInfo.c_str());
 
-    // Update last triggered timestamp
-    {
         std::lock_guard<std::mutex> lock(m_mutex);
         auto stored = m_automations.find(automation.id);
         if (stored != m_automations.end()) {
             stored->second->lastTriggeredAt = getCurrentTimestamp();
             saveToDatabase(*stored->second);
         }
+    } else {
+        // It could have been turned off or removed during a delay. An edit doesn't stop this
+        // run, which finishes the actions it started with.
+        std::lock_guard<std::mutex> lock(m_mutex);
+        const auto stored = m_automations.find(automation.id);
+        if (stored == m_automations.end() || !stored->second->enabled) {
+            LOG_INFO("Automation %s stopped during a delay", automation.name.c_str());
+            return;
+        }
     }
 
-    // Execute actions sequentially
-    int64_t delayBudgetMs = Automation::kMaxTotalDelayMs;
-    for (const auto& action : automation.actions) {
-        if (action.type == ActionType::Delay) {
-            // Older saved automations could have longer delays than validation allows
-            const auto delayMs = std::min<int64_t>(action.delayMs, delayBudgetMs);
-            delayBudgetMs -= delayMs;
-            // A signal handler can only set a flag, so this checks for one regularly
-            const auto wakeAt = std::chrono::steady_clock::now() + std::chrono::milliseconds(delayMs);
-            while (std::chrono::steady_clock::now() < wakeAt && !isStopping()) {
-                std::this_thread::sleep_for(std::min<std::chrono::steady_clock::duration>(
-                    wakeAt - std::chrono::steady_clock::now(), std::chrono::milliseconds(100)));
-            }
-            if (isStopping()) {
-                LOG_INFO("Automation %s stopped by shutdown", automation.name.c_str());
-                return;
-            }
+    while (run.nextAction < automation.actions.size()) {
+        const Action& action = automation.actions[run.nextAction];
+        ++run.nextAction;
 
-            // It could have been turned off or removed during the wait. An edit doesn't stop
-            // this run, which finishes the actions it started with.
-            std::lock_guard<std::mutex> lock(m_mutex);
-            const auto stored = m_automations.find(automation.id);
-            if (stored == m_automations.end() || !stored->second->enabled) {
-                LOG_INFO("Automation %s stopped during a delay", automation.name.c_str());
-                return;
-            }
-        } else {
-            if (isStopping()) {
-                return;
-            }
+        if (action.type != ActionType::Delay) {
             executeAction(action);
+            continue;
         }
+
+        // Older saved automations could have longer delays than validation allows
+        const int64_t delayMs = std::min<int64_t>(action.delayMs, run.delayBudgetMs);
+        run.delayBudgetMs -= delayMs;
+        const auto due = std::chrono::steady_clock::now() + std::chrono::milliseconds(delayMs);
+        {
+            std::lock_guard<std::mutex> lock(m_queueMutex);
+            if (!m_stopping) {
+                m_runQueue.emplace(due, std::move(run));
+            }
+        }
+        return;
     }
 }
 
@@ -601,7 +646,7 @@ bool AutomationManager::setEnabled(const std::string& id, bool enabled) {
 }
 
 bool AutomationManager::triggerAutomation(const std::string& id) {
-    std::vector<PendingRun> runs;
+    std::vector<std::pair<Automation, std::string>> runs;
     {
         std::lock_guard<std::mutex> lock(m_mutex);
 
@@ -609,10 +654,10 @@ bool AutomationManager::triggerAutomation(const std::string& id) {
         if (it == m_automations.end()) {
             return false;
         }
-        runs.push_back({*it->second, "Manual"});
+        runs.emplace_back(*it->second, "Manual");
     }
 
-    executeAll(runs);
+    enqueueRuns(std::move(runs));
     return true;
 }
 

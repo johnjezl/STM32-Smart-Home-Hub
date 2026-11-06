@@ -255,8 +255,16 @@ std::optional<ZnpFrame> ZnpTransport::request(const ZnpFrame& frame, int timeout
         return std::nullopt;
     }
 
+    // The timeout covers waiting behind other requests too, so these can't pile up
+    auto deadline = std::chrono::steady_clock::now() +
+                    std::chrono::milliseconds(timeoutMs);
+
     // A second caller would overwrite the response this one is waiting for
-    std::lock_guard<std::mutex> serialLock(m_requestSerialMutex);
+    std::unique_lock<std::timed_mutex> serialLock(m_requestSerialMutex, deadline);
+    if (!serialLock.owns_lock()) {
+        LOG_WARN("Timeout waiting for an earlier request before {}", frame.toString());
+        return std::nullopt;
+    }
 
     std::unique_lock<std::mutex> lock(m_requestMutex);
 
@@ -275,9 +283,6 @@ std::optional<ZnpFrame> ZnpTransport::request(const ZnpFrame& frame, int timeout
     }
 
     // Wait for response
-    auto deadline = std::chrono::steady_clock::now() +
-                    std::chrono::milliseconds(timeoutMs);
-
     while (m_running && !m_pendingResponse) {
         if (m_responseCv.wait_until(lock, deadline) == std::cv_status::timeout) {
             LOG_WARN("Timeout waiting for response to {}", frame.toString());
