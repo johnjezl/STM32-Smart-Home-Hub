@@ -152,6 +152,7 @@ void SensorHistoryScreen::loadSensorData() {
 
             switch (device->type()) {
                 case DeviceType::TemperatureSensor:
+                case DeviceType::MultiSensor:
                     unit = "°F";
                     snprintf(buf, sizeof(buf), "%.1f%s", value.get<float>(), unit.c_str());
                     if (m_chart) {
@@ -233,7 +234,8 @@ void SensorHistoryScreen::generateMockData() {
         prevValue = prevValue + delta + meanReversion;
 
         // Add time-of-day variation for temperature
-        if (device && device->type() == DeviceType::TemperatureSensor) {
+        if (device && (device->type() == DeviceType::TemperatureSensor ||
+                       device->type() == DeviceType::MultiSensor)) {
             // Simulate daily temperature cycle
             float hourOfDay = fmod(static_cast<float>(dp.timestamp) / 3600.0f, 24.0f);
             float dailyCycle = sinf((hourOfDay - 6.0f) * 3.14159f / 12.0f) * 3.0f;

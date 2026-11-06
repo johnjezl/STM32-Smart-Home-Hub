@@ -700,7 +700,7 @@ void DeviceManager::restoreSensorOptions(const std::string& id, std::string& typ
     if (typeName == "motion_sensor") {
         config["has_illuminance"] = properties.count("illuminance") > 0;
     } else {
-        config["has_humidity"] = properties.count("humidity") > 0;
+        config["has_humidity"] = typeName == "multi_sensor" || properties.count("humidity") > 0;
     }
 }
 

@@ -139,6 +139,7 @@ void SensorListScreen::createSensorCards() {
 
         switch (device->type()) {
             case DeviceType::TemperatureSensor:
+            case DeviceType::MultiSensor:  // Temperature and humidity
                 isSensor = true;
                 icon = LV_SYMBOL_CHARGE;  // Thermometer-like
                 unit = "°F";
@@ -239,7 +240,8 @@ void SensorListScreen::refreshSensorValues() {
 
         std::string unit;
         switch (device->type()) {
-            case DeviceType::TemperatureSensor: unit = "°F"; break;
+            case DeviceType::TemperatureSensor:
+            case DeviceType::MultiSensor: unit = "°F"; break;
             case DeviceType::HumiditySensor: unit = "%"; break;
             default: break;
         }

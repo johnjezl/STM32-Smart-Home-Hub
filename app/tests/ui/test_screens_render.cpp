@@ -225,6 +225,16 @@ TEST_F(ScreenRenderTest, SensorList) {
     EXPECT_GE(test::countText(root, "Hall Sensor"), 1);
 }
 
+TEST_F(ScreenRenderTest, SensorListIncludesSensorsWithHumidity) {
+    deviceManager->addDevice(std::make_shared<TemperatureSensor>(
+        "climate", "Climate Sensor", "local", "", true, false));
+
+    auto* root = showAndRender("sensors", std::make_unique<SensorListScreen>(
+        *screenManager, *themeManager, *deviceManager));
+
+    EXPECT_GE(test::countText(root, "Climate Sensor"), 1);
+}
+
 TEST_F(ScreenRenderTest, SensorHistory) {
     auto* root = showAndRender("sensor_history", std::make_unique<SensorHistoryScreen>(
         *screenManager, *themeManager, *deviceManager),
