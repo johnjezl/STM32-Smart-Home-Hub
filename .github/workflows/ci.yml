@@ -105,13 +105,20 @@ jobs:
   build-arm:
     name: Build (ARM32 Cross-compile)
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 60  # Long enough for a slow first download, which fills the cache
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           submodules: recursive
+
+      # These toolchain packages are large, and the mirror can take many minutes to serve them
+      - name: Restore downloaded packages
+        uses: actions/cache@v4
+        with:
+          path: ~/apt-archives
+          key: arm-apt-archives-v1
 
       # A stalled mirror connection should fail fast and retry, rather than use up the job's time limit
       - name: Configure apt retries
@@ -121,8 +128,9 @@ jobs:
 
       - name: Install cross-compilation toolchain
         run: |
+          mkdir -p ~/apt-archives/partial
           sudo apt-get update
-          sudo apt-get install -y \
+          sudo apt-get install -y -o Dir::Cache::Archives="$HOME/apt-archives" \
             build-essential \
             cmake \
             ninja-build \
@@ -146,12 +154,13 @@ jobs:
             echo "deb [arch=armhf] http://ports.ubuntu.com/ubuntu-ports $pocket main universe"
           done | sudo tee /etc/apt/sources.list.d/armhf-ports.list
           sudo apt-get update
-          sudo apt-get install -y \
+          sudo apt-get install -y -o Dir::Cache::Archives="$HOME/apt-archives" \
             libsqlite3-dev:armhf \
             libssl-dev:armhf \
             libmosquitto-dev:armhf \
             libyaml-cpp-dev:armhf \
             nlohmann-json3-dev
+          sudo chown -R "$USER" ~/apt-archives
 
       - name: Configure CMake (Cross-compile)
         working-directory: app
