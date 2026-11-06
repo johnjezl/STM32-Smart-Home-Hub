@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -283,11 +284,18 @@ nlohmann::json Automation::toJson() const {
 
 namespace {
 
-// Delays run on the thread that fired the automation, so a long total stalls that thread
-constexpr int kMaxTotalDelayMs = 60000;
+constexpr int kMaxTotalDelayMs = Automation::kMaxTotalDelayMs;
 
 // About a year, and small enough to convert to milliseconds safely
 constexpr int kMaxIntervalMinutes = 525600;
+
+// A whole number field, or the fallback if it's absent. Reading other JSON numbers as an int
+// would round or wrap them, which could turn a bad value into a good one, so they read as -1000.
+int64_t wholeNumber(const nlohmann::json& j, const char* key, int64_t fallback) {
+    if (!j.contains(key)) return fallback;
+    const auto& value = j[key];
+    return value.is_number_integer() ? value.get<int64_t>() : -1000;
+}
 
 bool isCompareOp(const std::string& op) {
     return op == "eq" || op == "neq" || op == "gt" || op == "gte" || op == "lt" || op == "lte";
@@ -318,17 +326,20 @@ std::string validateTrigger(const nlohmann::json& trigger) {
         }
     } else if (type == "time") {
         // -1 means any hour or any minute, and has to be asked for
-        const int hour = trigger.value("hour", -2);
-        const int minute = trigger.value("minute", -2);
+        const int64_t hour = wholeNumber(trigger, "hour", -2);
+        const int64_t minute = wholeNumber(trigger, "minute", -2);
         if (hour < -1 || hour > 23) return "time trigger needs an hour from 0 to 23, or -1";
         if (minute < -1 || minute > 59) return "time trigger needs a minute from 0 to 59, or -1";
         if (trigger.contains("days_of_week")) {
-            for (const int day : trigger["days_of_week"].get<std::vector<int>>()) {
-                if (day < 0 || day > 6) return "days_of_week values must be from 0 to 6";
+            if (!trigger["days_of_week"].is_array()) return "days_of_week must be a list";
+            for (const auto& day : trigger["days_of_week"]) {
+                if (!day.is_number_integer() || day.get<int64_t>() < 0 || day.get<int64_t>() > 6) {
+                    return "days_of_week values must be from 0 to 6";
+                }
             }
         }
     } else if (type == "time_interval") {
-        const int minutes = trigger.value("interval_minutes", 0);
+        const int64_t minutes = wholeNumber(trigger, "interval_minutes", 0);
         if (minutes <= 0 || minutes > kMaxIntervalMinutes) {
             return "time_interval trigger needs an interval_minutes from 1 to " +
                    std::to_string(kMaxIntervalMinutes);
@@ -354,7 +365,7 @@ std::string validateAction(const nlohmann::json& action) {
             return "set_device_state action needs a value";
         }
     } else if (type == "delay") {
-        const int delayMs = action.value("delayMs", action.value("delay_ms", 0));
+        const int64_t delayMs = wholeNumber(action, "delayMs", wholeNumber(action, "delay_ms", 0));
         if (delayMs <= 0 || delayMs > kMaxTotalDelayMs) {
             return "delay action needs a delayMs from 1 to " + std::to_string(kMaxTotalDelayMs);
         }
@@ -437,12 +448,12 @@ std::string validateFields(const nlohmann::json& j) {
     if (!j.contains("actions") || !j["actions"].is_array() || j["actions"].empty()) {
         return "at least one action is required";
     }
-    int totalDelayMs = 0;
+    int64_t totalDelayMs = 0;
     for (const auto& action : j["actions"]) {
         const std::string problem = validateAction(action);
         if (!problem.empty()) return problem;
         if (action.value("type", "") == "delay") {
-            totalDelayMs += action.value("delayMs", action.value("delay_ms", 0));
+            totalDelayMs += wholeNumber(action, "delayMs", wholeNumber(action, "delay_ms", 0));
             if (totalDelayMs > kMaxTotalDelayMs) {
                 return "delays can total at most " + std::to_string(kMaxTotalDelayMs) + " ms";
             }

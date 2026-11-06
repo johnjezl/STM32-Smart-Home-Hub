@@ -1339,7 +1339,7 @@ class SmartHubApp {
         const actionEl = document.createElement('div');
         actionEl.className = 'action-item';
         actionEl.innerHTML = `
-            <span class="action-item-text">Set ${deviceName} ${property} to ${value ? 'On' : 'Off'}</span>
+            <span class="action-item-text">Set ${this.escapeHtml(deviceName)} ${this.escapeHtml(property)} to ${value ? 'On' : 'Off'}</span>
             <button class="action-remove-btn">×</button>
         `;
 

@@ -34,7 +34,7 @@ Automation System
     +-- UI Screens
             |
             +-- AutomationListScreen
-            +-- AddAutomationScreen (4-step wizard)
+            +-- AddAutomationScreen (3-step wizard)
             +-- EditAutomationScreen
 ```
 
@@ -258,7 +258,7 @@ Navigation:
 - Tap automation → EditAutomationScreen
 - Tap Add → AddAutomationScreen
 
-### AddAutomationScreen (4-Step Wizard)
+### AddAutomationScreen (3-Step Wizard)
 
 **Step 1: Name & Description**
 - Name input (required)
@@ -270,17 +270,14 @@ Navigation:
   - DeviceState: Device, Property, Value
   - Time: Hour, Minute
   - TimeInterval: Minutes
-  - SensorThreshold: Device, Operator, Value
+  - SensorThreshold: Device, Reading, Operator, Value
 
-**Step 3: Conditions (Optional)**
-- Add device state conditions
-- AND/OR logic toggle
-
-**Step 4: Actions**
+**Step 3: Action**
 - Device dropdown
 - Property dropdown
 - Value input
-- Add multiple actions with delays
+
+Conditions, delays and multiple actions can only be set through the API for now.
 
 ### EditAutomationScreen
 

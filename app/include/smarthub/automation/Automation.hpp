@@ -143,6 +143,9 @@ struct Automation {
     uint64_t lastTriggeredAt = 0;
 
     nlohmann::json toJson() const;
+    // Delays run on the thread that fired the automation, so a long total stalls that thread
+    static constexpr int kMaxTotalDelayMs = 60000;
+
     static Automation fromJson(const nlohmann::json& j);
 
     /**

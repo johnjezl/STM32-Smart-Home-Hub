@@ -768,6 +768,12 @@ TEST_F(WebAuthTest, AutomationsThatCouldNeverRunAreRejected) {
          {"condition", {{"is_group", true}, {"group_op", "or"},
                         {"children", nlohmann::json::array()}}},
          {"actions", {action}}},
+        {{"name", "Wrapping interval"},
+         {"trigger", {{"type", "time_interval"}, {"interval_minutes", 4294967297LL}}},
+         {"actions", {action}}},
+        {{"name", "Fractional hour"},
+         {"trigger", {{"type", "time"}, {"hour", 12.9}, {"minute", 0}}},
+         {"actions", {action}}},
         {{"name", "Internal property"},
          {"trigger", {{"type", "device_state"}, {"device_id", "s"}, {"property", "_removed"}}},
          {"actions", {action}}},
@@ -804,9 +810,9 @@ TEST_F(WebAuthTest, AutomationsThatCouldNeverRunAreRejected) {
 
     // A field of the wrong type gets a clear message
     RequestOptions wrongType = admin;
-    wrongType.body = nlohmann::json{{"name", "Null interval"},
-                                    {"trigger", {{"type", "time_interval"},
-                                                 {"interval_minutes", nullptr}}},
+    wrongType.body = nlohmann::json{{"name", "Numeric property"},
+                                    {"trigger", {{"type", "device_state"}, {"device_id", "x"},
+                                                 {"property", 5}}},
                                     {"actions", {action}}}.dump();
     const Response wrongTypeResponse = request("POST", "/api/automations", wrongType);
     EXPECT_EQ(wrongTypeResponse.status, 400);

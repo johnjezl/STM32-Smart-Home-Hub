@@ -9,6 +9,7 @@
 #include "smarthub/devices/DeviceManager.hpp"
 #include "smarthub/core/Logger.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <ctime>
 #include <random>
@@ -169,6 +170,7 @@ void AutomationManager::checkIntervalTriggers(uint64_t currentTimeMs) {
         for (const auto& [id, automation] : m_automations) {
             if (!automation->enabled) continue;
 
+            bool due = false;
             for (size_t index = 0; index < automation->triggers.size(); ++index) {
                 const auto& trigger = automation->triggers[index];
                 if (trigger.type == TriggerType::TimeInterval && trigger.intervalMinutes > 0) {
@@ -181,9 +183,12 @@ void AutomationManager::checkIntervalTriggers(uint64_t currentTimeMs) {
                         m_lastIntervalCheck[timer] = currentTimeMs;
                     } else if (currentTimeMs - lastCheck >= intervalMs) {
                         m_lastIntervalCheck[timer] = currentTimeMs;
-                        runs.push_back({*automation, "Interval:" +
-                                        std::to_string(trigger.intervalMinutes) + "min"});
-                        break;
+                        // Triggers due together run the automation once
+                        if (!due) {
+                            due = true;
+                            runs.push_back({*automation, "Interval:" +
+                                            std::to_string(trigger.intervalMinutes) + "min"});
+                        }
                     }
                 }
             }
@@ -379,7 +384,9 @@ void AutomationManager::executeAutomation(const Automation& automation,
     // Execute actions sequentially
     for (const auto& action : automation.actions) {
         if (action.type == ActionType::Delay) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(action.delayMs));
+            // Older saved automations could have a longer delay than validation allows
+            const auto delayMs = std::min<int64_t>(action.delayMs, Automation::kMaxTotalDelayMs);
+            std::this_thread::sleep_for(std::chrono::milliseconds(delayMs));
         } else {
             executeAction(action);
         }
@@ -401,7 +408,10 @@ void AutomationManager::executeAction(const Action& action) {
                          action.property.c_str(), action.value.dump().c_str());
                 break;
             }
-            m_deviceManager.setDeviceState(action.deviceId, action.property, action.value);
+            if (!m_deviceManager.setDeviceState(action.deviceId, action.property, action.value)) {
+                LOG_WARN("Action failed: set %s.%s to %s", action.deviceId.c_str(),
+                         action.property.c_str(), action.value.dump().c_str());
+            }
             break;
         }
 

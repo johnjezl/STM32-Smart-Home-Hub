@@ -13,6 +13,7 @@
 namespace smarthub {
 
 class AutomationManager;
+struct Automation;
 
 namespace ui {
 
@@ -55,7 +56,7 @@ private:
     static void toggleHandler(lv_event_t* e);
     static void rowClickHandler(lv_event_t* e);
 
-    std::string getTriggerSummary(const std::string& automationId);
+    std::string getTriggerSummary(const Automation& automation);
     std::string formatLastTriggered(uint64_t timestamp);
 
     lv_obj_t* m_content = nullptr;
