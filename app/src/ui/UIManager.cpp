@@ -110,6 +110,8 @@ static struct {
 
 static lv_indev_drv_t s_keyboard_drv;
 static lv_indev_t* s_keyboard_indev = nullptr;
+static lv_indev_t* s_touch_indev = nullptr;
+static lv_disp_t* s_display = nullptr;
 
 // Modal focus group stack (for nested modals)
 static std::vector<lv_group_t*> s_modal_group_stack;
@@ -828,13 +830,13 @@ bool UIManager::initialize(const std::string& drmDevice, const std::string& touc
     s_disp_drv.full_refresh = 1;
     // Note: We handle rotation manually in drm_flush_cb, not using sw_rotate
 
-    lv_disp_drv_register(&s_disp_drv);
+    s_display = lv_disp_drv_register(&s_disp_drv);
 
     // Initialize touch input driver
     lv_indev_drv_init(&s_indev_drv);
     s_indev_drv.type = LV_INDEV_TYPE_POINTER;
     s_indev_drv.read_cb = touch_read_cb;
-    lv_indev_drv_register(&s_indev_drv);
+    s_touch_indev = lv_indev_drv_register(&s_indev_drv);
 
     // Initialize keyboard input driver
     if (s_keyboard.fd >= 0) {
@@ -986,6 +988,30 @@ void UIManager::shutdown() {
     // Clean up screen manager before LVGL buffers
     m_screenManager.reset();
     m_themeManager.reset();
+
+    // Take this out of LVGL before freeing what it uses. LVGL keeps running in-process, so the
+    // next thing to draw would write to the freed buffers.
+    for (lv_group_t* group : s_modal_group_stack) {
+        lv_group_del(group);
+    }
+    s_modal_group_stack.clear();
+    if (s_main_group) {
+        lv_group_set_default(nullptr);
+        lv_group_del(s_main_group);
+        s_main_group = nullptr;
+    }
+    if (s_keyboard_indev) {
+        lv_indev_delete(s_keyboard_indev);
+        s_keyboard_indev = nullptr;
+    }
+    if (s_touch_indev) {
+        lv_indev_delete(s_touch_indev);
+        s_touch_indev = nullptr;
+    }
+    if (s_display) {
+        lv_disp_remove(s_display);
+        s_display = nullptr;
+    }
 
     // Free LVGL buffers
     delete[] s_lvgl_buf1;

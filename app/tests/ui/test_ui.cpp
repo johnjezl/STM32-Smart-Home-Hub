@@ -11,6 +11,10 @@
 #ifdef SMARTHUB_ENABLE_LVGL
 
 #include <smarthub/ui/UIManager.hpp>
+
+#ifdef SMARTHUB_ENABLE_LVGL
+#include <lvgl.h>
+#endif
 #include <smarthub/core/EventBus.hpp>
 #include <smarthub/devices/DeviceManager.hpp>
 #include <smarthub/database/Database.hpp>
@@ -185,6 +189,12 @@ TEST_F(UIManagerTest, InitializeWithRealDRM) {
             uiManager->shutdown();
         });
         EXPECT_FALSE(uiManager->isRunning());
+
+#ifdef SMARTHUB_ENABLE_LVGL
+        // LVGL keeps running, and mustn't draw to the buffers shutdown freed
+        lv_obj_invalidate(lv_scr_act());
+        lv_refr_now(nullptr);
+#endif
     } else {
         // Failed init is acceptable if no display connected
         EXPECT_FALSE(uiManager->isRunning());
