@@ -5,6 +5,8 @@
  */
 
 #include <gtest/gtest.h>
+#include <smarthub_protocol/rpmsg_protocol.hpp>
+#include <smarthub_protocol/rpmsg_test_vectors.hpp>
 #include <cstdint>
 #include <cstring>
 #include <vector>
@@ -19,66 +21,7 @@
 
 namespace {
 
-// Message types (same as in rpmsg.hpp)
-enum class MsgType : uint8_t {
-    CMD_PING            = 0x01,
-    CMD_GET_SENSOR_DATA = 0x10,
-    CMD_SET_INTERVAL    = 0x11,
-    CMD_GET_STATUS      = 0x20,
-    CMD_SET_GPIO        = 0x30,
-    CMD_GET_GPIO        = 0x31,
-    RSP_PONG            = 0x81,
-    RSP_SENSOR_DATA     = 0x90,
-    RSP_STATUS          = 0xA0,
-    RSP_GPIO_STATE      = 0xB1,
-    EVT_SENSOR_UPDATE   = 0xC0,
-    EVT_GPIO_CHANGE     = 0xC1,
-    EVT_ERROR           = 0xE0,
-};
-
-enum class SensorType : uint8_t {
-    Unknown         = 0,
-    Temperature     = 1,
-    Humidity        = 2,
-    Pressure        = 3,
-};
-
-struct MsgHeader {
-    uint8_t type;
-    uint8_t flags;
-    uint16_t seq;
-    uint16_t len;
-    uint16_t reserved;
-} PACKED_STRUCT;
-
-struct SensorDataPayload {
-    uint8_t sensorId;
-    uint8_t sensorType;
-    uint16_t reserved;
-    int32_t value;
-    int32_t scale;
-    uint32_t timestamp;
-} PACKED_STRUCT;
-
-struct StatusPayload {
-    uint32_t uptime;
-    uint8_t sensorCount;
-    uint8_t errorCount;
-    uint16_t pollInterval;
-    uint32_t freeMemory;
-} PACKED_STRUCT;
-
-struct GPIOPayload {
-    uint8_t port;
-    uint8_t pin;
-    uint8_t state;
-    uint8_t mode;
-} PACKED_STRUCT;
-
-struct IntervalPayload {
-    uint16_t intervalMs;
-    uint16_t reserved;
-} PACKED_STRUCT;
+using namespace smarthub::protocol;
 
 /**
  * Message builder for creating RPMsg messages
@@ -440,7 +383,6 @@ TEST_F(RpmsgProtocolTest, ParseSetIntervalCommand) {
     IntervalPayload* payload = reinterpret_cast<IntervalPayload*>(
         msg.data() + sizeof(MsgHeader));
     payload->intervalMs = 2000;
-    payload->reserved = 0;
 
     auto parsed = parser.parse(msg.data(), msg.size());
 
@@ -810,4 +752,54 @@ TEST_F(VirtioVringTest, MultipleMessages) {
     EXPECT_EQ(used()->idx, 2);
     EXPECT_EQ(used()->ring[0].len, 56u);
     EXPECT_EQ(used()->ring[1].len, 36u);
+}
+
+// ---- The contract with the application, whose tests check the same bytes ----
+
+TEST(RpmsgContract, FirmwareBuildsMessagesAsTheApplicationExpects) {
+    uint8_t buffer[64];
+    size_t size = encodeMessage(MsgType::RSP_PONG, 0, nullptr, 0, buffer, sizeof(buffer));
+    EXPECT_EQ(std::vector<uint8_t>(buffer, buffer + size), vectors::PONG);
+
+    SensorDataPayload sensor{};
+    sensor.sensorId = 3;
+    sensor.sensorType = static_cast<uint8_t>(SensorType::Temperature);
+    sensor.value = 2150;
+    sensor.scale = 100;
+    sensor.timestamp = 5000;
+    size = encodeMessage(MsgType::EVT_SENSOR_UPDATE, 0x0102, &sensor, sizeof(sensor), buffer, sizeof(buffer));
+    EXPECT_EQ(std::vector<uint8_t>(buffer, buffer + size), vectors::SENSOR_UPDATE_21_50);
+}
+
+TEST(RpmsgContract, FirmwareReadsWhatTheApplicationSends) {
+    DecodedMessage message{};
+    ASSERT_EQ(decodeMessage(vectors::PING.data(), vectors::PING.size(), message), DecodeResult::Ok);
+    EXPECT_EQ(message.header.type, static_cast<uint8_t>(MsgType::CMD_PING));
+    EXPECT_EQ(message.header.len, 0);
+
+    ASSERT_EQ(decodeMessage(vectors::SET_GPIO_B7_HIGH.data(), vectors::SET_GPIO_B7_HIGH.size(), message),
+              DecodeResult::Ok);
+    EXPECT_EQ(message.header.type, static_cast<uint8_t>(MsgType::CMD_SET_GPIO));
+    ASSERT_EQ(message.header.len, sizeof(GPIOPayload));
+    GPIOPayload gpio;
+    std::memcpy(&gpio, message.payload, sizeof(gpio));
+    EXPECT_EQ(gpio.port, 1);
+    EXPECT_EQ(gpio.pin, 7);
+    EXPECT_EQ(gpio.state, 1);
+
+    ASSERT_EQ(decodeMessage(vectors::SET_INTERVAL_1000.data(), vectors::SET_INTERVAL_1000.size(), message),
+              DecodeResult::Ok);
+    IntervalPayload interval;
+    std::memcpy(&interval, message.payload, sizeof(interval));
+    EXPECT_EQ(interval.intervalMs, 1000);
+}
+
+TEST(RpmsgContract, ShortAndOversizedMessagesAreNotRead) {
+    DecodedMessage message{};
+    EXPECT_EQ(decodeMessage(vectors::PING.data(), 3, message), DecodeResult::NeedMore);
+    EXPECT_EQ(decodeMessage(vectors::SET_GPIO_B7_HIGH.data(), 9, message), DecodeResult::NeedMore);
+    const uint8_t huge[] = {0x01, 0, 0, 0, 0xFF, 0xFF, 0, 0};
+    EXPECT_EQ(decodeMessage(huge, sizeof(huge), message), DecodeResult::Invalid);
+    const uint8_t unknownType[] = {0x77, 0, 0, 0, 0, 0, 0, 0};
+    EXPECT_EQ(decodeMessage(unknownType, sizeof(unknownType), message), DecodeResult::Invalid);
 }

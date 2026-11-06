@@ -5,6 +5,9 @@
  */
 #pragma once
 
+#include <smarthub_protocol/rpmsg_protocol.hpp>
+
+#include <chrono>
 #include <string>
 #include <vector>
 #include <functional>
@@ -13,22 +16,6 @@
 namespace smarthub {
 
 class EventBus;
-
-/**
- * RPMsg message types (shared with M4 firmware)
- */
-enum class RpmsgMessageType : uint8_t {
-    Ping = 0x00,
-    Pong = 0x01,
-    SensorData = 0x10,
-    GpioCommand = 0x20,
-    GpioState = 0x21,
-    AdcRequest = 0x30,
-    AdcResponse = 0x31,
-    PwmCommand = 0x40,
-    Config = 0x50,
-    Error = 0xFF
-};
 
 /**
  * RPMsg client for M4 communication
@@ -45,9 +32,11 @@ public:
     RpmsgClient& operator=(const RpmsgClient&) = delete;
 
     /**
-     * Initialize RPMsg communication
+     * Open the device and ping the M4. False if the device can't be opened, or the M4 doesn't
+     * answer within pingTimeoutMs. In the second case the device stays open, and poll() keeps
+     * pinging, in case it starts later.
      */
-    bool initialize();
+    bool initialize(int pingTimeoutMs = 250);
 
     /**
      * Shutdown and cleanup
@@ -55,9 +44,15 @@ public:
     void shutdown();
 
     /**
-     * Check if connected to M4
+     * Check if the device is open. See m4Responded for whether anything is answering.
      */
     bool isConnected() const { return m_connected; }
+
+    /**
+     * Whether the M4 has answered a ping since this was initialized. It doesn't go false again if
+     * the M4 stops later.
+     */
+    bool m4Responded() const { return m_m4Responded; }
 
     /**
      * Poll for messages (call from main loop)
@@ -72,22 +67,24 @@ public:
     /**
      * Send typed message
      */
-    bool sendMessage(RpmsgMessageType type, const std::vector<uint8_t>& payload);
+    bool sendMessage(protocol::MsgType type, const std::vector<uint8_t>& payload);
 
     /**
-     * Request sensor data from M4
+     * Ask the M4 to read its sensors now. The readings arrive as SensorDataEvents.
      */
-    bool requestSensorData(uint8_t sensorId);
+    bool requestSensorData();
+
+    /**
+     * Set how often the M4 reads its sensors
+     */
+    bool setSensorInterval(uint16_t intervalMs);
 
     /**
      * Set GPIO pin state
+     * @param port 0=A, 1=B, and so on
+     * @param pin 0-15
      */
-    bool setGpio(uint8_t pin, bool state);
-
-    /**
-     * Set PWM duty cycle
-     */
-    bool setPwm(uint8_t channel, uint16_t dutyCycle);
+    bool setGpio(uint8_t port, uint8_t pin, bool state);
 
     /**
      * Send ping to verify M4 is responsive
@@ -100,12 +97,18 @@ public:
     void setMessageCallback(MessageCallback callback) { m_callback = callback; }
 
 private:
-    void handleMessage(const std::vector<uint8_t>& data);
+    void handleReceived(const uint8_t* data, size_t size);
+    void handleMessage(const protocol::DecodedMessage& message);
 
     EventBus& m_eventBus;
     std::string m_device;
     int m_fd = -1;
     bool m_connected = false;
+    bool m_m4Responded = false;
+    uint16_t m_nextSeq = 0;
+    std::vector<uint8_t> m_received;  // What has arrived of a message not complete yet
+    std::chrono::steady_clock::time_point m_lastReceived{};
+    std::chrono::steady_clock::time_point m_lastPing{};
     MessageCallback m_callback;
 };
 

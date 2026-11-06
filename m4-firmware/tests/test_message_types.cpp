@@ -5,6 +5,7 @@
  */
 
 #include <gtest/gtest.h>
+#include <smarthub_protocol/rpmsg_protocol.hpp>
 #include <cstdint>
 #include <cstring>
 
@@ -21,62 +22,7 @@ namespace smarthub::m4 {
 /**
  * Message types for M4 <-> A7 communication
  */
-enum class MsgType : uint8_t {
-    CMD_PING            = 0x01,
-    CMD_GET_SENSOR_DATA = 0x10,
-    CMD_SET_INTERVAL    = 0x11,
-    CMD_GET_STATUS      = 0x20,
-    CMD_SET_GPIO        = 0x30,
-    CMD_GET_GPIO        = 0x31,
-    RSP_PONG            = 0x81,
-    RSP_SENSOR_DATA     = 0x90,
-    RSP_STATUS          = 0xA0,
-    RSP_GPIO_STATE      = 0xB1,
-    EVT_SENSOR_UPDATE   = 0xC0,
-    EVT_GPIO_CHANGE     = 0xC1,
-    EVT_ERROR           = 0xE0,
-};
-
-enum class SensorType : uint8_t {
-    Unknown         = 0,
-    Temperature     = 1,
-    Humidity        = 2,
-    Pressure        = 3,
-    Light           = 4,
-    Motion          = 5,
-};
-
-struct MsgHeader {
-    uint8_t type;
-    uint8_t flags;
-    uint16_t seq;
-    uint16_t len;
-    uint16_t reserved;
-} PACKED_STRUCT;
-
-struct SensorDataPayload {
-    uint8_t sensorId;
-    uint8_t sensorType;
-    uint16_t reserved;
-    int32_t value;
-    int32_t scale;
-    uint32_t timestamp;
-} PACKED_STRUCT;
-
-struct StatusPayload {
-    uint32_t uptime;
-    uint8_t sensorCount;
-    uint8_t errorCount;
-    uint16_t pollInterval;
-    uint32_t freeMemory;
-} PACKED_STRUCT;
-
-struct GPIOPayload {
-    uint8_t port;
-    uint8_t pin;
-    uint8_t state;
-    uint8_t mode;
-} PACKED_STRUCT;
+using namespace smarthub::protocol;
 
 } // namespace smarthub::m4
 

@@ -250,8 +250,8 @@ Send a ping message from the A7 side and verify pong response:
 ```cpp
 // On A7 Linux application
 int fd = open("/dev/ttyRPMSG0", O_RDWR);
-uint8_t ping[] = {0x01, 0x00, 0x00, 0x00};  // Ping message
-write(fd, ping, 4);
+uint8_t ping[8] = {0x01};  // CMD_PING: an 8-byte header with no payload
+write(fd, ping, sizeof(ping));
 
 uint8_t response[64];
 int n = read(fd, response, sizeof(response));
@@ -375,9 +375,9 @@ if (!m4.initialize()) {
 }
 
 // Send commands
-m4.requestSensorData(0);           // Request sensor 0
-m4.setGpio(5, true);               // Set GPIO5 high
-m4.setPwm(0, 512);                 // 50% duty on PWM0
+m4.requestSensorData();            // Read sensors now
+m4.setSensorInterval(1000);        // Read them every second
+m4.setGpio(1, 5, true);            // Set port B, pin 5 high
 m4.ping();                         // Heartbeat
 
 // Receive data (call from main loop)
@@ -385,10 +385,11 @@ m4.poll();
 
 // Or use callback
 m4.setMessageCallback([](const std::vector<uint8_t>& data) {
-    // Handle message
-    auto type = static_cast<RpmsgMessageType>(data[0]);
-    if (type == RpmsgMessageType::SensorData) {
-        // Parse sensor reading
+    // Handle message. data is the whole message, header included.
+    protocol::DecodedMessage message;
+    if (protocol::decodeMessage(data.data(), data.size(), message) == protocol::DecodeResult::Ok &&
+        static_cast<protocol::MsgType>(message.header.type) == protocol::MsgType::EVT_SENSOR_UPDATE) {
+        // Sensor readings also arrive as SensorDataEvents, which are easier
     }
 });
 ```
@@ -425,27 +426,7 @@ fcntl(fd, F_SETFL, O_NONBLOCK);
 
 ### Message Format
 
-All messages between A7 and M4 use this format:
-
-```
-Byte  Content
-0     Message type (RpmsgMessageType)
-1     Payload length
-2-N   Payload data
-```
-
-| Type | Value | Direction | Description |
-|------|-------|-----------|-------------|
-| Ping | 0x00 | A7→M4 | Heartbeat request |
-| Pong | 0x01 | M4→A7 | Heartbeat response |
-| SensorData | 0x10 | M4→A7 | Sensor reading |
-| GpioCommand | 0x20 | A7→M4 | Set GPIO state |
-| GpioState | 0x21 | M4→A7 | GPIO state report |
-| AdcRequest | 0x30 | A7→M4 | Request ADC reading |
-| AdcResponse | 0x31 | M4→A7 | ADC value |
-| PwmCommand | 0x40 | A7→M4 | Set PWM duty |
-| Config | 0x50 | A7→M4 | Configuration |
-| Error | 0xFF | M4→A7 | Error report |
+See [rpmsg.md](rpmsg.md#message-protocol). The definition is `shared/include/smarthub_protocol/rpmsg_protocol.hpp`, which both sides build against.
 
 ### EventBus Integration
 

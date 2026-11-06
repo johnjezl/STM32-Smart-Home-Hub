@@ -32,6 +32,7 @@ if(GTEST_AVAILABLE)
         ${CMAKE_SOURCE_DIR}/include
         ${CMAKE_SOURCE_DIR}/src
         ${CMAKE_SOURCE_DIR}/third_party
+        ${CMAKE_SOURCE_DIR}/../shared/include
         ${CMAKE_CURRENT_SOURCE_DIR}
     )
 
@@ -91,6 +92,7 @@ if(GTEST_AVAILABLE)
         ${CMAKE_SOURCE_DIR}/include
         ${CMAKE_SOURCE_DIR}/src
         ${CMAKE_SOURCE_DIR}/third_party
+        ${CMAKE_SOURCE_DIR}/../shared/include
     )
     target_link_libraries(smarthub_lib PUBLIC Threads::Threads)
     target_compile_definitions(smarthub_lib PUBLIC MG_TLS=2)  # MG_TLS_OPENSSL, as the program uses
@@ -251,6 +253,7 @@ if(GTEST_AVAILABLE)
             ui/test_theme_manager.cpp
             ui/test_widgets.cpp
             ui/test_screens.cpp
+            ${CMAKE_SOURCE_DIR}/src/ui/widgets/TimeSeriesChart.cpp
             ${CMAKE_SOURCE_DIR}/src/ui/ThemeManager.cpp
             ${CMAKE_SOURCE_DIR}/src/ui/DisplayManager.cpp
             ${CMAKE_SOURCE_DIR}/src/ui/AnimationManager.cpp
@@ -328,6 +331,7 @@ if(GTEST_AVAILABLE)
         target_sources(smarthub_tests PRIVATE ui/headless_display.cpp ui/test_screens_render.cpp
                        ui/test_device_control.cpp)
     else()
+        target_sources(smarthub_tests PRIVATE ${CMAKE_SOURCE_DIR}/src/ui/widgets/TimeSeriesChart.cpp)
         # ThemeManager, DisplayManager, and AnimationManager work without LVGL
         target_sources(smarthub_tests PRIVATE
             ${CMAKE_SOURCE_DIR}/src/ui/ThemeManager.cpp

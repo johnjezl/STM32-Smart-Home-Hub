@@ -10,6 +10,7 @@
  * - Inter-processor communication with A7 (Linux)
  */
 
+#include <cstring>
 #include <cstdint>
 #include "smarthub_m4/stm32mp1xx.h"
 #include "smarthub_m4/drivers/clock.hpp"
@@ -42,8 +43,9 @@ static void handleCommand(const MsgHeader* hdr, const void* payload, size_t len)
     switch ((MsgType)hdr->type) {
         case MsgType::CMD_SET_INTERVAL: {
             if (len >= sizeof(uint16_t) && g_sensors) {
-                uint16_t interval = *(const uint16_t*)payload;
-                g_sensors->setPollingInterval(interval);
+                IntervalPayload interval;
+                std::memcpy(&interval, payload, sizeof(interval));  /* It may not be aligned */
+                g_sensors->setPollingInterval(interval.intervalMs);
             }
             break;
         }

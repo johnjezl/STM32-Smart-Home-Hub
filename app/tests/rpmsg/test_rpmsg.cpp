@@ -6,6 +6,13 @@
  */
 
 #include <gtest/gtest.h>
+#include <smarthub_protocol/rpmsg_test_vectors.hpp>
+#include <chrono>
+#include <fcntl.h>
+#include <stdlib.h>
+#include <termios.h>
+#include <thread>
+#include <unistd.h>
 #include <smarthub/rpmsg/RpmsgClient.hpp>
 #include <smarthub/core/EventBus.hpp>
 #include <filesystem>
@@ -67,7 +74,7 @@ TEST_F(RpmsgClientTest, SendFailsWhenNotConnected) {
 TEST_F(RpmsgClientTest, SendMessageFailsWhenNotConnected) {
     smarthub::RpmsgClient client(*eventBus);
     std::vector<uint8_t> payload = {0x01};
-    EXPECT_FALSE(client.sendMessage(smarthub::RpmsgMessageType::Ping, payload));
+    EXPECT_FALSE(client.sendMessage(smarthub::protocol::MsgType::CMD_PING, payload));
 }
 
 TEST_F(RpmsgClientTest, PingFailsWhenNotConnected) {
@@ -77,20 +84,13 @@ TEST_F(RpmsgClientTest, PingFailsWhenNotConnected) {
 
 TEST_F(RpmsgClientTest, RequestSensorDataFailsWhenNotConnected) {
     smarthub::RpmsgClient client(*eventBus);
-    EXPECT_FALSE(client.requestSensorData(0));
+    EXPECT_FALSE(client.requestSensorData());
 }
 
 TEST_F(RpmsgClientTest, SetGpioFailsWhenNotConnected) {
     smarthub::RpmsgClient client(*eventBus);
-    EXPECT_FALSE(client.setGpio(0, true));
-    EXPECT_FALSE(client.setGpio(1, false));
-}
-
-TEST_F(RpmsgClientTest, SetPwmFailsWhenNotConnected) {
-    smarthub::RpmsgClient client(*eventBus);
-    EXPECT_FALSE(client.setPwm(0, 512));
-    EXPECT_FALSE(client.setPwm(1, 0));
-    EXPECT_FALSE(client.setPwm(2, 65535));
+    EXPECT_FALSE(client.setGpio(0, 0, true));
+    EXPECT_FALSE(client.setGpio(1, 7, false));
 }
 
 TEST_F(RpmsgClientTest, PollWhenNotConnected) {
@@ -111,20 +111,6 @@ TEST_F(RpmsgClientTest, SetMessageCallback) {
     // Callback won't be called since not connected
     client.poll();
     EXPECT_FALSE(callbackSet);
-}
-
-TEST_F(RpmsgClientTest, MessageTypeEnumValues) {
-    // Verify message type enum values match protocol spec
-    EXPECT_EQ(static_cast<uint8_t>(smarthub::RpmsgMessageType::Ping), 0x00);
-    EXPECT_EQ(static_cast<uint8_t>(smarthub::RpmsgMessageType::Pong), 0x01);
-    EXPECT_EQ(static_cast<uint8_t>(smarthub::RpmsgMessageType::SensorData), 0x10);
-    EXPECT_EQ(static_cast<uint8_t>(smarthub::RpmsgMessageType::GpioCommand), 0x20);
-    EXPECT_EQ(static_cast<uint8_t>(smarthub::RpmsgMessageType::GpioState), 0x21);
-    EXPECT_EQ(static_cast<uint8_t>(smarthub::RpmsgMessageType::AdcRequest), 0x30);
-    EXPECT_EQ(static_cast<uint8_t>(smarthub::RpmsgMessageType::AdcResponse), 0x31);
-    EXPECT_EQ(static_cast<uint8_t>(smarthub::RpmsgMessageType::PwmCommand), 0x40);
-    EXPECT_EQ(static_cast<uint8_t>(smarthub::RpmsgMessageType::Config), 0x50);
-    EXPECT_EQ(static_cast<uint8_t>(smarthub::RpmsgMessageType::Error), 0xFF);
 }
 
 // Hardware tests - only run on target device with M4
@@ -149,8 +135,8 @@ TEST_F(RpmsgClientHardwareTest, InitializeWithRealDevice) {
         client.shutdown();
         EXPECT_FALSE(client.isConnected());
     } else {
-        // M4 firmware may not be loaded
-        EXPECT_FALSE(client.isConnected());
+        // M4 firmware may not be loaded, in which case the device stays open if it exists
+        EXPECT_FALSE(client.m4Responded());
     }
 }
 
@@ -163,4 +149,219 @@ TEST_F(RpmsgClientHardwareTest, PingM4) {
         (void)client.ping();
         client.shutdown();
     }
+}
+
+// ---- The contract with the firmware, whose tests check the same bytes ----
+
+namespace {
+
+/** Plays the M4's end of the device, over a pseudo-terminal, which is what the real one looks like. */
+class FakeM4 {
+public:
+    FakeM4() {
+        m_master = posix_openpt(O_RDWR | O_NOCTTY | O_NONBLOCK);
+        grantpt(m_master);
+        unlockpt(m_master);
+        m_path = ptsname(m_master);
+        // Bytes as they are, or the terminal would alter them before the client opens it
+        struct termios tio;
+        tcgetattr(m_master, &tio);
+        cfmakeraw(&tio);
+        tcsetattr(m_master, TCSANOW, &tio);
+    }
+    ~FakeM4() { close(m_master); }
+
+    const std::string& path() const { return m_path; }
+
+    void send(const std::vector<uint8_t>& bytes) {
+        ASSERT_EQ(write(m_master, bytes.data(), bytes.size()), static_cast<ssize_t>(bytes.size()));
+    }
+
+    std::vector<uint8_t> received() {
+        std::vector<uint8_t> bytes;
+        uint8_t buffer[512];
+        for (int i = 0; i < 100; i++) {
+            const ssize_t n = read(m_master, buffer, sizeof(buffer));
+            if (n > 0) {
+                bytes.insert(bytes.end(), buffer, buffer + n);
+                return bytes;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        return bytes;
+    }
+
+private:
+    int m_master = -1;
+    std::string m_path;
+};
+
+} // namespace
+
+class RpmsgContractTest : public RpmsgClientTest {
+protected:
+    // Answers the first ping, so the client is up
+    void connect(smarthub::RpmsgClient& client) {
+        std::thread answer([this] {
+            EXPECT_EQ(m4.received(), smarthub::protocol::vectors::PING);
+            m4.send(smarthub::protocol::vectors::PONG);
+        });
+        EXPECT_TRUE(client.initialize(2000));
+        answer.join();
+    }
+    FakeM4 m4;
+};
+
+TEST_F(RpmsgContractTest, InitializeIsOnlyTrueIfTheM4Answers) {
+    smarthub::RpmsgClient client(*eventBus, m4.path());
+    EXPECT_FALSE(client.initialize(50));
+    EXPECT_TRUE(client.isConnected()) << "it stays open in case the M4 starts later";
+    EXPECT_FALSE(client.m4Responded());
+
+    m4.send(smarthub::protocol::vectors::PONG);
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    client.poll();
+    EXPECT_TRUE(client.m4Responded());
+}
+
+TEST_F(RpmsgContractTest, ClientSendsWhatTheFirmwareExpects) {
+    smarthub::RpmsgClient client(*eventBus, m4.path());
+    connect(client);
+
+    EXPECT_TRUE(client.setGpio(1, 7, true));
+    EXPECT_EQ(m4.received(), smarthub::protocol::vectors::SET_GPIO_B7_HIGH);
+
+    EXPECT_TRUE(client.setSensorInterval(1000));
+    EXPECT_EQ(m4.received(), smarthub::protocol::vectors::SET_INTERVAL_1000);
+}
+
+TEST_F(RpmsgContractTest, ClientReadsWhatTheFirmwareSends) {
+    smarthub::RpmsgClient client(*eventBus, m4.path());
+    connect(client);
+
+    std::vector<smarthub::SensorDataEvent> events;
+    eventBus->subscribe("sensor.data", [&](const smarthub::Event& event) {
+        events.push_back(static_cast<const smarthub::SensorDataEvent&>(event));
+    });
+
+    m4.send(smarthub::protocol::vectors::SENSOR_UPDATE_21_50);
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    client.poll();
+    eventBus->processQueue();
+
+    ASSERT_EQ(events.size(), 1u);
+    EXPECT_EQ(events[0].sensorId, "3");
+    EXPECT_DOUBLE_EQ(events[0].value, 21.5);
+}
+
+TEST_F(RpmsgContractTest, ClientReassemblesAMessageInPieces) {
+    smarthub::RpmsgClient client(*eventBus, m4.path());
+    connect(client);
+    int messages = 0;
+    client.setMessageCallback([&](const std::vector<uint8_t>&) { messages++; });
+
+    const auto& whole = smarthub::protocol::vectors::SENSOR_UPDATE_21_50;
+    m4.send({whole.begin(), whole.begin() + 5});
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    client.poll();
+    EXPECT_EQ(messages, 0);
+
+    m4.send({whole.begin() + 5, whole.end()});
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    client.poll();
+    EXPECT_EQ(messages, 1);
+}
+
+TEST_F(RpmsgContractTest, ClientReadsTwoMessagesThatArriveTogether) {
+    smarthub::RpmsgClient client(*eventBus, m4.path());
+    connect(client);
+    int messages = 0;
+    client.setMessageCallback([&](const std::vector<uint8_t>&) { messages++; });
+
+    auto both = smarthub::protocol::vectors::PONG;
+    both.insert(both.end(), smarthub::protocol::vectors::SENSOR_UPDATE_21_50.begin(),
+                smarthub::protocol::vectors::SENSOR_UPDATE_21_50.end());
+    m4.send(both);
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    client.poll();
+
+    EXPECT_EQ(messages, 2);
+}
+
+TEST_F(RpmsgContractTest, GarbageIsSkippedAndWhatFollowsIsRead) {
+    smarthub::RpmsgClient client(*eventBus, m4.path());
+    connect(client);
+    int messages = 0;
+    client.setMessageCallback([&](const std::vector<uint8_t>&) { messages++; });
+
+    // Too large, and then a type that doesn't exist
+    std::vector<uint8_t> bytes = {0x01, 0, 0, 0, 0xFF, 0xFF, 0, 0, 0x77, 0, 0, 0, 0, 0, 0, 0};
+    bytes.insert(bytes.end(), smarthub::protocol::vectors::PONG.begin(), smarthub::protocol::vectors::PONG.end());
+    m4.send(bytes);
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    client.poll();
+
+    EXPECT_GE(messages, 1) << "the pong behind the garbage";
+}
+
+TEST_F(RpmsgContractTest, MessageLeftUnfinishedDoesNotSpoilTheNext) {
+    smarthub::RpmsgClient client(*eventBus, m4.path());
+    connect(client);
+    int messages = 0;
+    client.setMessageCallback([&](const std::vector<uint8_t>&) { messages++; });
+
+    // The M4 reset partway through a message
+    const auto& whole = smarthub::protocol::vectors::SENSOR_UPDATE_21_50;
+    m4.send({whole.begin(), whole.begin() + 9});
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    client.poll();
+    std::this_thread::sleep_for(std::chrono::milliseconds(1100));
+
+    m4.send(smarthub::protocol::vectors::PONG);
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    client.poll();
+
+    EXPECT_EQ(messages, 1);
+}
+
+TEST_F(RpmsgContractTest, HandlerCanShutTheClientDown) {
+    smarthub::RpmsgClient client(*eventBus, m4.path());
+    connect(client);
+    client.setMessageCallback([&](const std::vector<uint8_t>&) { client.shutdown(); });
+
+    auto both = smarthub::protocol::vectors::PONG;
+    both.insert(both.end(), smarthub::protocol::vectors::PONG.begin(), smarthub::protocol::vectors::PONG.end());
+    m4.send(both);
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    client.poll();
+
+    EXPECT_FALSE(client.isConnected());
+}
+
+TEST_F(RpmsgContractTest, RetryingInitializeWaitsForItsOwnAnswer) {
+    smarthub::RpmsgClient client(*eventBus, m4.path());
+    connect(client);
+    EXPECT_TRUE(client.m4Responded());
+
+    EXPECT_FALSE(client.initialize(30)) << "nothing answered this time";
+    EXPECT_FALSE(client.m4Responded());
+}
+
+TEST_F(RpmsgContractTest, SensorEventSaysWhatItMeasures) {
+    smarthub::RpmsgClient client(*eventBus, m4.path());
+    connect(client);
+    std::string type;
+    std::string unit;
+    eventBus->subscribe("sensor.data", [&](const smarthub::Event& event) {
+        type = static_cast<const smarthub::SensorDataEvent&>(event).sensorType;
+        unit = static_cast<const smarthub::SensorDataEvent&>(event).unit;
+    });
+
+    m4.send(smarthub::protocol::vectors::SENSOR_UPDATE_21_50);
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    client.poll();
+    eventBus->processQueue();
+
+    EXPECT_EQ(type, "temperature");
+    EXPECT_EQ(unit, "C");
 }

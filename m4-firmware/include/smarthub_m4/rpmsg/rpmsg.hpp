@@ -5,94 +5,22 @@
  */
 #pragma once
 
+#include <smarthub_protocol/rpmsg_protocol.hpp>
+
 #include <cstdint>
 #include <cstddef>
 #include <functional>
 
 namespace smarthub::m4 {
 
-/**
- * Message types for M4 <-> A7 communication
- */
-enum class MsgType : uint8_t {
-    /* A7 -> M4 Commands */
-    CMD_PING            = 0x01,
-    CMD_GET_SENSOR_DATA = 0x10,
-    CMD_SET_INTERVAL    = 0x11,
-    CMD_GET_STATUS      = 0x20,
-    CMD_SET_GPIO        = 0x30,
-    CMD_GET_GPIO        = 0x31,
-
-    /* M4 -> A7 Responses */
-    RSP_PONG            = 0x81,
-    RSP_SENSOR_DATA     = 0x90,
-    RSP_STATUS          = 0xA0,
-    RSP_GPIO_STATE      = 0xB1,
-
-    /* M4 -> A7 Events (unsolicited) */
-    EVT_SENSOR_UPDATE   = 0xC0,
-    EVT_GPIO_CHANGE     = 0xC1,
-    EVT_ERROR           = 0xE0,
-};
-
-/**
- * Sensor types
- */
-enum class SensorType : uint8_t {
-    Unknown         = 0,
-    Temperature     = 1,
-    Humidity        = 2,
-    Pressure        = 3,
-    Light           = 4,
-    Motion          = 5,
-    Proximity       = 6,
-    CO2             = 7,
-    VOC             = 8,
-};
-
-/**
- * Message header - common to all messages
- */
-struct MsgHeader {
-    uint8_t type;       /* MsgType */
-    uint8_t flags;      /* Message flags */
-    uint16_t seq;       /* Sequence number */
-    uint16_t len;       /* Payload length */
-    uint16_t reserved;
-} __attribute__((packed));
-
-/**
- * Sensor data message payload
- */
-struct SensorDataPayload {
-    uint8_t sensorId;       /* Sensor ID (0-255) */
-    uint8_t sensorType;     /* SensorType */
-    uint16_t reserved;
-    int32_t value;          /* Fixed-point value (multiply by scale) */
-    int32_t scale;          /* Scale factor (e.g., 100 for 2 decimal places) */
-    uint32_t timestamp;     /* Timestamp in ms */
-} __attribute__((packed));
-
-/**
- * Status response payload
- */
-struct StatusPayload {
-    uint32_t uptime;        /* Uptime in ms */
-    uint8_t sensorCount;    /* Number of active sensors */
-    uint8_t errorCount;     /* Error counter */
-    uint16_t pollInterval;  /* Current polling interval in ms */
-    uint32_t freeMemory;    /* Free memory bytes */
-} __attribute__((packed));
-
-/**
- * GPIO command payload
- */
-struct GPIOPayload {
-    uint8_t port;           /* GPIO port (0=A, 1=B, etc.) */
-    uint8_t pin;            /* Pin number (0-15) */
-    uint8_t state;          /* Pin state (0=low, 1=high, 2=toggle) */
-    uint8_t mode;           /* Pin mode (for SET_GPIO) */
-} __attribute__((packed));
+/* The messages are defined once, for both sides, in shared/ */
+using protocol::GPIOPayload;
+using protocol::IntervalPayload;
+using protocol::MsgHeader;
+using protocol::MsgType;
+using protocol::SensorDataPayload;
+using protocol::SensorType;
+using protocol::StatusPayload;
 
 /**
  * RPMsg endpoint callback type
@@ -107,7 +35,7 @@ using RpmsgCallback = std::function<void(const MsgHeader*, const void*, size_t)>
  */
 class Rpmsg {
 public:
-    static constexpr size_t MAX_MSG_SIZE = 512;
+    static constexpr size_t MAX_MSG_SIZE = protocol::MAX_MESSAGE_SIZE;
     static constexpr const char* CHANNEL_NAME = "smarthub-m4";
 
     /**
