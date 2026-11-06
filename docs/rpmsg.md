@@ -6,7 +6,7 @@ The RPMsg client enables communication between the Cortex-A7 Linux application a
 
 The RpmsgClient class provides:
 - Bidirectional communication with M4 core
-- Typed message protocol for sensors, GPIO, PWM, ADC
+- Typed message protocol for sensors and GPIO
 - EventBus integration for sensor data delivery
 - Non-blocking polling for message reception
 
@@ -27,7 +27,6 @@ The RpmsgClient class provides:
 │  │ Bare-metal Firmware                          │   │
 │  │ - Sensor reading (ADC, I2C, SPI)            │   │
 │  │ - GPIO control                               │   │
-│  │ - PWM generation                             │   │
 │  │ - Real-time tasks                            │   │
 │  └─────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────┘
@@ -44,28 +43,33 @@ rpmsg:
 
 ## Message Protocol
 
+Both sides build against one definition, `shared/include/smarthub_protocol/rpmsg_protocol.hpp`. Each side's tests check the same bytes from `rpmsg_test_vectors.hpp`, so a change on either side that breaks the other fails its tests.
+
 ### Message Format
 
+An 8-byte header, then the payload, little-endian:
+
 ```
-┌──────────┬──────────┬─────────────────────┐
-│ Type (1) │ Len (1)  │ Payload (0-253)     │
-└──────────┴──────────┴─────────────────────┘
+type (1) | flags (1) | seq (2) | len (2) | reserved (2) | payload (len)
 ```
 
 ### Message Types
 
-| Type | Value | Direction | Description |
-|------|-------|-----------|-------------|
-| Ping | 0x00 | A7 → M4 | Connectivity check |
-| Pong | 0x01 | M4 → A7 | Ping response |
-| SensorData | 0x10 | M4 → A7 | Sensor reading |
-| GpioCommand | 0x20 | A7 → M4 | Set GPIO state |
-| GpioState | 0x21 | M4 → A7 | GPIO state report |
-| AdcRequest | 0x30 | A7 → M4 | Request ADC reading |
-| AdcResponse | 0x31 | M4 → A7 | ADC value response |
-| PwmCommand | 0x40 | A7 → M4 | Set PWM duty cycle |
-| Config | 0x50 | Both | Configuration data |
-| Error | 0xFF | M4 → A7 | Error notification |
+| Type | Value | Direction | Payload |
+|------|-------|-----------|---------|
+| CMD_PING | 0x01 | A7 → M4 | None |
+| CMD_GET_SENSOR_DATA | 0x10 | A7 → M4 | None. Reads sensors now. |
+| CMD_SET_INTERVAL | 0x11 | A7 → M4 | `IntervalPayload` |
+| CMD_GET_STATUS | 0x20 | A7 → M4 | None |
+| CMD_SET_GPIO | 0x30 | A7 → M4 | `GPIOPayload` |
+| CMD_GET_GPIO | 0x31 | A7 → M4 | `GPIOPayload` |
+| RSP_PONG | 0x81 | M4 → A7 | None |
+| RSP_SENSOR_DATA | 0x90 | M4 → A7 | `SensorDataPayload` |
+| RSP_STATUS | 0xA0 | M4 → A7 | `StatusPayload` |
+| RSP_GPIO_STATE | 0xB1 | M4 → A7 | `GPIOPayload` |
+| EVT_SENSOR_UPDATE | 0xC0 | M4 → A7 | `SensorDataPayload` |
+| EVT_GPIO_CHANGE | 0xC1 | M4 → A7 | `GPIOPayload` |
+| EVT_ERROR | 0xE0 | M4 → A7 | None |
 
 ## API Reference
 
@@ -86,17 +90,14 @@ smarthub::RpmsgClient client(eventBus, "/dev/ttyRPMSG1");
 ### Initialization
 
 ```cpp
-// Initialize connection to M4
+// Opens the device and pings the M4, waiting briefly for the answer
 if (client.initialize()) {
-    // Connected and M4 responded to ping
+    // The M4 answered
+} else if (client.isConnected()) {
+    // The device is open, but nothing answered. It stays open and poll() keeps pinging in case
+    // the M4 starts later, and client.m4Responded() changes if it does.
 }
 
-// Check connection status
-if (client.isConnected()) {
-    // ...
-}
-
-// Shutdown
 client.shutdown();
 ```
 
@@ -115,56 +116,35 @@ while (running) {
 ### Sending Messages
 
 ```cpp
-// Send raw data
-std::vector<uint8_t> data = {0x01, 0x02, 0x03};
-client.send(data);
+// Send a typed message
+client.sendMessage(protocol::MsgType::CMD_GET_STATUS, {});
 
-// Send typed message
-client.sendMessage(RpmsgMessageType::Config, configPayload);
-
-// Ping M4 (verify responsiveness)
-if (client.ping()) {
-    // M4 is responsive
-}
+// Ping the M4. This only says the ping was sent: m4Responded() shows when an answer has come back,
+// which poll() picks up.
+client.ping();
 ```
 
 ### GPIO Control
 
 ```cpp
-// Set GPIO pin high
-client.setGpio(13, true);   // Pin 13 = HIGH
-
-// Set GPIO pin low
-client.setGpio(13, false);  // Pin 13 = LOW
+client.setGpio(1, 7, true);  // Port B, pin 7, high
 ```
 
-### PWM Control
+### Sensor Data
 
 ```cpp
-// Set PWM duty cycle (0-65535)
-client.setPwm(0, 32768);  // Channel 0, 50% duty
-
-// Full brightness
-client.setPwm(1, 65535);  // Channel 1, 100%
-
-// Off
-client.setPwm(1, 0);      // Channel 1, 0%
+client.requestSensorData();         // Read sensors now
+client.setSensorInterval(1000);     // Read them every second
 ```
 
-### Sensor Data Request
-
-```cpp
-// Request sensor reading from M4
-client.requestSensorData(0);  // Sensor ID 0
-
-// Response comes via EventBus or callback
-```
+Readings arrive as `SensorDataEvent`s.
 
 ### Message Callback
 
 ```cpp
+// data is the whole message, header included
 client.setMessageCallback([](const std::vector<uint8_t>& data) {
-    auto type = static_cast<RpmsgMessageType>(data[0]);
+    const auto type = static_cast<protocol::MsgType>(data[0]);
     // Handle message based on type
 });
 ```
@@ -192,14 +172,7 @@ eventBus.subscribe("rpmsg.message", [](const smarthub::Event& e) {
 
 ## Sensor Data Format
 
-SensorData message payload:
-
-```
-┌────────────┬────────────┬────────────┬────────────┐
-│ SensorID   │ Value Low  │ Value Mid  │ Value High │
-│ (1 byte)   │ (1 byte)   │ (1 byte)   │ (1 byte)   │
-└────────────┴────────────┴────────────┴────────────┘
-```
+`SensorDataPayload` holds a fixed-point `value` and a `scale`. The real reading is `value / scale`, which is what `SensorDataEvent::value` holds.
 
 ## Error Handling
 
@@ -228,9 +201,9 @@ Hardware tests only run on target device:
 The M4 firmware must:
 1. Initialize OpenAMP/RPMsg communication
 2. Create an RPMsg endpoint
-3. Respond to Ping messages with Pong
-4. Send SensorData messages for sensor readings
-5. Process GpioCommand and PwmCommand messages
+3. Answer CMD_PING with RSP_PONG
+4. Send EVT_SENSOR_UPDATE messages for sensor readings
+5. Process CMD_SET_GPIO, CMD_SET_INTERVAL and CMD_GET_SENSOR_DATA
 
 See `m4-firmware/` directory for reference implementation.
 
@@ -244,14 +217,14 @@ public:
     {
         events.subscribe("sensor.data", [this](const Event& e) {
             auto& sensor = static_cast<const SensorDataEvent&>(e);
-            if (sensor.sensorId == "0") {  // Temperature sensor
-                m_temperature = sensor.value / 100.0;  // Convert to Celsius
+            if (sensor.sensorId == "0") {
+                m_temperature = sensor.value;
             }
         });
     }
 
     void requestUpdate() {
-        m_rpmsg.requestSensorData(0);
+        m_rpmsg.requestSensorData();
     }
 
     double temperature() const { return m_temperature; }
@@ -259,31 +232,6 @@ public:
 private:
     RpmsgClient& m_rpmsg;
     double m_temperature = 0.0;
-};
-```
-
-## Example: LED PWM Control
-
-```cpp
-class LedController {
-public:
-    LedController(RpmsgClient& rpmsg) : m_rpmsg(rpmsg) {}
-
-    void setBrightness(uint8_t channel, float percent) {
-        uint16_t duty = static_cast<uint16_t>(percent * 655.35f);
-        m_rpmsg.setPwm(channel, duty);
-    }
-
-    void fadeIn(uint8_t channel, int durationMs) {
-        for (int i = 0; i <= 100; i++) {
-            setBrightness(channel, static_cast<float>(i));
-            std::this_thread::sleep_for(
-                std::chrono::milliseconds(durationMs / 100));
-        }
-    }
-
-private:
-    RpmsgClient& m_rpmsg;
 };
 ```
 

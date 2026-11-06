@@ -296,18 +296,15 @@ void Rpmsg::poll() {
 }
 
 void Rpmsg::handleIncomingMessage(const void* /* rhdr */, const void* payload, size_t len) {
-    if (len < sizeof(MsgHeader)) {
+    protocol::DecodedMessage message;
+    if (protocol::decodeMessage((const uint8_t*)payload, len, message) != protocol::DecodeResult::Ok) {
         /* Not our protocol - might be a control message */
         return;
     }
 
-    const MsgHeader* hdr = (const MsgHeader*)payload;
-    const void* msgPayload = (const uint8_t*)payload + sizeof(MsgHeader);
-    size_t msgPayloadLen = hdr->len;
-
-    if (msgPayloadLen > len - sizeof(MsgHeader)) {
-        msgPayloadLen = len - sizeof(MsgHeader);
-    }
+    const MsgHeader* hdr = &message.header;
+    const void* msgPayload = message.payload;
+    size_t msgPayloadLen = message.header.len;
 
     /* Handle built-in commands */
     switch ((MsgType)hdr->type) {
@@ -334,26 +331,17 @@ bool Rpmsg::send(MsgType type, const void* payload, size_t len) {
         return false;
     }
 
-    if (len > MAX_MSG_SIZE - sizeof(MsgHeader)) {
+    /* Build our message */
+    uint8_t msgBuf[MAX_MSG_SIZE];
+    const size_t total = protocol::encodeMessage(type, m_seqNum, payload, len, msgBuf, sizeof(msgBuf));
+    if (total == 0) {
         m_lastError = "Payload too large";
         return false;
     }
-
-    /* Build our message */
-    uint8_t msgBuf[MAX_MSG_SIZE];
-    MsgHeader* hdr = (MsgHeader*)msgBuf;
-    hdr->type = (uint8_t)type;
-    hdr->flags = 0;
-    hdr->seq = m_seqNum++;
-    hdr->len = len;
-    hdr->reserved = 0;
-
-    if (payload && len > 0) {
-        std::memcpy(msgBuf + sizeof(MsgHeader), payload, len);
-    }
+    m_seqNum++;
 
     /* Send via RPMsg */
-    return sendRaw(LOCAL_ADDR, 0, msgBuf, sizeof(MsgHeader) + len);
+    return sendRaw(LOCAL_ADDR, 0, msgBuf, total);
 }
 
 void Rpmsg::notifyHost() {
