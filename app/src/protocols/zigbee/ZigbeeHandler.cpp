@@ -346,19 +346,47 @@ bool ZigbeeHandler::sendCommand(const std::string& deviceAddress,
 }
 
 void ZigbeeHandler::setDeviceDiscoveredCallback(DeviceDiscoveredCallback cb) {
+    std::lock_guard<std::mutex> lock(m_callbackMutex);
     m_discoveredCb = std::move(cb);
 }
 
 void ZigbeeHandler::setDeviceStateCallback(DeviceStateCallback cb) {
+    std::lock_guard<std::mutex> lock(m_callbackMutex);
     m_stateCb = std::move(cb);
 }
 
 void ZigbeeHandler::setDeviceAvailabilityCallback(DeviceAvailabilityCallback cb) {
+    std::lock_guard<std::mutex> lock(m_callbackMutex);
     m_availabilityCb = std::move(cb);
 }
 
 void ZigbeeHandler::setPendingDeviceCallback(DeviceDiscoveredCallback cb) {
+    std::lock_guard<std::recursive_mutex> lock(m_pendingCallbackMutex);
     m_pendingDeviceCb = std::move(cb);
+}
+
+void ZigbeeHandler::notifyState(const std::string& deviceId, const std::string& property,
+                                const nlohmann::json& value) {
+    DeviceStateCallback callback;
+    {
+        std::lock_guard<std::mutex> lock(m_callbackMutex);
+        callback = m_stateCb;
+    }
+    if (callback) {
+        callback(deviceId, property, value);
+    }
+}
+
+void ZigbeeHandler::notifyAvailability(const std::string& deviceId,
+                                       DeviceAvailability availability) {
+    DeviceAvailabilityCallback callback;
+    {
+        std::lock_guard<std::mutex> lock(m_callbackMutex);
+        callback = m_availabilityCb;
+    }
+    if (callback) {
+        callback(deviceId, availability);
+    }
 }
 
 DevicePtr ZigbeeHandler::getPendingDevice() const {
@@ -660,13 +688,21 @@ void ZigbeeHandler::finishPairing(uint64_t ieeeAddr) {
             std::lock_guard<std::mutex> lock(m_deviceMutex);
             m_pendingDevice = device;
         }
+        // Held during the call, so clearing the callback waits for it, and whoever set it can
+        // be destroyed afterwards. Recursive in case the callback clears itself.
+        std::lock_guard<std::recursive_mutex> lock(m_pendingCallbackMutex);
         if (m_pendingDeviceCb) {
             m_pendingDeviceCb(device);
         }
     } else {
         // Not in discovery mode - auto-add the device
-        if (m_discoveredCb) {
-            m_discoveredCb(device);
+        DeviceDiscoveredCallback callback;
+        {
+            std::lock_guard<std::mutex> lock(m_callbackMutex);
+            callback = m_discoveredCb;
+        }
+        if (callback) {
+            callback(device);
         }
     }
 }
@@ -687,8 +723,8 @@ void ZigbeeHandler::onDeviceLeft(uint64_t ieeeAddr) {
     }
 
     // Notify availability callback
-    if (!deviceId.empty() && m_availabilityCb) {
-        m_availabilityCb(deviceId, DeviceAvailability::Offline);
+    if (!deviceId.empty()) {
+        notifyAvailability(deviceId, DeviceAvailability::Offline);
     }
 }
 
@@ -719,32 +755,24 @@ void ZigbeeHandler::onAttributeReport(uint16_t nwkAddr, const ZclAttributeValue&
     switch (attr.clusterId) {
         case zcl::cluster::ON_OFF:
             if (attr.attributeId == zcl::attr::onoff::ON_OFF) {
-                if (m_stateCb) {
-                    m_stateCb(deviceId, "on", attr.asBool());
-                }
+                notifyState(deviceId, "on", attr.asBool());
             }
             break;
 
         case zcl::cluster::LEVEL_CONTROL:
             if (attr.attributeId == zcl::attr::level::CURRENT_LEVEL) {
-                if (m_stateCb) {
-                    m_stateCb(deviceId, "brightness", levelToPercent(attr.asUint8()));
-                }
+                notifyState(deviceId, "brightness", levelToPercent(attr.asUint8()));
             }
             break;
 
         case zcl::cluster::COLOR_CONTROL:
             if (attr.attributeId == zcl::attr::color::CURRENT_HUE) {
-                if (m_stateCb) {
-                    m_stateCb(deviceId, "hue", attr.asUint8());
-                }
+                notifyState(deviceId, "hue", attr.asUint8());
             } else if (attr.attributeId == zcl::attr::color::CURRENT_SAT) {
-                if (m_stateCb) {
-                    m_stateCb(deviceId, "saturation", attr.asUint8());
-                }
+                notifyState(deviceId, "saturation", attr.asUint8());
             } else if (attr.attributeId == zcl::attr::color::COLOR_TEMP) {
-                if (m_stateCb && attr.asUint16() > 0) {
-                    m_stateCb(deviceId, "colorTemp", miredsToKelvin(attr.asUint16()));
+                if (attr.asUint16() > 0) {
+                    notifyState(deviceId, "colorTemp", miredsToKelvin(attr.asUint16()));
                 }
             }
             break;
@@ -752,29 +780,23 @@ void ZigbeeHandler::onAttributeReport(uint16_t nwkAddr, const ZclAttributeValue&
         case zcl::cluster::TEMPERATURE_MEASUREMENT:
             if (attr.attributeId == zcl::attr::temperature::MEASURED_VALUE) {
                 // Temperature in 0.01°C units
-                if (m_stateCb) {
-                    m_stateCb(deviceId, "temperature", attr.asInt16() / 100.0);
-                }
+                notifyState(deviceId, "temperature", attr.asInt16() / 100.0);
             }
             break;
 
         case zcl::cluster::RELATIVE_HUMIDITY:
             if (attr.attributeId == zcl::attr::humidity::MEASURED_VALUE) {
                 // Humidity in 0.01% units
-                if (m_stateCb) {
-                    m_stateCb(deviceId, "humidity", attr.asUint16() / 100.0);
-                }
+                notifyState(deviceId, "humidity", attr.asUint16() / 100.0);
             }
             break;
 
         case zcl::cluster::IAS_ZONE:
             if (attr.attributeId == zcl::attr::ias_zone::ZONE_STATUS) {
                 uint16_t status = attr.asUint16();
-                if (m_stateCb) {
-                    m_stateCb(deviceId, "alarm", (status & 0x01) != 0);
-                    m_stateCb(deviceId, "tamper", (status & 0x04) != 0);
-                    m_stateCb(deviceId, "lowBattery", (status & 0x08) != 0);
-                }
+                notifyState(deviceId, "alarm", (status & 0x01) != 0);
+                notifyState(deviceId, "tamper", (status & 0x04) != 0);
+                notifyState(deviceId, "lowBattery", (status & 0x08) != 0);
             }
             break;
 
@@ -814,17 +836,11 @@ void ZigbeeHandler::onCommandReceived(uint16_t nwkAddr, uint8_t endpoint,
         case zcl::cluster::ON_OFF:
             // Handle On/Off commands from switches
             if (command == zcl::cmd::onoff::OFF) {
-                if (m_stateCb) {
-                    m_stateCb(deviceId, "on", false);
-                }
+                notifyState(deviceId, "on", false);
             } else if (command == zcl::cmd::onoff::ON) {
-                if (m_stateCb) {
-                    m_stateCb(deviceId, "on", true);
-                }
+                notifyState(deviceId, "on", true);
             } else if (command == zcl::cmd::onoff::TOGGLE) {
-                if (m_stateCb) {
-                    m_stateCb(deviceId, "toggle", true);
-                }
+                notifyState(deviceId, "toggle", true);
             }
             break;
 
@@ -832,11 +848,9 @@ void ZigbeeHandler::onCommandReceived(uint16_t nwkAddr, uint8_t endpoint,
             // Zone status change notification
             if (command == 0x00 && payload.size() >= 2) {  // Status change notification
                 uint16_t status = payload[0] | (payload[1] << 8);
-                if (m_stateCb) {
-                    m_stateCb(deviceId, "alarm", (status & 0x01) != 0);
-                    m_stateCb(deviceId, "tamper", (status & 0x04) != 0);
-                    m_stateCb(deviceId, "lowBattery", (status & 0x08) != 0);
-                }
+                notifyState(deviceId, "alarm", (status & 0x01) != 0);
+                notifyState(deviceId, "tamper", (status & 0x04) != 0);
+                notifyState(deviceId, "lowBattery", (status & 0x08) != 0);
             }
             break;
 

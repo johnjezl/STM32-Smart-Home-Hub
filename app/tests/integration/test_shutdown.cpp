@@ -241,7 +241,7 @@ TEST_F(ShutdownTest, SigtermUnderLoadExitsCleanly) {
     }
 }
 
-TEST_F(ShutdownTest, SigtermWakesAnAutomationWaitingInADelay) {
+TEST_F(ShutdownTest, SigtermDoesNotWaitForAnAutomationInADelay) {
     ASSERT_NO_FATAL_FAILURE(startProgram());
     ASSERT_NO_FATAL_FAILURE(setUpAdmin());
 
@@ -257,10 +257,7 @@ TEST_F(ShutdownTest, SigtermWakesAnAutomationWaitingInADelay) {
     ASSERT_NE(runCommand(curl("POST", "/api/automations", automation.dump())).find("success"),
               std::string::npos);
 
-    // This request runs the automation on the web thread, and won't get an answer yet
-    std::thread request([&] {
-        runCommand(curl("PUT", "/api/devices/device-source", R"({"on":true})"));
-    });
+    runCommand(curl("PUT", "/api/devices/device-source", R"({"on":true})"));
     for (int attempt = 0; attempt < 200; ++attempt) {
         if (output().find("Executing automation: Slow") != std::string::npos) {
             break;
@@ -274,8 +271,6 @@ TEST_F(ShutdownTest, SigtermWakesAnAutomationWaitingInADelay) {
     expectCleanExit(20, &seconds);
     EXPECT_LT(seconds, 15) << "Shutdown waited out the delay";
     EXPECT_NE(output().find("stopped by shutdown"), std::string::npos) << output();
-
-    request.join();
 }
 
 }  // namespace

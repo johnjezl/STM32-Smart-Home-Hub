@@ -250,6 +250,7 @@ TEST_F(AutomationManagerTest, ActionThatChangesADeviceDoesNotDeadlock) {
     ASSERT_TRUE(automationManager->addAutomation(automation));
     ASSERT_TRUE(automationManager->triggerAutomation(automation.id));
 
+    automationManager->waitForRuns();
     EXPECT_EQ(light->getProperty("on"), true);
 }
 
@@ -288,8 +289,10 @@ TEST_F(AutomationManagerTest, DeviceStateChangeWithToValueRunsTheAction) {
     trigger.toValue = true;
     ASSERT_TRUE(automationManager->addAutomation(lightOnWhen(trigger)));
 
+    automationManager->waitForRuns();
     EXPECT_NE(light->getProperty("on"), true);
     ASSERT_TRUE(deviceManager->setDeviceState("source", "on", true));
+    automationManager->waitForRuns();
     EXPECT_EQ(light->getProperty("on"), true);
 }
 
@@ -309,6 +312,7 @@ TEST_F(AutomationManagerTest, ToValueThatDoesNotMatchDoesNotRunTheAction) {
     ASSERT_TRUE(automationManager->addAutomation(lightOnWhen(trigger)));
 
     ASSERT_TRUE(deviceManager->setDeviceState("source", "on", false));
+    automationManager->waitForRuns();
     EXPECT_NE(light->getProperty("on"), true);
 }
 
@@ -329,10 +333,12 @@ TEST_F(AutomationManagerTest, FromValueMatchesThePreviousValue) {
 
     // From 10, which doesn't match
     ASSERT_TRUE(deviceManager->setDeviceState("source", "brightness", 20));
+    automationManager->waitForRuns();
     EXPECT_NE(light->getProperty("on"), true);
 
     // From 20, which does
     ASSERT_TRUE(deviceManager->setDeviceState("source", "brightness", 30));
+    automationManager->waitForRuns();
     EXPECT_EQ(light->getProperty("on"), true);
 }
 
@@ -352,9 +358,11 @@ TEST_F(AutomationManagerTest, ThresholdTriggerUsesTheNewValue) {
     ASSERT_TRUE(automationManager->addAutomation(lightOnWhen(trigger)));
 
     ASSERT_TRUE(deviceManager->setDeviceState("source", "brightness", 40));
+    automationManager->waitForRuns();
     EXPECT_NE(light->getProperty("on"), true);
 
     ASSERT_TRUE(deviceManager->setDeviceState("source", "brightness", 60));
+    automationManager->waitForRuns();
     EXPECT_EQ(light->getProperty("on"), true);
 }
 
@@ -377,11 +385,13 @@ TEST_F(AutomationManagerTest, EachIntervalTriggerKeepsItsOwnTimer) {
     automationManager->poll(1);
 
     automationManager->poll(1 + 5 * minute);
+    automationManager->waitForRuns();
     EXPECT_EQ(light->getProperty("on"), true);
     ASSERT_TRUE(deviceManager->setDeviceState("light_001", "on", false));
 
     // The 7-minute trigger is due, even though the other one fired 2 minutes ago
     automationManager->poll(1 + 7 * minute);
+    automationManager->waitForRuns();
     EXPECT_EQ(light->getProperty("on"), true);
 }
 
@@ -400,10 +410,12 @@ TEST_F(AutomationManagerTest, IntervalTriggersDueTogetherRunOnce) {
     const uint64_t minute = 60 * 1000;
     automationManager->poll(1);
     automationManager->poll(1 + 5 * minute);
+    automationManager->waitForRuns();
     EXPECT_EQ(light->getProperty("on"), true);
     ASSERT_TRUE(deviceManager->setDeviceState("light_001", "on", false));
 
     automationManager->poll(2 + 5 * minute);
+    automationManager->waitForRuns();
     EXPECT_NE(light->getProperty("on"), true);
 }
 
@@ -426,6 +438,7 @@ TEST_F(AutomationManagerTest, ActionCantSetAReportedProperty) {
     ASSERT_TRUE(automationManager->addAutomation(automation));
 
     ASSERT_TRUE(deviceManager->setDeviceState("source", "on", true));
+    automationManager->waitForRuns();
     EXPECT_EQ(sensor->getProperty("temperature"), before);
 }
 
@@ -447,8 +460,10 @@ TEST_F(AutomationManagerTest, ReEnablingRestartsAnIntervalCountdown) {
     ASSERT_TRUE(automationManager->setEnabled(automation.id, true));
 
     automationManager->poll(2 + 120 * minute);
+    automationManager->waitForRuns();
     EXPECT_NE(light->getProperty("on"), true);
     automationManager->poll(2 + 180 * minute);
+    automationManager->waitForRuns();
     EXPECT_EQ(light->getProperty("on"), true);
 }
 
@@ -467,6 +482,7 @@ TEST_F(AutomationManagerTest, InternalEventsDontRunAutomations) {
 
     // This would deadlock if the action ran, because the event is published under a lock
     EXPECT_TRUE(deviceManager->removeDevice("source"));
+    automationManager->waitForRuns();
     EXPECT_NE(light->getProperty("on"), true);
 }
 
@@ -513,6 +529,7 @@ TEST_F(AutomationManagerTest, OrderingConditionOnAMissingValueDoesNotHold) {
     ASSERT_TRUE(automationManager->addAutomation(automation));
 
     ASSERT_TRUE(deviceManager->setDeviceState("source", "on", true));
+    automationManager->waitForRuns();
     EXPECT_NE(light->getProperty("on"), true);
 }
 
@@ -541,12 +558,166 @@ TEST_F(AutomationManagerTest, TurningOffDuringADelayStopsTheRemainingActions) {
     automation.actions.insert(automation.actions.begin(), delay);
     ASSERT_TRUE(automationManager->addAutomation(automation));
 
-    std::thread running([&] { automationManager->triggerAutomation(automation.id); });
+    ASSERT_TRUE(automationManager->triggerAutomation(automation.id));
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
     ASSERT_TRUE(automationManager->setEnabled(automation.id, false));
-    running.join();
 
+    automationManager->waitForRuns();
     EXPECT_NE(light->getProperty("on"), true);
+}
+
+namespace {
+
+// Runs a delay, then turns on light_001, when the source device changes
+Automation delayedLightOn(int delayMs) {
+    Trigger trigger;
+    trigger.type = TriggerType::DeviceState;
+    trigger.deviceId = "source";
+    trigger.property = "on";
+    Automation automation = lightOnWhen(trigger);
+    Action delay;
+    delay.type = ActionType::Delay;
+    delay.delayMs = delayMs;
+    automation.actions.insert(automation.actions.begin(), delay);
+    return automation;
+}
+
+}  // namespace
+
+TEST_F(AutomationManagerTest, ADelayDoesNotHoldUpWhoChangedTheDevice) {
+    automationManager->initialize();
+    auto source = std::make_shared<SwitchDevice>("source", "Source");
+    deviceManager->addDevice(source);
+    deviceManager->addDevice(std::make_shared<SwitchDevice>("light_001", "Light"));
+    ASSERT_TRUE(automationManager->addAutomation(delayedLightOn(30000)));
+
+    const auto start = std::chrono::steady_clock::now();
+    ASSERT_TRUE(deviceManager->setDeviceState("source", "on", true));
+    EXPECT_LT(std::chrono::steady_clock::now() - start, std::chrono::seconds(5));
+
+    // Nor does it hold up shutdown, which drops the run
+    automationManager->shutdown();
+    EXPECT_LT(std::chrono::steady_clock::now() - start, std::chrono::seconds(5));
+}
+
+TEST_F(AutomationManagerTest, ADelayDoesNotHoldUpOtherAutomations) {
+    automationManager->initialize();
+    auto source = std::make_shared<SwitchDevice>("source", "Source");
+    auto other = std::make_shared<SwitchDevice>("other", "Other");
+    auto light = std::make_shared<SwitchDevice>("light_001", "Light");
+    deviceManager->addDevice(source);
+    deviceManager->addDevice(other);
+    deviceManager->addDevice(light);
+
+    ASSERT_TRUE(automationManager->addAutomation(delayedLightOn(30000)));
+    Trigger trigger;
+    trigger.type = TriggerType::DeviceState;
+    trigger.deviceId = "source";
+    trigger.property = "on";
+    Automation immediate = lightOnWhen(trigger);
+    immediate.id = "immediate";
+    immediate.actions[0].deviceId = "other";
+    ASSERT_TRUE(automationManager->addAutomation(immediate));
+
+    ASSERT_TRUE(deviceManager->setDeviceState("source", "on", true));
+
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (other->getProperty("on") != true && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    EXPECT_EQ(other->getProperty("on"), true);
+    EXPECT_NE(light->getProperty("on"), true);
+}
+
+TEST_F(AutomationManagerTest, ActionsRunAwayFromThePublishingThread) {
+    automationManager->initialize();
+    auto source = std::make_shared<SwitchDevice>("source", "Source");
+    auto light = std::make_shared<SwitchDevice>("light_001", "Light");
+    deviceManager->addDevice(source);
+    deviceManager->addDevice(light);
+
+    std::thread::id actionThread;
+    const auto subscription = eventBus->subscribe("device.state", [&](const Event& event) {
+        const auto& state = static_cast<const DeviceStateEvent&>(event);
+        if (state.deviceId == "light_001") {
+            actionThread = std::this_thread::get_id();
+        }
+    });
+
+    Trigger trigger;
+    trigger.type = TriggerType::DeviceState;
+    trigger.deviceId = "source";
+    trigger.property = "on";
+    ASSERT_TRUE(automationManager->addAutomation(lightOnWhen(trigger)));
+
+    ASSERT_TRUE(deviceManager->setDeviceState("source", "on", true));
+    automationManager->waitForRuns();
+    eventBus->unsubscribe(subscription);
+
+    EXPECT_EQ(light->getProperty("on"), true);
+    EXPECT_NE(actionThread, std::this_thread::get_id());
+}
+
+TEST_F(AutomationManagerTest, HandlerCanCallBackWhenADeviceIsAddedOrRemoved) {
+    automationManager->initialize();
+    std::vector<bool> found;
+    const auto subscription = eventBus->subscribe("device.state", [&](const Event& event) {
+        const auto& state = static_cast<const DeviceStateEvent&>(event);
+        found.push_back(deviceManager->getDevice(state.deviceId) != nullptr);
+    });
+
+    deviceManager->addDevice(std::make_shared<SwitchDevice>("new", "New"));
+    deviceManager->removeDevice("new");
+    eventBus->unsubscribe(subscription);
+
+    EXPECT_EQ(found, (std::vector<bool>{true, false}));
+}
+
+TEST_F(AutomationManagerTest, ConcurrentDeviceChangesAndAutomations) {
+    automationManager->initialize();
+    auto source = std::make_shared<SwitchDevice>("source", "Source");
+    auto light = std::make_shared<SwitchDevice>("light_001", "Light");
+    deviceManager->addDevice(source);
+    deviceManager->addDevice(light);
+
+    Trigger trigger;
+    trigger.type = TriggerType::DeviceState;
+    trigger.deviceId = "source";
+    trigger.property = "on";
+    ASSERT_TRUE(automationManager->addAutomation(lightOnWhen(trigger)));
+
+    std::atomic<bool> stop{false};
+    std::vector<std::thread> threads;
+    threads.emplace_back([&] {
+        bool on = false;
+        while (!stop) {
+            on = !on;
+            deviceManager->setDeviceState("source", "on", on);
+        }
+    });
+    threads.emplace_back([&] {
+        int count = 0;
+        while (!stop) {
+            const std::string id = "extra" + std::to_string(count++ % 4);
+            deviceManager->addDevice(std::make_shared<SwitchDevice>(id, id));
+            deviceManager->removeDevice(id);
+        }
+    });
+    threads.emplace_back([&] {
+        uint64_t time = 1;
+        while (!stop) {
+            automationManager->poll(time += 1000);
+            automationManager->getAllAutomations();
+            automationManager->setEnabled("runs_action", time % 2000 == 0);
+        }
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    stop = true;
+    for (auto& thread : threads) {
+        thread.join();
+    }
+    automationManager->waitForRuns();
+    SUCCEED();
 }
 
 TEST_F(AutomationManagerTest, ReEnablingAnEnabledAutomationKeepsItsCountdown) {
@@ -564,65 +735,8 @@ TEST_F(AutomationManagerTest, ReEnablingAnEnabledAutomationKeepsItsCountdown) {
     automationManager->poll(1);
     ASSERT_TRUE(automationManager->setEnabled(automation.id, true));
     automationManager->poll(1 + 61 * minute);
+    automationManager->waitForRuns();
     EXPECT_EQ(light->getProperty("on"), true);
-}
-
-TEST_F(AutomationManagerTest, StopFlagEndsADelayAndTheRemainingActions) {
-    automationManager->initialize();
-    auto light = std::make_shared<SwitchDevice>("light_001", "Light");
-    deviceManager->addDevice(light);
-    static std::atomic<bool> stopFlag;  // Outlives the manager, even if an assertion fails
-    stopFlag = false;
-    automationManager->setStopFlag(&stopFlag);
-
-    Trigger trigger;
-    trigger.type = TriggerType::TimeInterval;
-    trigger.intervalMinutes = 60;
-    Automation automation = lightOnWhen(trigger);
-    Action delay;
-    delay.type = ActionType::Delay;
-    delay.delayMs = 30000;
-    automation.actions.insert(automation.actions.begin(), delay);
-    ASSERT_TRUE(automationManager->addAutomation(automation));
-
-    const auto start = std::chrono::steady_clock::now();
-    std::thread running([&] { automationManager->triggerAutomation(automation.id); });
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    stopFlag = true;
-    running.join();
-
-    EXPECT_LT(std::chrono::steady_clock::now() - start, std::chrono::seconds(5));
-    EXPECT_NE(light->getProperty("on"), true);
-}
-
-TEST_F(AutomationManagerTest, ShutdownWaitsForARunOnAnotherThread) {
-    automationManager->initialize();
-    auto light = std::make_shared<SwitchDevice>("light_001", "Light");
-    deviceManager->addDevice(light);
-
-    Trigger trigger;
-    trigger.type = TriggerType::TimeInterval;
-    trigger.intervalMinutes = 60;
-    Automation automation = lightOnWhen(trigger);
-    Action delay;
-    delay.type = ActionType::Delay;
-    delay.delayMs = 30000;
-    automation.actions.insert(automation.actions.begin(), delay);
-    ASSERT_TRUE(automationManager->addAutomation(automation));
-
-    std::atomic<bool> finished{false};
-    std::thread running([&] {
-        automationManager->triggerAutomation(automation.id);
-        finished = true;
-    });
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-
-    automationManager->shutdown();
-    // The run has ended, even if the thread hasn't quite returned from triggerAutomation
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    EXPECT_TRUE(finished);
-    EXPECT_NE(light->getProperty("on"), true);
-    running.join();
 }
 
 TEST_F(AutomationManagerTest, ReturnedAutomationsAreCopies) {
@@ -707,6 +821,7 @@ TEST_F(AutomationManagerTest, AutomationsTriggeringEachOtherStopAtTheDepthLimit)
 
     ASSERT_TRUE(automationManager->triggerAutomation("on"));
 
+    automationManager->waitForRuns();
     EXPECT_GT(automationManager->getAutomation("off")->lastTriggeredAt, 0u);
 }
 

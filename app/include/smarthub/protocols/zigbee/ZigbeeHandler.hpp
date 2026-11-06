@@ -175,6 +175,12 @@ private:
     DeviceDiscoveredCallback m_pendingDeviceCb;
     DeviceStateCallback m_stateCb;
     DeviceAvailabilityCallback m_availabilityCb;
+    std::mutex m_callbackMutex;                  // Guards the callbacks above, except pending
+    std::recursive_mutex m_pendingCallbackMutex;  // Guards m_pendingDeviceCb, and held to call it
+
+    void notifyState(const std::string& deviceId, const std::string& property,
+                     const nlohmann::json& value);
+    void notifyAvailability(const std::string& deviceId, DeviceAvailability availability);
 
     // Pending device during discovery (not auto-added)
     DevicePtr m_pendingDevice;

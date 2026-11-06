@@ -127,10 +127,6 @@ void Application::run(const std::atomic<bool>& stopRequested) {
     }
 
     LOG_INFO("SmartHub running");
-    if (m_automationManager) {
-        // The delays in time-based automations run on this thread, so they have to watch this
-        m_automationManager->setStopFlag(&stopRequested);
-    }
 
     // Publish system ready event
     SystemEvent readyEvent;

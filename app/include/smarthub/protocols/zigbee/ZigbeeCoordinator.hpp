@@ -6,6 +6,8 @@
  */
 #pragma once
 
+#include <atomic>
+
 #include "ZnpTransport.hpp"
 #include "ZclConstants.hpp"
 #include <map>
@@ -283,11 +285,11 @@ private:
     bool m_ownsTransport = true;
 
     // Network state
-    bool m_networkUp = false;
+    std::atomic<bool> m_networkUp{false};
     uint16_t m_panId = 0;
     uint64_t m_ieeeAddr = 0;
     uint8_t m_channel = 0;
-    ZnpDeviceState m_deviceState = ZnpDeviceState::HOLD;
+    std::atomic<ZnpDeviceState> m_deviceState{ZnpDeviceState::HOLD};
 
     // Device database
     std::map<uint64_t, ZigbeeDeviceInfo> m_devices;

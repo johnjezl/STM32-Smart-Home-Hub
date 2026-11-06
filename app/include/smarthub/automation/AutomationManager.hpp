@@ -10,7 +10,10 @@
 #include "smarthub/core/EventBus.hpp"
 
 #include <map>
-#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <thread>
+#include <utility>
 #include <mutex>
 #include <vector>
 #include <functional>
@@ -44,19 +47,13 @@ public:
     bool initialize();
 
     /**
-     * Stop all runs, and wait for those on other threads. Don't call it from an action.
+     * Stop the worker thread, dropping any runs still queued or in a delay
      */
     void shutdown();
 
     /**
-     * Also end delays when this flag is set. It's forgotten by shutdown() or by passing
-     * nullptr, and has to last until then. It lets a signal stop a delay running on the thread
-     * that would otherwise call shutdown().
-     */
-    void setStopFlag(const std::atomic<bool>* stopFlag) { m_stopFlag = stopFlag; }
-
-    /**
-     * Poll timer-based triggers (call from main loop)
+     * Check time-based triggers (call from main loop). Actions run on a worker thread, as they
+     * do for every trigger, so this and publishing a device change don't wait for them.
      * @param currentTimeMs Current time in milliseconds
      */
     void poll(uint64_t currentTimeMs);
@@ -81,9 +78,14 @@ public:
     bool setEnabled(const std::string& id, bool enabled);
 
     /**
-     * Manually trigger an automation (for testing)
+     * Manually trigger an automation. It runs on the worker thread.
      */
     bool triggerAutomation(const std::string& id);
+
+    /**
+     * Wait until no runs are queued or in a delay (for tests)
+     */
+    void waitForRuns();
 
     /**
      * Get count of automations
@@ -120,14 +122,20 @@ private:
                        CompareOp op,
                        const nlohmann::json& expected) const;
 
-    // Execution engine. Runs are copies, chosen under m_mutex and executed outside it.
-    struct PendingRun {
+    // Execution engine. A run is a copy of the automation, taken when it was triggered, which
+    // the worker thread steps through. A delay puts it back in the queue for later.
+    struct Run {
         Automation automation;
         std::string triggerInfo;
+        size_t nextAction = 0;
+        int64_t delayBudgetMs = Automation::kMaxTotalDelayMs;
+        int depth = 0;  // How many automations in a row led to this one
     };
-    void executeAll(const std::vector<PendingRun>& runs);
-    void executeAutomation(const Automation& automation,
-                           const std::string& triggerInfo);
+    using RunQueue = std::multimap<std::chrono::steady_clock::time_point, Run>;
+
+    void enqueueRuns(std::vector<std::pair<Automation, std::string>> runs);
+    void workerLoop();
+    void continueRun(Run run);
     void executeAction(const Action& action);
 
     // Persistence
@@ -149,11 +157,13 @@ private:
 
     uint64_t m_eventSubscription = 0;
 
-    // Let shutdown or a signal interrupt a run that's waiting in a delay
-    std::atomic<bool> m_stopping{false};
-    std::atomic<int> m_activeRuns{0};
-    std::atomic<const std::atomic<bool>*> m_stopFlag{nullptr};
-    bool isStopping() const;
+    // Worker thread and its queue, ordered by when each run is next due
+    std::thread m_worker;
+    std::mutex m_queueMutex;
+    std::condition_variable m_queueChanged;
+    RunQueue m_runQueue;
+    bool m_stopping = false;
+    bool m_workerBusy = false;
 
     // Timer state
     int m_lastCheckedMinute = -1;

@@ -163,35 +163,28 @@ bool DeviceManager::addDevice(DevicePtr device) {
         return false;
     }
 
-    LOG_DEBUG("addDevice: acquiring mutex");
-    std::lock_guard<std::mutex> lock(m_mutex);
-    LOG_DEBUG("addDevice: mutex acquired");
+    const std::string deviceId = device->id();
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
 
-    std::string deviceId = device->id();
-    LOG_DEBUG("addDevice: device id = %s", deviceId.c_str());
+        if (m_devices.count(deviceId) > 0) {
+            LOG_WARN("Device %s already exists", deviceId.c_str());
+            return false;
+        }
 
-    if (m_devices.count(deviceId) > 0) {
-        LOG_WARN("Device %s already exists", deviceId.c_str());
-        return false;
+        m_devices[deviceId] = device;
+        LOG_INFO("Added device: %s (%s)", device->name().c_str(), deviceId.c_str());
+
+        saveDevice(device);
     }
 
-    m_devices[deviceId] = device;
-    LOG_INFO("Added device: %s (%s)", device->name().c_str(), deviceId.c_str());
-
-    // Save to database
-    saveDevice(device);
-
-    // Publish device added event
-    LOG_DEBUG("addDevice: publishing event");
+    // Unlocked, because handlers can call back into this class
     try {
         DeviceStateEvent event;
         event.deviceId = deviceId;
         event.property = "_added";
-        LOG_DEBUG("addDevice: calling toJson");
         event.value = device->toJson();
-        LOG_DEBUG("addDevice: calling eventBus.publish");
         m_eventBus.publish(event);
-        LOG_DEBUG("addDevice: event published");
     } catch (const std::exception& e) {
         LOG_ERROR("Exception publishing device event: %s", e.what());
     } catch (...) {
@@ -202,25 +195,26 @@ bool DeviceManager::addDevice(DevicePtr device) {
 }
 
 bool DeviceManager::removeDevice(const std::string& id) {
-    std::lock_guard<std::mutex> lock(m_mutex);
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
 
-    auto it = m_devices.find(id);
-    if (it == m_devices.end()) {
-        return false;
+        auto it = m_devices.find(id);
+        if (it == m_devices.end()) {
+            return false;
+        }
+
+        LOG_INFO("Removing device: %s", id.c_str());
+
+        deleteDeviceFromDatabase(id);
+        m_devices.erase(it);
     }
 
-    LOG_INFO("Removing device: %s", id.c_str());
-
-    // Delete from database
-    deleteDeviceFromDatabase(id);
-
-    // Publish device removed event
+    // Unlocked, because handlers can call back into this class
     DeviceStateEvent event;
     event.deviceId = id;
     event.property = "_removed";
     m_eventBus.publish(event);
 
-    m_devices.erase(it);
     return true;
 }
 
