@@ -24,6 +24,9 @@ else()
     add_compile_options(-O2)
 endif()
 
+# A wrong log format loses the message or its values, and only shows up when it's needed most
+add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-Werror=format>)
+
 if(SMARTHUB_ENABLE_SANITIZERS)
     add_compile_options(-fsanitize=address,undefined)
     add_link_options(-fsanitize=address,undefined)

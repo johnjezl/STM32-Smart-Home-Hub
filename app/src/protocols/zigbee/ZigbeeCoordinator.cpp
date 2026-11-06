@@ -107,7 +107,7 @@ bool ZigbeeCoordinator::initialize() {
     // Get version info
     uint8_t transportRev, product, majorRel, minorRel, maintRel;
     if (getVersion(transportRev, product, majorRel, minorRel, maintRel)) {
-        LOG_INFO("Z-Stack version: {}.{}.{} (product={}, transport={})",
+        LOG_INFO("Z-Stack version: %d.%d.%d (product=%d, transport=%d)",
                  majorRel, minorRel, maintRel, product, transportRev);
     }
 
@@ -210,10 +210,10 @@ bool ZigbeeCoordinator::startNetwork() {
 
     // Response contains status (0=restored, 1=new, 2=failed)
     uint8_t status = rsp->getByte(0);
-    LOG_INFO("Startup status: {}", status);
+    LOG_INFO("Startup status: %d", status);
 
     if (status > 1) {
-        LOG_ERROR("Network startup failed with status {}", status);
+        LOG_ERROR("Network startup failed with status %d", status);
         return false;
     }
 
@@ -222,12 +222,12 @@ bool ZigbeeCoordinator::startNetwork() {
     auto stateRsp = m_transport->request(stateReq);
     if (stateRsp && stateRsp->payload().size() >= 13) {
         m_deviceState = static_cast<ZnpDeviceState>(stateRsp->getByte(12));
-        LOG_INFO("Current device state: {}", znpDeviceStateToString(m_deviceState));
+        LOG_INFO("Current device state: %s", znpDeviceStateToString(m_deviceState));
     }
 
     // Wait for ZB_COORD state (may already be there)
     if (!waitForState(ZnpDeviceState::ZB_COORD)) {
-        LOG_ERROR("Timeout waiting for coordinator state (current: {})",
+        LOG_ERROR("Timeout waiting for coordinator state (current: %s)",
                   znpDeviceStateToString(m_deviceState));
         return false;
     }
@@ -242,7 +242,7 @@ bool ZigbeeCoordinator::startNetwork() {
         uint16_t nwkAddr = infoRsp->getWord(9);
         m_deviceState = static_cast<ZnpDeviceState>(infoRsp->getByte(12));
 
-        LOG_INFO("Coordinator IEEE: {:016X}, NWK: {:04X}", m_ieeeAddr, nwkAddr);
+        LOG_INFO("Coordinator IEEE: %016llX, NWK: %04X", static_cast<unsigned long long>(m_ieeeAddr), nwkAddr);
     }
 
     m_networkUp = true;
@@ -295,7 +295,7 @@ bool ZigbeeCoordinator::waitForState(ZnpDeviceState targetState, int timeoutMs) 
 }
 
 bool ZigbeeCoordinator::permitJoin(uint8_t duration) {
-    LOG_INFO("Setting permit join: {} seconds", duration);
+    LOG_INFO("Setting permit join: %d seconds", duration);
 
     ZnpFrame req(ZnpType::SREQ, ZnpSubsystem::ZDO, cmd::zdo::MGMT_PERMIT_JOIN_REQ);
     req.appendByte(0x0F);        // AddrMode: broadcast
@@ -311,9 +311,9 @@ bool ZigbeeCoordinator::permitJoin(uint8_t duration) {
 
     uint8_t status = rsp->getByte(0);
     if (status == 0) {
-        LOG_INFO("Permit join enabled successfully for {} seconds", duration);
+        LOG_INFO("Permit join enabled successfully for %d seconds", duration);
     } else {
-        LOG_ERROR("Permit join failed with status: {}", status);
+        LOG_ERROR("Permit join failed with status: %d", status);
     }
     return status == 0;
 }
@@ -628,7 +628,7 @@ void ZigbeeCoordinator::setCommandReceivedCallback(CommandReceivedCallback cb) {
 // ============================================================================
 
 void ZigbeeCoordinator::handleIndication(const ZnpFrame& frame) {
-    LOG_INFO("Received ZNP indication: subsystem={}, cmd=0x{:02X}, len={}",
+    LOG_INFO("Received ZNP indication: subsystem=%d, cmd=0x%02X, len=%zu",
              static_cast<int>(frame.subsystem()), frame.command(), frame.payload().size());
 
     switch (frame.subsystem()) {
@@ -653,7 +653,7 @@ void ZigbeeCoordinator::handleIndication(const ZnpFrame& frame) {
                     handleSimpleDescRsp(frame);
                     break;
                 default:
-                    LOG_DEBUG("Unhandled ZDO indication: 0x{:02X}", frame.command());
+                    LOG_DEBUG("Unhandled ZDO indication: 0x%02X", frame.command());
                     break;
             }
             break;
@@ -681,7 +681,7 @@ void ZigbeeCoordinator::handleStateChange(const ZnpFrame& frame) {
     if (frame.payload().empty()) return;
 
     m_deviceState = static_cast<ZnpDeviceState>(frame.getByte(0));
-    LOG_INFO("Device state changed: {}", znpDeviceStateToString(m_deviceState));
+    LOG_INFO("Device state changed: %s", znpDeviceStateToString(m_deviceState));
 }
 
 void ZigbeeCoordinator::forgetAddress(uint16_t nwkAddr, uint64_t ieeeAddr) {
@@ -700,8 +700,8 @@ void ZigbeeCoordinator::handleDeviceAnnounce(const ZnpFrame& frame) {
     uint64_t ieeeAddr = frame.getQWord(4);
     uint8_t capabilities = frame.getByte(12);
 
-    LOG_INFO("Device announced: NWK={:04X}, IEEE={:016X}, caps=0x{:02X}",
-             nwkAddr, ieeeAddr, capabilities);
+    LOG_INFO("Device announced: NWK=%04X, IEEE=%016llX, caps=0x%02X",
+             nwkAddr, static_cast<unsigned long long>(ieeeAddr), capabilities);
 
     // Add/update device in database
     {
@@ -736,7 +736,7 @@ void ZigbeeCoordinator::handleDeviceLeave(const ZnpFrame& frame) {
     uint8_t request = frame.getByte(10);
     uint8_t remove = frame.getByte(11);
 
-    LOG_INFO("Device left: IEEE={:016X}", ieeeAddr);
+    LOG_INFO("Device left: IEEE=%016llX", static_cast<unsigned long long>(ieeeAddr));
 
     // Remove from database
     {
@@ -764,8 +764,8 @@ void ZigbeeCoordinator::handleTcDeviceInd(const ZnpFrame& frame) {
     uint64_t ieeeAddr = frame.getQWord(2);
     uint16_t parentAddr = frame.getWord(10);
 
-    LOG_INFO("New device joining: NWK={:04X}, IEEE={:016X}, parent={:04X}",
-             nwkAddr, ieeeAddr, parentAddr);
+    LOG_INFO("New device joining: NWK=%04X, IEEE=%016llX, parent=%04X",
+             nwkAddr, static_cast<unsigned long long>(ieeeAddr), parentAddr);
 }
 
 void ZigbeeCoordinator::handleActiveEpRsp(const ZnpFrame& frame) {
@@ -779,18 +779,18 @@ void ZigbeeCoordinator::handleActiveEpRsp(const ZnpFrame& frame) {
     uint8_t epCount = frame.getByte(5);
 
     if (status != 0) {
-        LOG_WARN("Active endpoints request failed for {:04X}: status={}", nwkAddr, status);
+        LOG_WARN("Active endpoints request failed for %04X: status=%d", nwkAddr, status);
         return;
     }
 
-    LOG_INFO("Active endpoints for {:04X}: {} endpoints", nwkAddr, epCount);
+    LOG_INFO("Active endpoints for %04X: %d endpoints", nwkAddr, epCount);
 
     // Store endpoints
     std::vector<uint8_t> endpoints;
     for (uint8_t i = 0; i < epCount && (6 + i) < frame.payload().size(); ++i) {
         uint8_t ep = frame.getByte(6 + i);
         endpoints.push_back(ep);
-        LOG_DEBUG("  Endpoint: {}", ep);
+        LOG_DEBUG("  Endpoint: %d", ep);
     }
 
     // Update device with endpoints
@@ -836,7 +836,7 @@ void ZigbeeCoordinator::handleSimpleDescRsp(const ZnpFrame& frame) {
     if (frame.payload().size() < 14) return;
 
     if (descLen < 8) {
-        LOG_WARN("Simple descriptor too short: {}", descLen);
+        LOG_WARN("Simple descriptor too short: %d", descLen);
         return;
     }
 
@@ -846,7 +846,7 @@ void ZigbeeCoordinator::handleSimpleDescRsp(const ZnpFrame& frame) {
     uint8_t deviceVersion = frame.getByte(11);
     uint8_t numInClusters = frame.getByte(12);
 
-    LOG_INFO("Simple descriptor for {:04X} ep{}: profile=0x{:04X}, device=0x{:04X}, inClusters={}",
+    LOG_INFO("Simple descriptor for %04X ep%d: profile=0x%04X, device=0x%04X, inClusters=%d",
              nwkAddr, endpoint, profileId, deviceId, numInClusters);
 
     // Parse input clusters
@@ -855,7 +855,7 @@ void ZigbeeCoordinator::handleSimpleDescRsp(const ZnpFrame& frame) {
     for (uint8_t i = 0; i < numInClusters && (offset + 1) < frame.payload().size(); ++i) {
         uint16_t cluster = frame.getWord(offset);
         inClusters.push_back(cluster);
-        LOG_DEBUG("  In cluster: 0x{:04X}", cluster);
+        LOG_DEBUG("  In cluster: 0x%04X", cluster);
         offset += 2;
     }
 
@@ -867,7 +867,7 @@ void ZigbeeCoordinator::handleSimpleDescRsp(const ZnpFrame& frame) {
         for (uint8_t i = 0; i < numOutClusters && (offset + 1) < frame.payload().size(); ++i) {
             uint16_t cluster = frame.getWord(offset);
             outClusters.push_back(cluster);
-            LOG_DEBUG("  Out cluster: 0x{:04X}", cluster);
+            LOG_DEBUG("  Out cluster: 0x%04X", cluster);
             offset += 2;
         }
     }
@@ -881,8 +881,8 @@ void ZigbeeCoordinator::handleSimpleDescRsp(const ZnpFrame& frame) {
             if (devIt != m_devices.end()) {
                 devIt->second.inClusters[endpoint] = inClusters;
                 devIt->second.outClusters[endpoint] = outClusters;
-                LOG_INFO("Updated device {:016X} with clusters for endpoint {}",
-                         it->second, endpoint);
+                LOG_INFO("Updated device %016llX with clusters for endpoint %d",
+                         static_cast<unsigned long long>(it->second), endpoint);
             }
         }
     }
@@ -913,7 +913,7 @@ void ZigbeeCoordinator::handleIncomingMessage(const ZnpFrame& frame) {
     uint8_t transSeq = zclData[1];
     uint8_t cmdId = zclData[2];
 
-    LOG_DEBUG("Incoming ZCL: cluster={:04X}, src={:04X}:{}, cmd=0x{:02X}",
+    LOG_DEBUG("Incoming ZCL: cluster=%04X, src=%04X:%d, cmd=0x%02X",
               clusterId, srcAddr, srcEndpoint, cmdId);
 
     // Handle attribute reports

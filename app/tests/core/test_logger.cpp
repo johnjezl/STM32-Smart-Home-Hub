@@ -48,7 +48,7 @@ TEST_F(LoggerTest, FormatStrings) {
 
 TEST_F(LoggerTest, EmptyMessage) {
     smarthub::Logger::init(smarthub::Logger::Level::Debug, "");
-    LOG_INFO("");  // Should not crash
+    LOG_INFO("%s", "");  // Should not crash
 }
 
 TEST_F(LoggerTest, LongMessage) {

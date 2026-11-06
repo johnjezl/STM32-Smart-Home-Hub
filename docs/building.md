@@ -328,7 +328,7 @@ diff buildroot/configs/smarthub_defconfig .config
 1. Make changes to overlay/scripts
 2. `./tools/build.sh` (fast, ~2 min)
 3. `./tools/flash.sh`
-4. Insert SD, power cycle, test
+4. Insert SD, power on with the `power_on` labctl MCP tool, test
 5. Repeat
 
 ### Testing Without Reflash
