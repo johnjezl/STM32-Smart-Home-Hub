@@ -17,6 +17,7 @@
 #include <chrono>
 #include <csignal>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -58,6 +59,10 @@ std::string runCommand(const std::string& command) {
 class ShutdownTest : public ::testing::Test {
 protected:
     void SetUp() override {
+        if (std::system("command -v curl > /dev/null") != 0) {
+            GTEST_SKIP() << "These tests need curl";
+        }
+
         m_dir = fs::temp_directory_path() /
                 ("smarthub_shutdown_" + std::to_string(getpid()) + "_" +
                  ::testing::UnitTest::GetInstance()->current_test_info()->name());
@@ -102,6 +107,11 @@ protected:
         for (int attempt = 0; attempt < 300; ++attempt) {
             if (!runCommand(curl("GET", "/api/setup/status")).empty()) {
                 return;
+            }
+            int status = 0;
+            if (waitpid(m_pid, &status, WNOHANG) != 0) {
+                m_pid = -1;
+                FAIL() << "The program exited during startup:\n" << output();
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
@@ -163,7 +173,8 @@ protected:
         }
         ASSERT_TRUE(WIFEXITED(status)) << "Killed by signal " << WTERMSIG(status) << ":\n" << output();
         EXPECT_EQ(WEXITSTATUS(status), 0) << output();
-        EXPECT_NE(output().find("SmartHub shutdown complete"), std::string::npos) << output();
+        // main prints the same words, so check for what only Application logs
+        EXPECT_NE(output().find("Shutting down SmartHub"), std::string::npos) << output();
     }
 
     fs::path m_dir;
@@ -174,20 +185,20 @@ protected:
 };
 
 TEST_F(ShutdownTest, SigtermWhileIdleExitsCleanly) {
-    startProgram();
+    ASSERT_NO_FATAL_FAILURE(startProgram());
     ASSERT_EQ(kill(m_pid, SIGTERM), 0);
     expectCleanExit(20);
 }
 
 TEST_F(ShutdownTest, SigintExitsCleanly) {
-    startProgram();
+    ASSERT_NO_FATAL_FAILURE(startProgram());
     ASSERT_EQ(kill(m_pid, SIGINT), 0);
     expectCleanExit(20);
 }
 
 TEST_F(ShutdownTest, SigtermUnderLoadExitsCleanly) {
-    startProgram();
-    setUpAdmin();
+    ASSERT_NO_FATAL_FAILURE(startProgram());
+    ASSERT_NO_FATAL_FAILURE(setUpAdmin());
 
     runCommand(curl("POST", "/api/devices", R"({"type":"switch","protocol":"local","name":"Lamp"})"));
 
@@ -210,7 +221,7 @@ TEST_F(ShutdownTest, SigtermUnderLoadExitsCleanly) {
     }
 
     std::this_thread::sleep_for(std::chrono::seconds(1));
-    ASSERT_EQ(kill(m_pid, SIGTERM), 0);
+    EXPECT_EQ(kill(m_pid, SIGTERM), 0);
     expectCleanExit(30);
 
     stop = true;
@@ -220,8 +231,8 @@ TEST_F(ShutdownTest, SigtermUnderLoadExitsCleanly) {
 }
 
 TEST_F(ShutdownTest, SigtermWakesAnAutomationWaitingInADelay) {
-    startProgram();
-    setUpAdmin();
+    ASSERT_NO_FATAL_FAILURE(startProgram());
+    ASSERT_NO_FATAL_FAILURE(setUpAdmin());
 
     runCommand(curl("POST", "/api/devices", R"({"type":"switch","protocol":"local","name":"Source"})"));
     runCommand(curl("POST", "/api/devices", R"({"type":"switch","protocol":"local","name":"Target"})"));
@@ -239,9 +250,15 @@ TEST_F(ShutdownTest, SigtermWakesAnAutomationWaitingInADelay) {
     std::thread request([&] {
         runCommand(curl("PUT", "/api/devices/device-source", R"({"on":true})"));
     });
-    std::this_thread::sleep_for(std::chrono::seconds(1));
+    for (int attempt = 0; attempt < 200; ++attempt) {
+        if (output().find("Executing automation: Slow") != std::string::npos) {
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));  // Into the delay itself
 
-    ASSERT_EQ(kill(m_pid, SIGTERM), 0);
+    EXPECT_EQ(kill(m_pid, SIGTERM), 0);
     double seconds = 0;
     expectCleanExit(20, &seconds);
     EXPECT_LT(seconds, 15) << "Shutdown waited out the delay";

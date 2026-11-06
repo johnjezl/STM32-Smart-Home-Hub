@@ -10,6 +10,7 @@
 #include "smarthub/core/EventBus.hpp"
 
 #include <map>
+#include <atomic>
 #include <condition_variable>
 #include <mutex>
 #include <vector>
@@ -47,6 +48,12 @@ public:
      * Shutdown and cleanup
      */
     void shutdown();
+
+    /**
+     * Also end delays when this flag is set. It has to outlive this object. It lets a signal
+     * stop a delay running on the thread that would otherwise call shutdown().
+     */
+    void setStopFlag(const std::atomic<bool>* stopFlag) { m_stopFlag = stopFlag; }
 
     /**
      * Poll timer-based triggers (call from main loop)
@@ -146,6 +153,8 @@ private:
     std::mutex m_stopMutex;
     std::condition_variable m_stopSignal;
     bool m_stopping = false;
+    std::atomic<const std::atomic<bool>*> m_stopFlag{nullptr};
+    bool isStopping();
 
     // Timer state
     int m_lastCheckedMinute = -1;

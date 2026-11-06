@@ -131,7 +131,8 @@ public:
     /**
      * Unsubscribe from events. Once this returns, the handler won't start again and any calls
      * on other threads have finished, so whatever it captured can be destroyed. It can be
-     * called from inside a handler. Don't hold a lock a running handler might need.
+     * called from inside a handler. Don't hold a lock a running handler might need, don't have
+     * handlers on two threads unsubscribe each other, and only unsubscribe an id once.
      * @param id Subscription ID returned from subscribe()
      */
     void unsubscribe(SubscriptionId id);
