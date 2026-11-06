@@ -226,7 +226,10 @@ nlohmann::json Action::toJson() const {
 
 Action Action::fromJson(const nlohmann::json& j) {
     Action a;
-    a.type = stringToActionType(j.value("type", "set_device_state"));
+    // Saved automations didn't always record the type, and only delays have this field
+    const bool savedDelay = !j.contains("type") && (j.contains("delayMs") || j.contains("delay_ms"));
+    a.type = savedDelay ? ActionType::Delay
+                        : stringToActionType(j.value("type", "set_device_state"));
 
     switch (a.type) {
         case ActionType::SetDeviceState:
@@ -286,6 +289,10 @@ constexpr int kMaxTotalDelayMs = 60000;
 // About a year, and small enough to convert to milliseconds safely
 constexpr int kMaxIntervalMinutes = 525600;
 
+bool isCompareOp(const std::string& op) {
+    return op == "eq" || op == "neq" || op == "gt" || op == "gte" || op == "lt" || op == "lte";
+}
+
 std::string validateTrigger(const nlohmann::json& trigger) {
     if (!trigger.is_object()) return "a trigger must be an object";
 
@@ -303,10 +310,7 @@ std::string validateTrigger(const nlohmann::json& trigger) {
         if (property[0] == '_') return "a trigger can't use the internal property " + property;
         if (type == "sensor_threshold") {
             const std::string op = trigger.value("compare_op", "");
-            if (op != "eq" && op != "neq" && op != "gt" && op != "gte" && op != "lt" &&
-                op != "lte") {
-                return "unknown compare_op: " + op;
-            }
+            if (!isCompareOp(op)) return "unknown compare_op: " + op;
             if (!trigger.contains("threshold") || !trigger["threshold"].is_number() ||
                 !std::isfinite(trigger["threshold"].get<double>())) {
                 return "sensor_threshold trigger needs a numeric threshold";
@@ -369,7 +373,8 @@ std::string validateCondition(const nlohmann::json& condition, int depth = 0) {
     if (condition.value("is_group", false)) {
         const std::string op = condition.value("group_op", "and");
         if (op != "and" && op != "or") return "unknown group_op: " + op;
-        if (!condition.contains("children") || !condition["children"].is_array()) {
+        if (!condition.contains("children") || !condition["children"].is_array() ||
+            condition["children"].empty()) {
             return "a condition group needs children";
         }
         for (const auto& child : condition["children"]) {
@@ -386,9 +391,7 @@ std::string validateCondition(const nlohmann::json& condition, int depth = 0) {
     if (leaf.value("device_id", "").empty()) return "a condition needs a device_id";
     if (leaf.value("property", "").empty()) return "a condition needs a property";
     const std::string op = leaf.value("op", "");
-    if (op != "eq" && op != "neq" && op != "gt" && op != "gte" && op != "lt" && op != "lte") {
-        return "unknown condition op: " + op;
-    }
+    if (!isCompareOp(op)) return "unknown condition op: " + op;
     if (!leaf.contains("value")) return "a condition needs a value";
     return "";
 }
@@ -404,10 +407,6 @@ nlohmann::json triggerList(const nlohmann::json& j) {
     }
     return triggers;
 }
-
-}  // namespace
-
-namespace {
 
 std::string validateFields(const nlohmann::json& j) {
     if (j.value("name", "").empty()) return "name is required";
