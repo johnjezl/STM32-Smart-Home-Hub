@@ -6,6 +6,9 @@
  */
 #pragma once
 
+#include <vector>
+#include <optional>
+#include <condition_variable>
 #include <atomic>
 
 #include "ZnpTransport.hpp"
@@ -30,6 +33,7 @@ struct ZigbeeDeviceInfo {
     std::string manufacturer;
     std::string model;
     std::string dateCode;
+    std::optional<uint16_t> zoneType; // IAS Zone Type, for a device with that cluster
     std::vector<uint8_t> endpoints;
     int failedDescriptors = 0;        // Simple descriptor requests the device has refused
     uint64_t lastSeen = 0;            // Unix timestamp
@@ -188,6 +192,26 @@ public:
     bool requestNetworkAddress(uint64_t ieeeAddr);
 
     /**
+     * Read attributes and wait for the answer. Returns those the device had; empty on no answer.
+     * Waits, so this can't be called from a callback, which runs on the thread that receives it.
+     */
+    std::vector<ZclAttributeValue> readAttributes(uint16_t nwkAddr, uint8_t endpoint, uint16_t cluster,
+                                                  const std::vector<uint16_t>& attributes,
+                                                  int timeoutMs);
+
+    /** End any readAttributes waits now, and fail later ones. For shutting down. */
+    void cancelReads();
+
+    /** Record what pairing learned about a device */
+    void setDeviceDetails(uint64_t ieeeAddr, const std::string& manufacturer, const std::string& model,
+                          std::optional<uint16_t> zoneType);
+
+    /**
+     * Tell an IAS zone device it's enrolled. Doesn't wait, so a callback can call this.
+     */
+    bool sendZoneEnrollResponse(uint16_t nwkAddr, uint8_t endpoint, uint8_t zoneId);
+
+    /**
      * Make a saved device addressable after a restart. It isn't marked available.
      *
      * Returns false and does nothing if the device has already been heard from, since that
@@ -290,6 +314,8 @@ private:
     void handleActiveEpRsp(const ZnpFrame& frame);
     void handleSimpleDescRsp(const ZnpFrame& frame);
     void handleNwkAddrRsp(const ZnpFrame& frame);
+    void handleReadAttributesRsp(uint16_t srcAddr, uint8_t transSeq, uint16_t clusterId, uint8_t endpoint,
+                                 const std::vector<uint8_t>& zcl);
 
     // Internal helpers
     bool registerEndpoint(uint8_t endpoint, uint16_t profileId, uint16_t deviceId,
@@ -318,6 +344,16 @@ private:
     // Transaction sequence number
     uint8_t m_transSeq = 0;
     std::mutex m_seqMutex;
+
+    struct PendingRead {
+        bool answered = false;
+        std::vector<ZclAttributeValue> values;
+    };
+    std::mutex m_readMutex;
+    std::condition_variable m_readCv;
+    std::map<std::pair<uint16_t, uint8_t>, PendingRead> m_pendingReads;  // By address and sequence
+    bool m_readsCancelled = false;
+
 
     // Callbacks
     DeviceJoinedCallback m_deviceJoinedCb;

@@ -143,6 +143,9 @@ private:
     std::optional<uint64_t> deviceIdToIeee(const std::string& deviceId) const;
     std::optional<std::string> savedDeviceId(uint64_t ieeeAddr) const;
     static std::optional<uint64_t> parseIeeeAddress(std::string text);
+    void fetchDeviceDetails(uint64_t ieeeAddr);
+    void enrollIasZone(uint16_t nwkAddr, uint8_t endpoint);
+    void notifyZoneStatus(const std::string& deviceId, uint64_t ieeeAddr, uint16_t status);
     void lookUpNetworkAddress(uint64_t ieeeAddr);  // Caller keeps the coordinator from going away
     void onNetworkAddressFound(uint16_t nwkAddr, uint64_t ieeeAddr, bool changed);
 
@@ -200,10 +203,12 @@ private:
     // Devices the hub keeps, IEEE to device id. Announcing again doesn't make one of these new, and
     // this outlives a leave, because the hub still has the device when it rejoins.
     std::map<uint64_t, std::string> m_savedDevices;
+    std::map<uint64_t, DeviceType> m_deviceTypes;  // To say what an IAS zone alarm means
     std::deque<uint64_t> m_addressChecks;  // Saved addresses still to confirm
     std::chrono::steady_clock::time_point m_lastAddressCheck{};
     std::map<uint64_t, std::chrono::steady_clock::time_point> m_lastAddressLookup;
     int m_addressLookupIntervalMs = 30000;
+    int m_pairingReadTimeoutMs = 3000;
     mutable std::mutex m_deviceMutex;
 };
 

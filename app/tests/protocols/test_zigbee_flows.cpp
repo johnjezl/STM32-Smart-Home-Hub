@@ -12,6 +12,7 @@
 #include "../mocks/FakeZnpCoordinator.hpp"
 
 #include <smarthub/core/EventBus.hpp>
+#include <smarthub/devices/types/ContactSensor.hpp>
 #include <smarthub/devices/types/SwitchDevice.hpp>
 #include <smarthub/protocols/zigbee/ZigbeeCoordinator.hpp>
 #include <smarthub/protocols/zigbee/ZigbeeHandler.hpp>
@@ -873,6 +874,185 @@ TEST_F(ZigbeeHandlerFlowTest, SensorsNoReadingValuesAreNotReported) {
     EXPECT_FALSE(stateOf(idOf(CLIMATE), "humidity").has_value());
 }
 
+// ---- Contact and motion sensors -----------------------------------------------
+
+namespace {
+
+const FakeZigbeeDevice DOOR{
+    0x8101, 0x00124B0000008101ULL,
+    {{1, {zcl::cluster::BASIC, zcl::cluster::IAS_ZONE}}},
+    "Acme", "Door Sensor", zcl::zone_type::CONTACT_SWITCH};
+const FakeZigbeeDevice PIR{
+    0x8102, 0x00124B0000008102ULL,
+    {{1, {zcl::cluster::BASIC, zcl::cluster::IAS_ZONE}}},
+    "Acme", "Door Sensor Named Badly", zcl::zone_type::MOTION_SENSOR};
+const FakeZigbeeDevice SILENT_ZONE{
+    0x8103, 0x00124B0000008103ULL,
+    {{1, {zcl::cluster::BASIC, zcl::cluster::IAS_ZONE}}},
+    "", "", std::nullopt, true};
+const FakeZigbeeDevice OCCUPANCY{
+    0x8104, 0x00124B0000008104ULL,
+    {{1, {zcl::cluster::OCCUPANCY_SENSING}}}};
+
+} // namespace
+
+TEST_F(ZigbeeHandlerFlowTest, PairingReadsManufacturerAndModel) {
+    fake.addDevice(DOOR);
+    auto device = pair(DOOR);
+    ASSERT_NE(device, nullptr);
+    EXPECT_EQ(device->getProperty("manufacturer"), "Acme");
+    EXPECT_EQ(device->getProperty("model"), "Door Sensor");
+    EXPECT_EQ(device->name(), "Acme Door Sensor");
+}
+
+TEST_F(ZigbeeHandlerFlowTest, ZoneTypeDecidesContactSensor) {
+    fake.addDevice(DOOR);
+    auto device = pair(DOOR);
+    ASSERT_NE(device, nullptr);
+    EXPECT_EQ(device->type(), DeviceType::ContactSensor);
+}
+
+TEST_F(ZigbeeHandlerFlowTest, ZoneTypeBeatsTheModelName) {
+    fake.addDevice(PIR);
+    auto device = pair(PIR);
+    ASSERT_NE(device, nullptr);
+    EXPECT_EQ(device->type(), DeviceType::MotionSensor);
+}
+
+TEST_F(ZigbeeHandlerFlowTest, DeviceThatDoesNotAnswerReadsStillPairs) {
+    handlerConfig["pairingReadTimeoutMs"] = 100;
+    handler->shutdown();
+    handler = makeHandler(fake);
+    ASSERT_TRUE(handler->initialize());
+    fake.addDevice(SILENT_ZONE);
+
+    auto device = pair(SILENT_ZONE);
+
+    ASSERT_NE(device, nullptr);
+    EXPECT_EQ(device->type(), DeviceType::MotionSensor) << "the assumption for an unknown zone type";
+}
+
+TEST_F(ZigbeeHandlerFlowTest, PairingEnrollsAnIasZone) {
+    fake.addDevice(DOOR);
+    fake.clearSentFrames();
+    ASSERT_NE(pair(DOOR), nullptr);
+
+    bool wroteAddress = false;
+    bool enrolled = false;
+    for (const AirFrame& frame : airFrames(fake)) {
+        if (frame.cluster != zcl::cluster::IAS_ZONE || frame.nwkAddr != DOOR.nwkAddr) continue;
+        if ((frame.zclFrameControl & zcl::frame_ctrl::CLUSTER_SPECIFIC) == 0 &&
+            frame.zclCommand == zcl::global_cmd::WRITE_ATTRIBUTES) {
+            ASSERT_GE(frame.zclPayload.size(), 11u);
+            EXPECT_EQ(frame.zclPayload[0], zcl::attr::ias_zone::IAS_CIE_ADDRESS);
+            EXPECT_EQ(frame.zclPayload[2], zcl::datatype::IEEE_ADDR);
+            uint64_t address = 0;
+            for (int i = 0; i < 8; i++) {
+                address |= static_cast<uint64_t>(frame.zclPayload[3 + i]) << (8 * i);
+            }
+            EXPECT_EQ(address, FakeZnpCoordinator::COORDINATOR_IEEE);
+            wroteAddress = true;
+        }
+        if ((frame.zclFrameControl & zcl::frame_ctrl::CLUSTER_SPECIFIC) != 0 && frame.zclCommand == 0x00) {
+            EXPECT_EQ(frame.zclPayload[0], 0x00) << "success";
+            enrolled = true;
+        }
+    }
+    EXPECT_TRUE(wroteAddress);
+    EXPECT_TRUE(enrolled);
+}
+
+TEST_F(ZigbeeHandlerFlowTest, EnrollRequestIsAnsweredEvenDuringPairing) {
+    fake.addDevice(DOOR);
+    fake.holdDescriptor(DOOR.nwkAddr, 1);
+    fake.announceDevice(DOOR);
+    ASSERT_TRUE(fake.waitForSent(ZnpSubsystem::ZDO, cmd::zdo::SIMPLE_DESC_REQ, 1));
+    fake.clearSentFrames();
+
+    fake.clusterCommand(DOOR.nwkAddr, 1, zcl::cluster::IAS_ZONE, 0x01, {0x15, 0x00, 0x00, 0x00});
+
+    ASSERT_TRUE(fake.waitForSent(ZnpSubsystem::AF, cmd::af::DATA_REQUEST, 1));
+    auto frames = airFrames(fake);
+    ASSERT_GE(frames.size(), 1u);
+    EXPECT_EQ(frames[0].cluster, zcl::cluster::IAS_ZONE);
+    EXPECT_EQ(frames[0].zclCommand, 0x00);
+    fake.releaseDescriptors();
+}
+
+TEST_F(ZigbeeHandlerFlowTest, MotionReachesTheMotionProperty) {
+    ASSERT_NE(pair(MOTION), nullptr);
+
+    fake.clusterCommand(MOTION.nwkAddr, 1, zcl::cluster::IAS_ZONE, 0x00, {0x01, 0x00});
+    EXPECT_EQ(waitForState(idOf(MOTION), "motion"), true);
+
+    fake.clusterCommand(MOTION.nwkAddr, 1, zcl::cluster::IAS_ZONE, 0x00, {0x00, 0x00});
+    EXPECT_TRUE(eventually([&] { return stateOf(idOf(MOTION), "motion") == nlohmann::json(false); }));
+}
+
+TEST_F(ZigbeeHandlerFlowTest, ContactReachesTheContactProperty) {
+    fake.addDevice(DOOR);
+    ASSERT_NE(pair(DOOR), nullptr);
+
+    fake.clusterCommand(DOOR.nwkAddr, 1, zcl::cluster::IAS_ZONE, 0x00, {0x01, 0x00});
+    EXPECT_EQ(waitForState(idOf(DOOR), "contact"), false) << "alarm means it's open";
+
+    fake.clusterCommand(DOOR.nwkAddr, 1, zcl::cluster::IAS_ZONE, 0x00, {0x00, 0x00});
+    EXPECT_TRUE(eventually([&] { return stateOf(idOf(DOOR), "contact") == nlohmann::json(true); }));
+}
+
+TEST_F(ZigbeeHandlerFlowTest, ZoneStatusInAnAttributeReportCountsToo) {
+    ASSERT_NE(pair(MOTION), nullptr);
+    fake.reportAttribute(MOTION.nwkAddr, 1, zcl::cluster::IAS_ZONE,
+                         zcl::attr::ias_zone::ZONE_STATUS, zcl::datatype::BITMAP16, {0x02, 0x00});
+    EXPECT_EQ(waitForState(idOf(MOTION), "motion"), true) << "the second alarm bit";
+}
+
+TEST_F(ZigbeeHandlerFlowTest, OccupancyReachesTheMotionProperty) {
+    fake.addDevice(OCCUPANCY);
+    fake.clearSentFrames();
+    auto device = pair(OCCUPANCY);
+    ASSERT_NE(device, nullptr);
+    EXPECT_EQ(device->type(), DeviceType::MotionSensor);
+
+    bool askedToReport = false;
+    for (const AirFrame& frame : airFrames(fake)) {
+        askedToReport = askedToReport || (frame.cluster == zcl::cluster::OCCUPANCY_SENSING &&
+                                          frame.zclCommand == zcl::global_cmd::CONFIGURE_REPORTING);
+    }
+    EXPECT_TRUE(askedToReport);
+
+    fake.reportAttribute(OCCUPANCY.nwkAddr, 1, zcl::cluster::OCCUPANCY_SENSING,
+                         zcl::attr::occupancy::OCCUPANCY, zcl::datatype::BITMAP8, {0x01});
+    EXPECT_EQ(waitForState(idOf(OCCUPANCY), "motion"), true);
+}
+
+TEST_F(ZigbeeHandlerFlowTest, RestoredContactSensorStillReadsAsContact) {
+    ContactSensor saved(idOf(DOOR), "Door", "zigbee");
+    saved.setState("ieeeAddress", idOf(DOOR));
+    saved.setState("networkAddress", static_cast<int>(DOOR.nwkAddr));
+    handler->restoreDevice(saved);
+
+    fake.clusterCommand(DOOR.nwkAddr, 1, zcl::cluster::IAS_ZONE, 0x00, {0x01, 0x00});
+
+    EXPECT_EQ(waitForState(idOf(DOOR), "contact"), false);
+}
+
+TEST_F(ZigbeeHandlerFlowTest, ShutdownDoesNotWaitOutARead) {
+    handlerConfig["pairingReadTimeoutMs"] = 60000;
+    handler->shutdown();
+    handler = makeHandler(fake);
+    ASSERT_TRUE(handler->initialize());
+    fake.addDevice(SILENT_ZONE);
+    fake.clearSentFrames();
+    fake.announceDevice(SILENT_ZONE);
+    ASSERT_TRUE(fake.waitForSent(ZnpSubsystem::AF, cmd::af::DATA_REQUEST, 3));  // Write, enroll, read
+    std::this_thread::sleep_for(100ms);
+
+    const auto start = std::chrono::steady_clock::now();
+    handler->shutdown();
+    EXPECT_LT(std::chrono::steady_clock::now() - start, 5s);
+}
+
 TEST_F(ZigbeeHandlerFlowTest, UnknownDeviceGetsNoReporting) {
     auto device = pair(BASIC_ONLY);
     ASSERT_NE(device, nullptr);
@@ -1326,7 +1506,8 @@ class ZigbeeRestartTest : public ZigbeeHandlerFlowTest {
 protected:
     void SetUp() override {
         ZigbeeHandlerFlowTest::SetUp();
-        ASSERT_NE(pair(PLUG), nullptr);
+        DevicePtr paired = pair(PLUG);
+        ASSERT_NE(paired, nullptr);
 
         // The app restarts. The radio keeps its network, so devices stay joined
         // and never re-announce.
@@ -1336,6 +1517,9 @@ protected:
         }
         handler = makeHandler(restartedFake);
         ASSERT_TRUE(handler->initialize());
+
+        // What the device manager does with the devices it loads, here with what pairing recorded
+        handler->restoreDevice(*paired);
     }
 
     void TearDown() override {
@@ -1350,18 +1534,14 @@ TEST_F(ZigbeeRestartTest, NetworkComesBackUp) {
     EXPECT_TRUE(handler->isConnected());
 }
 
-// Issue #7: mappings aren't rebuilt after a restart, so reports are dropped
-// until the device re-announces.
-TEST_F(ZigbeeRestartTest, DISABLED_ReportFromExistingDeviceStillReachesState) {
+TEST_F(ZigbeeRestartTest, ReportFromExistingDeviceStillReachesState) {
     restartedFake.reportAttribute(PLUG.nwkAddr, 3, zcl::cluster::ON_OFF,
                                   zcl::attr::onoff::ON_OFF, zcl::datatype::BOOLEAN, {0x01});
 
     EXPECT_EQ(waitForState(idOf(PLUG), "on"), true);
 }
 
-// Issue #7: a restored device must be controllable before it next reports. The
-// fix decides how known devices reach the handler, so this may need to seed them.
-TEST_F(ZigbeeRestartTest, DISABLED_CommandWorksBeforeDeviceReports) {
+TEST_F(ZigbeeRestartTest, CommandWorksBeforeDeviceReports) {
     ASSERT_TRUE(handler->sendCommand(idOf(PLUG), "on", {{"on", true}}));
 
     auto frames = restartedFake.sentFrames(ZnpSubsystem::AF, cmd::af::DATA_REQUEST);
