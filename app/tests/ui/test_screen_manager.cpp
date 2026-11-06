@@ -453,7 +453,6 @@ TEST_F(ScreenManagerTest, NavigationIsBlockedDuringTransition) {
     }
     EXPECT_FALSE(screenManager->isTransitioning());
 
-    test::finishTransitions();
     EXPECT_TRUE(screenManager->showScreen("settings"));
     EXPECT_EQ(screenManager->currentScreen()->name(), "settings");
 }
@@ -468,22 +467,66 @@ TEST_F(ScreenManagerTest, TransitionIsNotReportedOverBeforeLvglFinishes) {
     screenManager->registerScreen("home", std::make_unique<TestScreen>(*screenManager, "home"));
     ASSERT_TRUE(screenManager->showScreen("home"));
 
-    for (int frame = 0; frame < 100; ++frame) {
+    int frames = 0;
+    for (; frames < 100 && screenManager->isTransitioning(); ++frames) {
         lv_tick_inc(16);
         screenManager->update(16);
-        if (!screenManager->isTransitioning()) {
-            EXPECT_FALSE(test::transitionPending())
-                << "ScreenManager unblocked navigation at frame " << frame
-                << " while LVGL still had the screen load pending";
-            break;
-        }
         lv_timer_handler();
     }
-    test::finishTransitions();
+
+    // Held until the animation's 300 ms had passed, at 16 ms a frame, and then released
+    EXPECT_GE(frames * 16, 300);
+    EXPECT_FALSE(screenManager->isTransitioning());
+    EXPECT_FALSE(test::transitionPending());
 }
 
-// Issue #27: a tap on each frame of a transition, including the one where LVGL finishes it, in the
-// same order as UIManager's main loop. Before the fix, one of these crashed inside LVGL.
+TEST_F(ScreenManagerTest, EveryKindOfNavigationWaitsForATransition) {
+    screenManager = std::make_unique<ScreenManager>(*uiManager);
+    screenManager->setTransitionDuration(0);
+    screenManager->registerScreen("home", std::make_unique<TestScreen>(*screenManager, "home"));
+    screenManager->registerScreen("settings", std::make_unique<TestScreen>(*screenManager, "settings"));
+    screenManager->registerScreen("about", std::make_unique<TestScreen>(*screenManager, "about"));
+    screenManager->setHomeScreen("home");
+
+    ASSERT_TRUE(screenManager->showScreen("home"));
+    ASSERT_TRUE(screenManager->showScreen("settings"));
+    screenManager->setTransitionDuration(300);
+    ASSERT_TRUE(screenManager->showScreen("about"));
+    ASSERT_TRUE(screenManager->isTransitioning());
+
+    // Tried during the transition: none of these may crash, or lose the way back
+    EXPECT_FALSE(screenManager->showScreen("home", TransitionType::None));
+    EXPECT_FALSE(screenManager->goBack());
+    screenManager->goHome();
+    EXPECT_EQ(screenManager->currentScreen()->name(), "about");
+
+    test::finishTransitions();
+    screenManager->setTransitionDuration(0);
+    EXPECT_TRUE(screenManager->goBack());
+    EXPECT_EQ(screenManager->currentScreen()->name(), "settings");
+}
+
+TEST_F(ScreenManagerTest, FailedGoBackKeepsTheHistory) {
+    createScreenManager();
+    screenManager->registerScreen("home", std::make_unique<TestScreen>(*screenManager, "home"));
+    screenManager->registerScreen("settings", std::make_unique<TestScreen>(*screenManager, "settings"));
+    screenManager->registerScreen("about", std::make_unique<TestScreen>(*screenManager, "about"));
+    ASSERT_TRUE(screenManager->showScreen("home"));
+    ASSERT_TRUE(screenManager->showScreen("settings"));
+    ASSERT_TRUE(screenManager->showScreen("about"));
+
+    screenManager->setTransitionDuration(300);
+    ASSERT_TRUE(screenManager->goBack());
+    EXPECT_EQ(screenManager->currentScreen()->name(), "settings");
+    EXPECT_FALSE(screenManager->goBack());
+    test::finishTransitions();
+
+    EXPECT_TRUE(screenManager->goBack());
+    EXPECT_EQ(screenManager->currentScreen()->name(), "home");
+}
+
+// Issue #27: navigating on each frame of a transition, including the one where LVGL finishes it.
+// Before the fix, one of these crashed inside LVGL.
 TEST_F(ScreenManagerTest, NavigatingOnEveryFrameOfATransitionIsSafe) {
     screenManager = std::make_unique<ScreenManager>(*uiManager);
     screenManager->setTransitionDuration(300);
