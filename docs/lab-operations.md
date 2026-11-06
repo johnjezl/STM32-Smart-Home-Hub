@@ -128,12 +128,14 @@ cat boot_log.txt
 ```bash
 cd ~/projects/smarthub/STM32-Smart-Home-Hub
 
-# Flash (auto-detects SD card in card reader)
+# Flash (uses the removable device, if there's only one)
 ./tools/flash.sh
 
 # Or specify device
 ./tools/flash.sh /dev/sde
 ```
+
+It only writes to a whole, removable disk that isn't holding this system, and asks for the device's name to be typed back.
 
 ### Manual Flash
 
