@@ -12,10 +12,11 @@
 #include <functional>
 #include <cstdint>
 
+#include "smarthub/core/EventBus.hpp"
+
 namespace smarthub {
 
 class DeviceManager;
-class EventBus;
 
 namespace ui {
 
@@ -57,7 +58,7 @@ public:
     void onDestroy() override;
 
 private:
-    friend struct AddDeviceScreenTestAccess;
+    friend struct ScreenTestAccess;
 
 #ifdef SMARTHUB_ENABLE_LVGL
     void createHeader();
@@ -87,6 +88,8 @@ private:
     void startZigbeePairing();
     void stopZigbeePairing();
     void onZigbeeDeviceDiscovered(DevicePtr device);
+    EventHandler makePairingEventHandler();
+    std::function<void(DevicePtr)> makePendingDeviceCallback();
 
     // Step 4: Room selection
     void createStep4_RoomSelection();

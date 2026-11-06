@@ -58,7 +58,7 @@ public:
     void onDestroy() override;
 
 private:
-    friend struct AddDeviceScreenTestAccess;
+    friend struct ScreenTestAccess;
 
 #ifdef SMARTHUB_ENABLE_LVGL
     void createHeader();
@@ -73,7 +73,8 @@ private:
 
     void onNetworkSelected(const network::WifiNetwork& network);
     void onConnectClicked();
-    void onConnectFinished(const network::ConnectionResult& result);
+    network::NetworkManager::ScanCallback makeScanCallback();
+    network::NetworkManager::ConnectCallback makeConnectCallback();
     void onCancelClicked();
     void onPasswordEntered(const std::string& password);
 
@@ -133,6 +134,7 @@ private:
     std::vector<network::WifiNetwork> m_networks;
     std::string m_selectedSsid;
     bool m_scanning = false;
+    int m_networkOperation = 0;  // Which scan or connect is the latest
 
     uint32_t m_refreshMs = 0;
     static constexpr uint32_t AUTO_REFRESH_INTERVAL = 30000;  // 30 seconds

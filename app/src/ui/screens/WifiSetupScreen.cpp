@@ -391,17 +391,7 @@ void WifiSetupScreen::refreshNetworks() {
     m_scanning = true;
     showLoading("Scanning for networks...");
 
-    // This runs on the network manager's thread
-    m_networkManager.startScan([this](const std::vector<network::WifiNetwork>& networks) {
-        postToUi([this, networks] {
-            m_networks = networks;
-            m_scanning = false;
-
-            hideLoading();
-            updateStatusBar();
-            updateNetworkList();
-        });
-    });
+    m_networkManager.startScan(makeScanCallback());
 }
 
 void WifiSetupScreen::onNetworkSelected(const network::WifiNetwork& network) {
@@ -421,9 +411,7 @@ void WifiSetupScreen::onNetworkSelected(const network::WifiNetwork& network) {
     // If open network, connect directly
     if (!network.secured) {
         showLoading("Connecting...");
-        m_networkManager.connect(network.ssid, "", [this](const network::ConnectionResult& result) {
-            postToUi([this, result] { onConnectFinished(result); });
-        });
+        m_networkManager.connect(network.ssid, "", makeConnectCallback());
         return;
     }
 
@@ -443,19 +431,43 @@ void WifiSetupScreen::onConnectClicked() {
     hidePasswordDialog();
     showLoading("Connecting...");
 
-    m_networkManager.connect(m_selectedSsid, password, [this](const network::ConnectionResult& result) {
-        postToUi([this, result] { onConnectFinished(result); });
-    });
+    m_networkManager.connect(m_selectedSsid, password, makeConnectCallback());
 }
 
-void WifiSetupScreen::onConnectFinished(const network::ConnectionResult& result) {
-    hideLoading();
-    updateStatusBar();
-    updateNetworkList();
+// These callbacks run on the network manager's thread, so they only hand over to the UI thread.
+// A newer scan or connect makes an older one's result out of date.
+network::NetworkManager::ScanCallback WifiSetupScreen::makeScanCallback() {
+    const int operation = ++m_networkOperation;
+    return [this, post = uiPoster(), operation](const std::vector<network::WifiNetwork>& networks) {
+        post([this, operation, networks] {
+            if (operation != m_networkOperation) return;
+            m_networks = networks;
+            m_scanning = false;
 
-    if (!result.success) {
-        showError(result.error);
-    }
+            hideLoading();
+            updateStatusBar();
+            updateNetworkList();
+        });
+    };
+}
+
+network::NetworkManager::ConnectCallback WifiSetupScreen::makeConnectCallback() {
+    const int operation = ++m_networkOperation;
+    return [this, post = uiPoster(), operation](const network::ConnectionResult& result) {
+        post([this, operation, result] {
+            if (operation != m_networkOperation) return;
+            m_scanning = false;
+
+            hideLoading();
+            updateStatusBar();
+            updateNetworkList();
+
+            if (!result.success) {
+                // Not showError: its label is inside the password dialog, which is closed by now
+                lv_msgbox_create(nullptr, "Couldn't connect", result.error.c_str(), nullptr, true);
+            }
+        });
+    };
 }
 
 void WifiSetupScreen::onCancelClicked() {
