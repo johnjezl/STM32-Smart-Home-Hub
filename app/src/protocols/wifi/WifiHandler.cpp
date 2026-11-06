@@ -350,29 +350,36 @@ void WifiHandler::onDeviceAvailabilityUpdate(const std::string& deviceId, bool a
 }
 
 void WifiHandler::addDevice(const std::string& id, WifiDeviceEntry entry) {
-    // What this replaces is destroyed unlocked, as that can disconnect it, which takes the lock
+    // What this replaces goes first. It's disconnected unlocked, as that takes the lock, and before
+    // the new one is in place, or its going offline would read as the new one doing so.
     WifiDeviceEntry replaced;
-    DevicePtr added;
-    DeviceDiscoveredCallback callback;
-    bool isNew = false;
+    bool isNew = true;
     {
         std::lock_guard<std::mutex> lock(m_deviceMutex);
-
-        added = entry.device;
-        callback = m_discoveredCallback;
         auto it = m_devices.find(id);
         if (it != m_devices.end()) {
             replaced = std::move(it->second);
-            it->second = std::move(entry);
-        } else {
-            m_devices.emplace(id, std::move(entry));
-            isNew = true;
+            m_devices.erase(it);
+            isNew = false;
         }
     }
+    if (replaced.tuyaDevice) {
+        replaced.tuyaDevice->disconnect();
+    }
 
-    // Notify discovery callback
-    if (isNew && callback && added) {
-        callback(added);
+    const bool available = entry.available;
+    DevicePtr added = entry.device;
+    DeviceDiscoveredCallback callback;
+    {
+        std::lock_guard<std::mutex> lock(m_deviceMutex);
+        m_devices.insert_or_assign(id, std::move(entry));
+        callback = m_discoveredCallback;
+    }
+
+    if (!isNew) {
+        onDeviceAvailabilityUpdate(id, available);  // Anyone listening just heard it go offline
+    } else if (callback && added) {
+        callback(added);  // Notify discovery callback
     }
 }
 
