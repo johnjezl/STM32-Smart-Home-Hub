@@ -231,6 +231,8 @@ void ScreenManager::runPostedTasks() {
             task();
         } catch (const std::exception& e) {
             LOG_ERROR("UI task failed: %s", e.what());
+        } catch (...) {
+            LOG_ERROR("UI task failed with an unknown error");
         }
     }
 }

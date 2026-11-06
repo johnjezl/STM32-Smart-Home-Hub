@@ -9,6 +9,8 @@
 
 #include <gtest/gtest.h>
 
+#include "headless_display.hpp"
+
 #ifdef SMARTHUB_ENABLE_LVGL
 
 #include <smarthub/ui/screens/DashboardScreen.hpp>
@@ -1442,32 +1444,60 @@ TEST_F(DisplayManagerTest, Shutdown) {
     });
 }
 
+#ifdef SMARTHUB_ENABLE_LVGL
+
 // ---------- Screens updated from other threads
 
 namespace smarthub {
 namespace ui {
 
-// Reaches what a real pairing would call
-struct AddDeviceScreenTestAccess {
-    static void startPairing(AddDeviceScreen& screen) {
+// Reaches the callbacks these screens really register, without a radio or WiFi hardware
+struct ScreenTestAccess {
+    static void showPairingStep(AddDeviceScreen& screen) {
         screen.onProtocolSelected(3);  // Zigbee
         screen.showStep(3);
         screen.startZigbeePairing();
     }
+    static EventHandler pairingEventHandler(AddDeviceScreen& screen) {
+        return screen.makePairingEventHandler();
+    }
+    static std::function<void(DevicePtr)> pendingDeviceCallback(AddDeviceScreen& screen) {
+        return screen.makePendingDeviceCallback();
+    }
+    static void showStep(AddDeviceScreen& screen, int step) { screen.showStep(step); }
     static lv_obj_t* statusLabel(AddDeviceScreen& screen) { return screen.m_pairStatusLabel; }
     static lv_obj_t* foundLabel(AddDeviceScreen& screen) { return screen.m_discoveredDeviceLabel; }
-    static void deviceFound(AddDeviceScreen& screen, DevicePtr device) {
-        screen.postToUi([&screen, device] { screen.onZigbeeDeviceDiscovered(device); });
-    }
+    static bool isPairing(AddDeviceScreen& screen) { return screen.m_isPairing; }
     static const std::string& address(AddDeviceScreen& screen) {
         return screen.m_discoveredIeeeAddress;
     }
-    static void startScan(WifiSetupScreen& screen) { screen.refreshNetworks(); }
+
+    static network::NetworkManager::ScanCallback scanCallback(WifiSetupScreen& screen) {
+        screen.m_scanning = true;
+        return screen.makeScanCallback();
+    }
+    static network::NetworkManager::ConnectCallback connectCallback(WifiSetupScreen& screen) {
+        return screen.makeConnectCallback();
+    }
     static bool isScanning(WifiSetupScreen& screen) { return screen.m_scanning; }
+    static const std::vector<network::WifiNetwork>& networks(WifiSetupScreen& screen) {
+        return screen.m_networks;
+    }
 };
 
 }  // namespace ui
 }  // namespace smarthub
+
+namespace {
+
+// As a protocol or network thread would
+template <typename Function>
+void onAnotherThread(Function function) {
+    std::thread thread(function);
+    thread.join();
+}
+
+}  // namespace
 
 TEST_F(ScreenTest, AddDeviceScreenHandlesPairingEventsOnTheUiThread) {
     createScreenManager();
@@ -1476,18 +1506,14 @@ TEST_F(ScreenTest, AddDeviceScreenHandlesPairingEventsOnTheUiThread) {
     AddDeviceScreen* screen = addDevice.get();
     screenManager->registerScreen("add_device", std::move(addDevice));
     screenManager->showScreen("add_device");
-    AddDeviceScreenTestAccess::startPairing(*screen);
-    lv_obj_t* status = AddDeviceScreenTestAccess::statusLabel(*screen);
+    ScreenTestAccess::showPairingStep(*screen);
+    lv_obj_t* status = ScreenTestAccess::statusLabel(*screen);
     const std::string before = lv_label_get_text(status);
 
-    // Published on another thread, as a protocol's thread does
-    std::thread publisher([&] {
-        DeviceStateEvent event;
-        event.deviceId = "zigbee_0011";
-        event.property = "_detecting";
-        eventBus->publish(event);
-    });
-    publisher.join();
+    const EventHandler handler = ScreenTestAccess::pairingEventHandler(*screen);
+    DeviceStateEvent detecting;
+    detecting.property = "_detecting";
+    onAnotherThread([&] { handler(detecting); });
     EXPECT_EQ(std::string(lv_label_get_text(status)), before);
 
     screenManager->update(16);
@@ -1495,14 +1521,54 @@ TEST_F(ScreenTest, AddDeviceScreenHandlesPairingEventsOnTheUiThread) {
 
     auto device = std::make_shared<SwitchDevice>("zigbee_0011223344556677", "Found");
     device->setState("manufacturer", "Acme");
-    std::thread pairing([&] { AddDeviceScreenTestAccess::deviceFound(*screen, device); });
-    pairing.join();
-    EXPECT_TRUE(AddDeviceScreenTestAccess::address(*screen).empty());
+    const auto pending = ScreenTestAccess::pendingDeviceCallback(*screen);
+    onAnotherThread([&] { pending(device); });
+    EXPECT_TRUE(ScreenTestAccess::address(*screen).empty());
 
     screenManager->update(16);
-    EXPECT_EQ(AddDeviceScreenTestAccess::address(*screen), "0x0011223344556677");
-    EXPECT_NE(std::string(lv_label_get_text(AddDeviceScreenTestAccess::foundLabel(*screen))).find("Acme"),
+    EXPECT_EQ(ScreenTestAccess::address(*screen), "0x0011223344556677");
+    EXPECT_NE(std::string(lv_label_get_text(ScreenTestAccess::foundLabel(*screen))).find("Acme"),
               std::string::npos);
+}
+
+TEST_F(ScreenTest, AddDeviceScreenStopsPairingWhenItsWidgetsGoAway) {
+    createScreenManager();
+    auto addDevice = std::make_unique<AddDeviceScreen>(
+        *screenManager, *themeManager, *deviceManager, *eventBus);
+    AddDeviceScreen* screen = addDevice.get();
+    screenManager->registerScreen("add_device", std::move(addDevice));
+    screenManager->showScreen("add_device");
+    ScreenTestAccess::showPairingStep(*screen);
+    ASSERT_TRUE(ScreenTestAccess::isPairing(*screen));
+
+    // Queued before the widgets go, and run after
+    DeviceStateEvent detecting;
+    detecting.property = "_detecting";
+    ScreenTestAccess::pairingEventHandler(*screen)(detecting);
+    const auto pending = ScreenTestAccess::pendingDeviceCallback(*screen);
+    pending(std::make_shared<SwitchDevice>("zigbee_0011223344556677", "Found"));
+
+    ScreenTestAccess::showStep(*screen, 2);
+    EXPECT_FALSE(ScreenTestAccess::isPairing(*screen));
+    EXPECT_EQ(ScreenTestAccess::statusLabel(*screen), nullptr);
+
+    EXPECT_NO_THROW(screenManager->update(16));
+}
+
+TEST_F(ScreenTest, AddDeviceScreenDestroyedWithQueuedEventsIgnoresThem) {
+    createScreenManager();
+    auto addDevice = std::make_unique<AddDeviceScreen>(
+        *screenManager, *themeManager, *deviceManager, *eventBus);
+    AddDeviceScreen* screen = addDevice.get();
+    screenManager->registerScreen("add_device", std::move(addDevice));
+    screenManager->showScreen("add_device");
+    ScreenTestAccess::showPairingStep(*screen);
+
+    const auto pending = ScreenTestAccess::pendingDeviceCallback(*screen);
+    screenManager->unregisterScreen("add_device");
+
+    pending(std::make_shared<SwitchDevice>("zigbee_0011223344556677", "Found"));
+    EXPECT_NO_THROW(screenManager->update(16));
 }
 
 TEST_F(ScreenTest, WifiSetupScreenFinishesAScanOnTheUiThread) {
@@ -1511,14 +1577,60 @@ TEST_F(ScreenTest, WifiSetupScreenFinishesAScanOnTheUiThread) {
     WifiSetupScreen* screen = wifi.get();
     screenManager->registerScreen("wifi_setup", std::move(wifi));
     screenManager->showScreen("wifi_setup");
+    screenManager->update(16);
 
-    AddDeviceScreenTestAccess::startScan(*screen);
+    network::WifiNetwork found;
+    found.ssid = "Home";
+    const auto callback = ScreenTestAccess::scanCallback(*screen);
+    onAnotherThread([&] { callback({found}); });
+    EXPECT_TRUE(ScreenTestAccess::isScanning(*screen));
+    EXPECT_TRUE(ScreenTestAccess::networks(*screen).empty());
 
-    // The scan's result reaches the UI through update, whatever thread the scan used
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
-    while (AddDeviceScreenTestAccess::isScanning(*screen) && std::chrono::steady_clock::now() < deadline) {
-        screenManager->update(16);
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    }
-    EXPECT_FALSE(AddDeviceScreenTestAccess::isScanning(*screen));
+    screenManager->update(16);
+    EXPECT_FALSE(ScreenTestAccess::isScanning(*screen));
+    ASSERT_EQ(ScreenTestAccess::networks(*screen).size(), 1u);
+    EXPECT_EQ(ScreenTestAccess::networks(*screen)[0].ssid, "Home");
 }
+
+TEST_F(ScreenTest, WifiSetupScreenIgnoresAnOutOfDateScan) {
+    createScreenManager();
+    auto wifi = std::make_unique<WifiSetupScreen>(*screenManager, *themeManager, *networkManager);
+    WifiSetupScreen* screen = wifi.get();
+    screenManager->registerScreen("wifi_setup", std::move(wifi));
+    screenManager->showScreen("wifi_setup");
+    screenManager->update(16);
+
+    network::WifiNetwork old;
+    old.ssid = "Old";
+    const auto oldScan = ScreenTestAccess::scanCallback(*screen);
+    const auto newScan = ScreenTestAccess::scanCallback(*screen);
+
+    oldScan({old});
+    screenManager->update(16);
+    EXPECT_TRUE(ScreenTestAccess::isScanning(*screen));
+    EXPECT_TRUE(ScreenTestAccess::networks(*screen).empty());
+
+    newScan({});
+    screenManager->update(16);
+    EXPECT_FALSE(ScreenTestAccess::isScanning(*screen));
+}
+
+TEST_F(ScreenTest, WifiSetupScreenShowsAFailedConnection) {
+    createScreenManager();
+    auto wifi = std::make_unique<WifiSetupScreen>(*screenManager, *themeManager, *networkManager);
+    WifiSetupScreen* screen = wifi.get();
+    screenManager->registerScreen("wifi_setup", std::move(wifi));
+    screenManager->showScreen("wifi_setup");
+    screenManager->update(16);
+
+    network::ConnectionResult result;
+    result.success = false;
+    result.error = "Wrong password";
+    const auto callback = ScreenTestAccess::connectCallback(*screen);
+    onAnotherThread([&] { callback(result); });
+    screenManager->update(16);
+
+    EXPECT_GE(test::countText(lv_layer_top(), "Wrong password"), 1);
+}
+
+#endif // SMARTHUB_ENABLE_LVGL

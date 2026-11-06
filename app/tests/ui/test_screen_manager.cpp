@@ -20,6 +20,8 @@
 #include <lvgl.h>
 
 #include <memory>
+#include <stdexcept>
+#include <thread>
 #include <filesystem>
 #include <vector>
 
@@ -505,6 +507,8 @@ TEST(ScreenManagerTest, LVGLNotAvailable) {
 
 #endif // SMARTHUB_ENABLE_LVGL
 
+#ifdef SMARTHUB_ENABLE_LVGL
+
 // ---------- Tasks posted to the UI thread
 
 namespace {
@@ -513,7 +517,8 @@ namespace {
 class PostingScreen : public TestScreen {
 public:
     using TestScreen::TestScreen;
-    using TestScreen::postToUi;
+    using TestScreen::UiPoster;
+    using TestScreen::uiPoster;
 };
 
 }  // namespace
@@ -560,6 +565,7 @@ TEST_F(ScreenManagerTest, FailingTaskDoesNotStopTheOthers) {
     createScreenManager();
     bool ran = false;
     screenManager->postToUi([] { throw std::runtime_error("failed"); });
+    screenManager->postToUi([] { throw 1; });
     screenManager->postToUi([&] { ran = true; });
 
     EXPECT_NO_THROW(screenManager->update(16));
@@ -569,10 +575,14 @@ TEST_F(ScreenManagerTest, FailingTaskDoesNotStopTheOthers) {
 TEST_F(ScreenManagerTest, ScreensPostedTaskSkipsIfTheScreenIsDestroyed) {
     createScreenManager();
     bool ran = false;
+    PostingScreen::UiPoster poster;
     {
         PostingScreen screen(*screenManager, "posting");
-        screen.postToUi([&] { ran = true; });
+        poster = screen.uiPoster();
     }
+
+    // Safe even after the screen has gone
+    poster([&] { ran = true; });
 
     screenManager->update(16);
     EXPECT_FALSE(ran);
@@ -582,8 +592,10 @@ TEST_F(ScreenManagerTest, ScreensPostedTaskRunsWhileTheScreenExists) {
     createScreenManager();
     bool ran = false;
     PostingScreen screen(*screenManager, "posting");
-    screen.postToUi([&] { ran = true; });
+    screen.uiPoster()([&] { ran = true; });
 
     screenManager->update(16);
     EXPECT_TRUE(ran);
 }
+
+#endif // SMARTHUB_ENABLE_LVGL

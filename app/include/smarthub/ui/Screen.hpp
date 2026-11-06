@@ -116,10 +116,13 @@ public:
 
 protected:
     /**
-     * Run a task on the UI thread, unless this screen is destroyed first. Safe to call from any
-     * thread, as long as this screen isn't being destroyed at that moment.
+     * A function that runs a task on the UI thread, unless this screen has been destroyed by
+     * then. Call this on the UI thread and give the result to whatever calls back from another
+     * thread. Calling the result doesn't touch the screen, so it's safe from any thread at any
+     * time, as long as the ScreenManager exists.
      */
-    void postToUi(std::function<void()> task);
+    using UiPoster = std::function<void(std::function<void()>)>;
+    UiPoster uiPoster() const;
 
     ScreenManager& m_screenManager;
     std::string m_name;
