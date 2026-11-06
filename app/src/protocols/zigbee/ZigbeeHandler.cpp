@@ -10,6 +10,7 @@
 #include <smarthub/devices/types/ColorLightDevice.hpp>
 #include <smarthub/devices/types/TemperatureSensor.hpp>
 #include <smarthub/devices/types/MotionSensor.hpp>
+#include <cinttypes>
 #include <algorithm>
 #include <cmath>
 #include <iomanip>
@@ -449,7 +450,7 @@ bool ZigbeeHandler::loadDeviceDatabase(const std::string& path) {
 // ============================================================================
 
 void ZigbeeHandler::onDeviceAnnounced(uint16_t nwkAddr, uint64_t ieeeAddr) {
-    LOG_INFO("Zigbee device announced: nwk=0x%04X, ieee=0x%016llX", nwkAddr, static_cast<unsigned long long>(ieeeAddr));
+    LOG_INFO("Zigbee device announced: nwk=0x%04X, ieee=0x%016" PRIX64, nwkAddr, ieeeAddr);
 
     // Publish event to notify UI that a device was detected
     if (m_discovering) {
@@ -628,7 +629,7 @@ uint64_t ZigbeeHandler::pairDevice(uint64_t ieeeAddr) {
 }
 
 void ZigbeeHandler::reportPairingFailure(uint64_t ieeeAddr, const std::string& message) {
-    LOG_ERROR("Pairing 0x%016llX failed: %s", (unsigned long long)ieeeAddr, message.c_str());
+    LOG_ERROR("Pairing 0x%016" PRIX64 " failed: %s", ieeeAddr, message.c_str());
     if (m_discovering) {
         DeviceStateEvent errorEvent;
         errorEvent.deviceId = ieeeToDeviceId(ieeeAddr);
@@ -653,7 +654,7 @@ void ZigbeeHandler::finishPairing(uint64_t ieeeAddr) {
     // Create SmartHub device from Zigbee device info
     auto device = createDeviceFromInfo(*deviceInfo);
     if (!device) {
-        LOG_ERROR("Failed to create device for 0x%016llX", (unsigned long long)ieeeAddr);
+        LOG_ERROR("Failed to create device for 0x%016" PRIX64, ieeeAddr);
         return;
     }
 
@@ -709,7 +710,7 @@ void ZigbeeHandler::finishPairing(uint64_t ieeeAddr) {
 }
 
 void ZigbeeHandler::onDeviceLeft(uint64_t ieeeAddr) {
-    LOG_INFO("Zigbee device left: ieee=0x%016llX", static_cast<unsigned long long>(ieeeAddr));
+    LOG_INFO("Zigbee device left: ieee=0x%016" PRIX64, ieeeAddr);
 
     std::string deviceId;
     {
@@ -946,8 +947,8 @@ DeviceType ZigbeeHandler::inferDeviceType(const ZigbeeDeviceInfo& info) {
     bool hasIasZone = false;
     bool hasOccupancy = false;
 
-    LOG_DEBUG("Inferring device type for %016llX, %zu endpoints with cluster info",
-              static_cast<unsigned long long>(info.ieeeAddress), info.inClusters.size());
+    LOG_DEBUG("Inferring device type for %016" PRIX64 ", %zu endpoints with cluster info",
+              info.ieeeAddress, info.inClusters.size());
 
     for (const auto& [endpoint, clusters] : info.inClusters) {
         LOG_DEBUG("  Endpoint %d has %zu clusters", endpoint, clusters.size());

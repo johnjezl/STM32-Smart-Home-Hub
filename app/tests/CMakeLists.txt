@@ -84,6 +84,7 @@ if(GTEST_AVAILABLE)
 
     # Create a library from testable sources
     add_library(smarthub_lib STATIC ${TESTABLE_SOURCES})
+    target_compile_options(smarthub_lib PRIVATE ${SMARTHUB_FORMAT_ERRORS})
     target_include_directories(smarthub_lib PUBLIC
         ${CMAKE_SOURCE_DIR}/include
         ${CMAKE_SOURCE_DIR}/src
@@ -215,6 +216,7 @@ if(GTEST_AVAILABLE)
         set(UI_LIB_SOURCES ${UI_SOURCES})
         list(TRANSFORM UI_LIB_SOURCES PREPEND "${CMAKE_SOURCE_DIR}/")
         add_library(smarthub_ui STATIC ${UI_LIB_SOURCES})
+        target_compile_options(smarthub_ui PRIVATE ${SMARTHUB_FORMAT_ERRORS})
         target_link_libraries(smarthub_ui PUBLIC smarthub_lib ${LVGL_LIBRARIES})
         if(LIBDRM_FOUND)
             target_link_libraries(smarthub_ui PUBLIC ${LIBDRM_LIBRARIES})

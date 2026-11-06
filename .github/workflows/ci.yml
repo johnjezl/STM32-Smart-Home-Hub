@@ -356,6 +356,15 @@ jobs:
             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
             -DSMARTHUB_BUILD_TESTS=OFF
 
+      - name: Check for log calls using {} placeholders
+        run: |
+          # The compiler catches placeholders with arguments, but not a call with none, such as
+          # LOG_ERROR("Port {} failed"). Logging is printf style, so that would print {} literally.
+          if grep -rnE 'LOG_(DEBUG|INFO|WARN|ERROR)\("[^"]*\{[0-9]*(:[^}]*)?\}' app/src app/include app/tests; then
+            echo "Use printf formats in log calls"
+            exit 1
+          fi
+
       - name: Run cppcheck
         working-directory: app
         run: |

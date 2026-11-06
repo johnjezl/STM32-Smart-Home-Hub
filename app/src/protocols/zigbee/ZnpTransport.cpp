@@ -241,8 +241,9 @@ bool ZnpTransport::send(const ZnpFrame& frame) {
     std::lock_guard<std::mutex> writeLock(m_writeMutex);
     ssize_t written = m_serialPort->write(data.data(), data.size());
     if (written != static_cast<ssize_t>(data.size())) {
-        LOG_ERROR("Failed to write frame: wrote %zd of %zu bytes",
-                  written, data.size());
+        // errno only means something if the write itself failed, not if it was short
+        LOG_ERROR("Failed to write frame: wrote %zd of %zu bytes (%s)",
+                  written, data.size(), written < 0 ? strerror(errno) : "short write");
         return false;
     }
 

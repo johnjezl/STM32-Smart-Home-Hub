@@ -480,7 +480,7 @@ static bool drm_create_buffer(int fd, DrmBuffer* buf, uint32_t width, uint32_t h
     create.bpp = 32;
 
     if (drmIoctl(fd, DRM_IOCTL_MODE_CREATE_DUMB, &create) < 0) {
-        LOG_ERROR("%s", ("Failed to create dumb buffer: " + std::string(strerror(errno))).c_str());
+        LOG_ERROR("Failed to create dumb buffer: %s", strerror(errno));
         return false;
     }
 
@@ -492,7 +492,7 @@ static bool drm_create_buffer(int fd, DrmBuffer* buf, uint32_t width, uint32_t h
 
     // Create framebuffer object
     if (drmModeAddFB(fd, width, height, 24, 32, buf->stride, buf->handle, &buf->fb_id) != 0) {
-        LOG_ERROR("%s", ("Failed to create framebuffer: " + std::string(strerror(errno))).c_str());
+        LOG_ERROR("Failed to create framebuffer: %s", strerror(errno));
         struct drm_mode_destroy_dumb destroy = { .handle = buf->handle };
         drmIoctl(fd, DRM_IOCTL_MODE_DESTROY_DUMB, &destroy);
         return false;
@@ -503,7 +503,7 @@ static bool drm_create_buffer(int fd, DrmBuffer* buf, uint32_t width, uint32_t h
     map.handle = buf->handle;
 
     if (drmIoctl(fd, DRM_IOCTL_MODE_MAP_DUMB, &map) < 0) {
-        LOG_ERROR("%s", ("Failed to map dumb buffer: " + std::string(strerror(errno))).c_str());
+        LOG_ERROR("Failed to map dumb buffer: %s", strerror(errno));
         drmModeRmFB(fd, buf->fb_id);
         struct drm_mode_destroy_dumb destroy = { .handle = buf->handle };
         drmIoctl(fd, DRM_IOCTL_MODE_DESTROY_DUMB, &destroy);
@@ -512,7 +512,7 @@ static bool drm_create_buffer(int fd, DrmBuffer* buf, uint32_t width, uint32_t h
 
     buf->map = (uint8_t*)mmap(nullptr, buf->size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, map.offset);
     if (buf->map == MAP_FAILED) {
-        LOG_ERROR("%s", ("Failed to mmap buffer: " + std::string(strerror(errno))).c_str());
+        LOG_ERROR("Failed to mmap buffer: %s", strerror(errno));
         drmModeRmFB(fd, buf->fb_id);
         struct drm_mode_destroy_dumb destroy = { .handle = buf->handle };
         drmIoctl(fd, DRM_IOCTL_MODE_DESTROY_DUMB, &destroy);
@@ -567,7 +567,7 @@ bool UIManager::initialize(const std::string& drmDevice, const std::string& touc
     // Open DRM device
     s_drm.fd = open(drmDevice.c_str(), O_RDWR | O_CLOEXEC);
     if (s_drm.fd < 0) {
-        LOG_ERROR("%s", ("Failed to open DRM device: " + drmDevice + " (" + strerror(errno) + ")").c_str());
+        LOG_ERROR("Failed to open DRM device: %s (%s)", drmDevice.c_str(), strerror(errno));
         return false;
     }
 
@@ -607,8 +607,8 @@ bool UIManager::initialize(const std::string& drmDevice, const std::string& touc
     int phys_width = s_drm.mode.hdisplay;
     int phys_height = s_drm.mode.vdisplay;
 
-    LOG_INFO("%s", ("Physical display: " + std::to_string(phys_width) + "x" + std::to_string(phys_height) +
-             " @ " + std::to_string(s_drm.mode.vrefresh) + "Hz (" + s_drm.mode.name + ")").c_str());
+    LOG_INFO("Physical display: %dx%d @ %uHz (%s)", static_cast<int>(phys_width), static_cast<int>(phys_height),
+             static_cast<unsigned>(s_drm.mode.vrefresh), s_drm.mode.name);
 
     // Detect portrait mode and enable rotation to landscape
     // Portrait: height > width (e.g., 480x800)
@@ -619,8 +619,7 @@ bool UIManager::initialize(const std::string& drmDevice, const std::string& touc
         // Swap dimensions for landscape orientation
         m_width = phys_height;   // Logical width = physical height
         m_height = phys_width;   // Logical height = physical width
-        LOG_INFO("%s", ("Rotating display 90° to landscape: " +
-                 std::to_string(m_width) + "x" + std::to_string(m_height)).c_str());
+        LOG_INFO("Rotating display 90° to landscape: %dx%d", static_cast<int>(m_width), static_cast<int>(m_height));
     } else {
         m_width = phys_width;
         m_height = phys_height;
@@ -680,7 +679,7 @@ bool UIManager::initialize(const std::string& drmDevice, const std::string& touc
     // Create double buffers at physical dimensions (DRM operates at physical resolution)
     for (int i = 0; i < 2; i++) {
         if (!drm_create_buffer(s_drm.fd, &s_drm.buffers[i], phys_width, phys_height)) {
-            LOG_ERROR("%s", ("Failed to create DRM buffer " + std::to_string(i)).c_str());
+            LOG_ERROR("Failed to create DRM buffer %d", i);
             // Cleanup already created buffers
             for (int j = 0; j < i; j++) {
                 drm_destroy_buffer(s_drm.fd, &s_drm.buffers[j]);
@@ -705,7 +704,7 @@ bool UIManager::initialize(const std::string& drmDevice, const std::string& touc
     // Set initial mode
     if (drmModeSetCrtc(s_drm.fd, s_drm.crtc_id, s_drm.buffers[0].fb_id, 0, 0,
                        &s_drm.connector_id, 1, &s_drm.mode) != 0) {
-        LOG_ERROR("%s", ("Failed to set CRTC mode: " + std::string(strerror(errno))).c_str());
+        LOG_ERROR("Failed to set CRTC mode: %s", strerror(errno));
         for (int i = 0; i < 2; i++) {
             drm_destroy_buffer(s_drm.fd, &s_drm.buffers[i]);
         }
@@ -721,9 +720,9 @@ bool UIManager::initialize(const std::string& drmDevice, const std::string& touc
     // Open touch device (optional - non-fatal if not available)
     s_touch.fd = open(touchDevice.c_str(), O_RDONLY | O_NONBLOCK);
     if (s_touch.fd < 0) {
-        LOG_WARN("%s", ("Touch device not available: " + touchDevice).c_str());
+        LOG_WARN("Touch device not available: %s", touchDevice.c_str());
     } else {
-        LOG_INFO("%s", ("Touch input initialized: " + touchDevice).c_str());
+        LOG_INFO("Touch input initialized: %s", touchDevice.c_str());
     }
 
     // Try to find and open a keyboard device

@@ -24,8 +24,12 @@ else()
     add_compile_options(-O2)
 endif()
 
-# A wrong log format loses the message or its values, and only shows up when it's needed most
-add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-Werror=format>)
+# A wrong log format loses the message or its values, and only shows up when it's needed most.
+# Applied per target so fetched dependencies (LVGL, GoogleTest) don't inherit it. format-security
+# is named because not every GCC turns it on: stock and Buildroot compilers may leave it off.
+set(SMARTHUB_FORMAT_ERRORS
+    $<$<COMPILE_LANGUAGE:CXX>:-Werror=format>
+    $<$<COMPILE_LANGUAGE:CXX>:-Werror=format-security>)
 
 if(SMARTHUB_ENABLE_SANITIZERS)
     add_compile_options(-fsanitize=address,undefined)
@@ -282,6 +286,7 @@ set(SOURCES
 
 # Main executable
 add_executable(smarthub ${SOURCES})
+target_compile_options(smarthub PRIVATE ${SMARTHUB_FORMAT_ERRORS})
 
 # Compile definitions
 if(SMARTHUB_ENABLE_LVGL)
