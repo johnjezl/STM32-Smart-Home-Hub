@@ -37,7 +37,7 @@ CertManager::CertManager(const std::string& certDir)
 {
 }
 
-#if __has_include(<openssl/x509.h>)
+#if HAVE_OPENSSL
 
 namespace {
 
@@ -55,7 +55,9 @@ using X509Ptr = std::unique_ptr<X509, decltype(&X509_free)>;
 // Writes to a temporary name and renames, so a power cut can't leave half a file
 bool writePem(const std::string& path, int mode, const std::function<bool(FILE*)>& write) {
     const std::string temporary = path + ".new";
-    const int fd = ::open(temporary.c_str(), O_WRONLY | O_CREAT | O_TRUNC, mode);
+    // A leftover file would keep its permissions, which could expose the key
+    ::unlink(temporary.c_str());
+    const int fd = ::open(temporary.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, mode);
     if (fd < 0) {
         return false;
     }
@@ -128,13 +130,20 @@ bool CertManager::createSelfSigned(const std::string& certPath, const std::strin
     ok = ok && extension && X509_add_ext(cert.get(), extension, -1) == 1;
     X509_EXTENSION_free(extension);
 
+    // Some clients won't accept a server certificate without this, even if it's trusted by hand
+    X509_EXTENSION* usage =
+        X509V3_EXT_conf_nid(nullptr, nullptr, NID_ext_key_usage, "serverAuth");
+    ok = ok && usage && X509_add_ext(cert.get(), usage, -1) == 1;
+    X509_EXTENSION_free(usage);
+
     ok = ok && X509_sign(cert.get(), key.get(), EVP_sha256()) != 0;
     if (!ok) {
         LOG_ERROR("Failed to build a TLS certificate");
         return false;
     }
 
-    // The key first, because a certificate without its key is what would look broken next time
+    // The key first, because startup treats a key on its own as an interrupted first boot and
+    // tries again, but leaves a certificate alone
     return writePem(keyPath, 0600, [&](FILE* file) {
                return PEM_write_PrivateKey(file, key.get(), nullptr, nullptr, 0, nullptr, nullptr) == 1;
            }) &&

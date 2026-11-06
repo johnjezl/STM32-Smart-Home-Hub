@@ -331,7 +331,9 @@ SmartHub is designed for **local network deployment**, but doesn't treat that ne
 - Password guessing (failed login limit)
 - XSS/Clickjacking (security headers)
 
-**TLS:** the hub creates a self-signed certificate on first boot if neither the certificate nor the key exists. If they exist but can't be used, it refuses to start rather than falling back to plain HTTP. Setting both paths to empty in the config is the only way to run without TLS.
+**TLS:** the hub creates a self-signed certificate on first boot if the certificate doesn't exist. If one exists but can't be used, the web server doesn't start, rather than falling back to plain HTTP, and the error is in the log. Automations and the touchscreen keep working. Setting both paths to empty in the config is the only way to run without TLS.
+
+The self-signed certificate names `smarthub.local` and `localhost`, so a browser reaching the hub by IP address still warns after it's trusted. It runs until 2099, which Apple devices don't accept as trusted even if it's installed by hand, so they keep showing a warning.
 
 **Not in scope**:
 - Network-level attacks (use firewall)
