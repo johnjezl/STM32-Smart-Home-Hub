@@ -220,7 +220,6 @@ public:
     void loadDevicesFromDatabase();
 
 private:
-    void setupEventHandlers();
     void onDeviceDiscovered(DevicePtr device);
     void applyStateChange(const DevicePtr& device, const std::string& property,
                           const nlohmann::json& value);

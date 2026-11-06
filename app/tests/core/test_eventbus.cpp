@@ -6,6 +6,7 @@
 #include <smarthub/core/EventBus.hpp>
 #include <atomic>
 #include <chrono>
+#include <stdexcept>
 #include <thread>
 
 class EventBusTest : public ::testing::Test {
@@ -147,4 +148,56 @@ TEST_F(EventBusTest, SubscribeAfterPublish) {
     TestEvent event2(2);
     eventBus.publish(event2);  // Published after subscription
     EXPECT_EQ(count, 1);
+}
+
+TEST_F(EventBusTest, UnsubscribeWaitsForAHandlerRunningOnAnotherThread) {
+    std::atomic<bool> started{false};
+    std::atomic<bool> finished{false};
+    const auto id = eventBus.subscribe("TestEvent", [&](const smarthub::Event&) {
+        started = true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        finished = true;
+    });
+
+    std::thread publisher([&] { eventBus.publish(TestEvent(1)); });
+    while (!started) {
+        std::this_thread::yield();
+    }
+
+    eventBus.unsubscribe(id);
+    EXPECT_TRUE(finished);
+    publisher.join();
+}
+
+TEST_F(EventBusTest, HandlerUnsubscribedByAnEarlierHandlerDoesNotRun) {
+    smarthub::SubscriptionId second = 0;
+    bool secondRan = false;
+    eventBus.subscribe("TestEvent", [&](const smarthub::Event&) { eventBus.unsubscribe(second); });
+    second = eventBus.subscribe("TestEvent", [&](const smarthub::Event&) { secondRan = true; });
+
+    eventBus.publish(TestEvent(1));
+    EXPECT_FALSE(secondRan);
+}
+
+TEST_F(EventBusTest, HandlerCanUnsubscribeItself) {
+    smarthub::SubscriptionId id = 0;
+    int calls = 0;
+    id = eventBus.subscribe("TestEvent", [&](const smarthub::Event&) {
+        ++calls;
+        eventBus.unsubscribe(id);
+    });
+
+    eventBus.publish(TestEvent(1));
+    eventBus.publish(TestEvent(1));
+    EXPECT_EQ(calls, 1);
+}
+
+TEST_F(EventBusTest, ThrowingHandlerStillLetsUnsubscribeFinish) {
+    const auto id = eventBus.subscribe("TestEvent", [](const smarthub::Event&) {
+        throw std::runtime_error("handler failed");
+    });
+
+    EXPECT_THROW(eventBus.publish(TestEvent(1)), std::runtime_error);
+    eventBus.unsubscribe(id);
+    EXPECT_EQ(eventBus.subscriberCount("TestEvent"), 0u);
 }

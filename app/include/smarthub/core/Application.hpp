@@ -59,14 +59,14 @@ public:
     bool initialize();
 
     /**
-     * Run the main application loop
-     * Blocks until shutdown() is called
+     * Run the main loop until stopRequested is set, then shut down.
+     * Setting the flag is safe from any thread or a signal handler.
      */
-    void run();
+    void run(const std::atomic<bool>& stopRequested);
 
     /**
-     * Request application shutdown
-     * Can be called from signal handler
+     * Stop every subsystem. Does nothing if that's already happened. Call it from the thread
+     * that called initialize(), and not while run() is running.
      */
     void shutdown();
 
@@ -97,11 +97,12 @@ private:
     bool initializeWebServer();
     bool initializeUI();
 
-    void mainLoop();
+    void mainLoop(const std::atomic<bool>& stopRequested);
     void shutdownSubsystems();
 
     std::string m_configPath;
     std::atomic<bool> m_running{false};
+    bool m_shutDown = false;
     std::atomic<bool> m_initialized{false};
 
     // Subsystems (order matters for initialization/shutdown)

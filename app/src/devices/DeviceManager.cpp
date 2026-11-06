@@ -28,7 +28,6 @@ bool DeviceManager::initialize() {
     LOG_INFO("Initializing device manager");
 
     loadDevicesFromDatabase();
-    setupEventHandlers();
 
     LOG_INFO("Device manager initialized with %zu devices", m_devices.size());
     return true;
@@ -818,20 +817,6 @@ bool DeviceManager::deleteRoom(const std::string& id) {
     }
 
     return false;
-}
-
-void DeviceManager::setupEventHandlers() {
-    // Subscribe to MQTT messages for device updates
-    m_eventBus.subscribe("mqtt.message", [this](const Event& event) {
-        (void)event;
-        // Protocol handlers will call onDeviceStateChanged directly
-    });
-
-    // Subscribe to sensor data from M4
-    m_eventBus.subscribe("sensor.data", [this](const Event& event) {
-        (void)event;
-        // RPMsg handler will call onDeviceStateChanged directly
-    });
 }
 
 void DeviceManager::onDeviceDiscovered(DevicePtr device) {
