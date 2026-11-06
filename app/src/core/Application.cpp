@@ -332,8 +332,9 @@ bool Application::configureTls() {
     // First boot, or one that lost power between writing the key and the certificate. A key on
     // its own is no use to anyone. A certificate that exists is left alone, even if it doesn't
     // work: it could be someone's real one, and regenerating would hide what's wrong with it.
-    if (!fs::exists(certPath)) {
-        if (fs::exists(keyPath)) {
+    std::error_code error;  // Not being able to check counts as not there, and creating it fails
+    if (!fs::exists(certPath, error)) {
+        if (fs::exists(keyPath, error)) {
             LOG_WARN("Found TLS key %s with no certificate, replacing it", keyPath.c_str());
         }
         LOG_INFO("Creating a self-signed TLS certificate at %s", certPath.c_str());
