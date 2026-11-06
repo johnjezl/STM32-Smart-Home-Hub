@@ -1171,10 +1171,8 @@ TEST_F(ZigbeeHandlerFlowTest, DeviceJoiningDuringACancelledWizardIsNotAdded) {
     handler->clearPendingDevice();
     fake.releaseDescriptors();
 
-    EXPECT_TRUE(eventually([&] {
-        return !handler->sendCommand(idOf(MULTI_ENDPOINT_LIGHT), "on", {{"on", true}});
-    }));
     std::this_thread::sleep_for(500ms);  // Long enough for pairing to have finished
+    EXPECT_FALSE(handler->sendCommand(idOf(MULTI_ENDPOINT_LIGHT), "on", {{"on", true}}));
     EXPECT_EQ(discoveredCount(), 0u);
     EXPECT_EQ(pendingCount(), 0u);
 }
@@ -1245,12 +1243,98 @@ TEST_F(ZigbeeHandlerFlowTest, RemovedDeviceThatWasDeclinedBeforeIsNewAgain) {
     ASSERT_TRUE(eventually([&] { return pendingCount() == 1; }));
     DevicePtr held = handler->getPendingDevice();
     handler->stopDiscovery();
-    handler->restoreDevice(*held);
-    handler->clearPendingDevice();
+    handler->clearPendingDevice();  // Declined
 
+    handler->restoreDevice(*held);  // Then added by hand, with the same address
     handler->forgetDevice(held->id());
 
     EXPECT_NE(pair(LIGHT), nullptr);
+}
+
+TEST_F(ZigbeeHandlerFlowTest, WizardStartedAgainHearsAboutTheDeviceItIsStillHolding) {
+    handler->startDiscovery();
+    fake.announceDevice(LIGHT);
+    ASSERT_TRUE(eventually([&] { return pendingCount() == 1; }));
+    handler->stopDiscovery();
+
+    handler->startDiscovery();
+    fake.announceDevice(LIGHT);
+
+    EXPECT_TRUE(eventually([&] { return pendingCount() == 2; }));
+}
+
+TEST_F(ZigbeeHandlerFlowTest, WizardCancelledDuringReportingSetupDoesNotHoldTheDevice) {
+    handler->startDiscovery();
+    std::atomic<bool> cancelled{false};
+    fake.setResponder(ZnpSubsystem::AF, cmd::af::DATA_REQUEST, [&](const ZnpFrame&) {
+        // Reporting setup is the last thing before the device would be held
+        if (!cancelled.exchange(true)) {
+            std::thread([this] { handler->stopDiscovery(); handler->clearPendingDevice(); }).detach();
+            std::this_thread::sleep_for(100ms);
+        }
+        return std::optional<std::vector<uint8_t>>(std::vector<uint8_t>{0});
+    });
+
+    fake.announceDevice(LIGHT);
+
+    ASSERT_TRUE(eventually([&] { return cancelled.load(); }));
+    std::this_thread::sleep_for(500ms);
+    EXPECT_EQ(handler->getPendingDevice(), nullptr);
+    EXPECT_EQ(discoveredCount(), 0u);
+    EXPECT_FALSE(handler->sendCommand(idOf(LIGHT), "on", {{"on", true}})) << "and it isn't left half added";
+}
+
+TEST_F(ZigbeeHandlerFlowTest, SecondDeviceFoundDeclinesTheOneItReplaces) {
+    handler->startDiscovery();
+    fake.announceDevice(LIGHT);
+    ASSERT_TRUE(eventually([&] { return pendingCount() == 1; }));
+    fake.announceDevice(PLUG);
+    ASSERT_TRUE(eventually([&] { return pendingCount() == 2; }));
+    handler->stopDiscovery();
+    handler->clearPendingDevice();
+
+    fake.announceDevice(LIGHT);
+
+    ASSERT_TRUE(fake.waitForSent(ZnpSubsystem::ZDO, cmd::zdo::ACTIVE_EP_REQ, 3));
+    std::this_thread::sleep_for(500ms);
+    EXPECT_EQ(discoveredCount(), 0u);
+}
+
+TEST_F(ZigbeeHandlerFlowTest, HeldDeviceThatLeftAndRejoinedIsStillHeld) {
+    handler->startDiscovery();
+    fake.announceDevice(LIGHT);
+    ASSERT_TRUE(eventually([&] { return pendingCount() == 1; }));
+    DevicePtr held = handler->getPendingDevice();
+    handler->stopDiscovery();
+
+    fake.deviceLeft(LIGHT);
+    FakeZigbeeDevice moved = LIGHT;
+    moved.nwkAddr = 0x4242;
+    fake.addDevice(moved);
+    fake.announceDevice(moved);
+
+    ASSERT_TRUE(eventually([&] { return held->getProperty("networkAddress") == 0x4242; }));
+    EXPECT_EQ(discoveredCount(), 0u);
+    EXPECT_EQ(handler->getPendingDevice(), held);
+}
+
+TEST_F(ZigbeeHandlerFlowTest, DeviceWhosePairingFailedInAWizardIsNotAddedLater) {
+    handlerConfig["pairingTimeoutMs"] = 100;
+    handler->shutdown();
+    handler = makeHandler(fake);
+    ASSERT_TRUE(handler->initialize());
+    watchForPairingErrors();
+    handler->startDiscovery();
+    const FakeZigbeeDevice late{0x8301, 0x00124B0000008301ULL, {{1, {zcl::cluster::ON_OFF}}}};
+    fake.announceDevice(late);  // Not on the fake's network yet, so it doesn't answer
+    ASSERT_TRUE(eventually([&] { return pairingFailed.load(); }));
+    handler->stopDiscovery();
+
+    fake.addDevice(late);
+    fake.announceDevice(late);
+
+    std::this_thread::sleep_for(500ms);
+    EXPECT_EQ(discoveredCount(), 0u);
 }
 
 TEST_F(ZigbeeHandlerFlowTest, UnknownDeviceGetsNoReporting) {

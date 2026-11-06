@@ -145,6 +145,8 @@ private:
     std::optional<uint64_t> deviceIdToIeee(const std::string& deviceId) const;
     std::optional<std::string> savedDeviceId(uint64_t ieeeAddr) const;
     static std::optional<uint64_t> parseIeeeAddress(std::string text);
+    void eraseMappingLocked(uint64_t ieeeAddr);  // Caller holds m_deviceMutex
+    void declineLocked(uint64_t ieeeAddr);       // Caller holds m_deviceMutex
     bool fetchDeviceDetails(uint64_t ieeeAddr);  // False if pairing shouldn't go on
     void enrollIasZone(uint16_t nwkAddr, uint8_t endpoint);
     void notifyZoneStatus(const std::string& deviceId, uint64_t ieeeAddr, uint16_t status);

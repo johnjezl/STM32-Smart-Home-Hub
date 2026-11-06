@@ -476,18 +476,28 @@ DevicePtr ZigbeeHandler::getPendingDevice() const {
     return m_pendingDevice;
 }
 
+void ZigbeeHandler::eraseMappingLocked(uint64_t ieeeAddr) {
+    auto it = m_ieeeToDeviceId.find(ieeeAddr);
+    if (it != m_ieeeToDeviceId.end()) {
+        m_deviceIdToIeee.erase(it->second);
+        m_ieeeToDeviceId.erase(it);
+    }
+    m_deviceEndpoints.erase(ieeeAddr);
+    m_zoneAlarms.erase(ieeeAddr);
+}
+
+void ZigbeeHandler::declineLocked(uint64_t ieeeAddr) {
+    if (m_savedDevices.count(ieeeAddr) == 0) {  // Otherwise it was added
+        m_declinedDevices.insert(ieeeAddr);
+        eraseMappingLocked(ieeeAddr);
+    }
+}
+
 void ZigbeeHandler::clearPendingDevice() {
     std::lock_guard<std::mutex> lock(m_deviceMutex);
     if (m_pendingDevice) {
-        // Unless it was added, the wizard was cancelled
-        auto it = m_deviceIdToIeee.find(m_pendingDevice->id());
-        if (it != m_deviceIdToIeee.end() && m_savedDevices.count(it->second) == 0) {
-            const uint64_t ieeeAddr = it->second;
-            m_declinedDevices.insert(ieeeAddr);
-            m_deviceIdToIeee.erase(it);
-            m_ieeeToDeviceId.erase(ieeeAddr);
-            m_deviceEndpoints.erase(ieeeAddr);
-            m_zoneAlarms.erase(ieeeAddr);
+        if (const auto ieeeAddr = parseIeeeAddress(m_pendingDevice->id())) {
+            declineLocked(*ieeeAddr);
         }
     }
     m_pendingDevice.reset();
@@ -595,12 +605,9 @@ void ZigbeeHandler::forgetDevice(const std::string& deviceId) {
         return;
     }
     const uint64_t ieeeAddr = it->second;
-    m_deviceIdToIeee.erase(it);
-    m_ieeeToDeviceId.erase(ieeeAddr);
-    m_deviceEndpoints.erase(ieeeAddr);
+    eraseMappingLocked(ieeeAddr);
     m_savedDevices.erase(ieeeAddr);
     m_declinedDevices.erase(ieeeAddr);
-    m_zoneAlarms.erase(ieeeAddr);
     m_addressChecks.erase(std::remove(m_addressChecks.begin(), m_addressChecks.end(), ieeeAddr),
                           m_addressChecks.end());
 }
@@ -844,6 +851,19 @@ uint64_t ZigbeeHandler::pairDevice(uint64_t ieeeAddr) {
 
 void ZigbeeHandler::reportPairingFailure(uint64_t ieeeAddr, const std::string& message) {
     LOG_ERROR("Pairing 0x%016" PRIX64 " failed: %s", ieeeAddr, message.c_str());
+
+    // The person adding it was told this failed, so it mustn't turn up later anyway
+    bool forWizard = false;
+    {
+        std::lock_guard<std::mutex> lock(m_pairingMutex);
+        auto task = m_pairingTasks.find(ieeeAddr);
+        forWizard = task != m_pairingTasks.end() && task->second.forWizard;
+    }
+    if (forWizard) {
+        std::lock_guard<std::mutex> lock(m_deviceMutex);
+        declineLocked(ieeeAddr);
+    }
+
     if (m_discovering && !savedDeviceId(ieeeAddr)) {  // Nobody is adding a device the hub has
         DeviceStateEvent errorEvent;
         errorEvent.deviceId = ieeeToDeviceId(ieeeAddr);
@@ -1031,19 +1051,22 @@ void ZigbeeHandler::finishPairing(uint64_t ieeeAddr) {
     {
         std::lock_guard<std::mutex> lock(m_deviceMutex);
 
-        // Announcing again while the wizard holds it. The wizard adds this one, so another
-        // device added here would make that fail.
-        auto mapped = m_ieeeToDeviceId.find(ieeeAddr);
-        if (m_pendingDevice && mapped != m_ieeeToDeviceId.end() && m_pendingDevice->id() == mapped->second) {
+        // Announcing again while a wizard that has stopped discovery holds it. The wizard adds this
+        // one, so another device added here would make that fail. A wizard started again, though,
+        // is waiting to hear about it, which carries on below.
+        if (!discovering && m_pendingDevice && m_pendingDevice->id() == ieeeToDeviceId(ieeeAddr)) {
             m_pendingDevice->setState("networkAddress", static_cast<int>(deviceInfo->networkAddress));
+            m_ieeeToDeviceId[ieeeAddr] = m_pendingDevice->id();  // It may have left in between
+            m_deviceIdToIeee[m_pendingDevice->id()] = ieeeAddr;
             return;
         }
 
         if (discovering) {
             m_declinedDevices.erase(ieeeAddr);  // Being offered again
         } else if (forWizard) {
-            LOG_INFO("Not adding 0x%016" PRIX64 ": the wizard it joined during has ended", ieeeAddr);
-            m_declinedDevices.insert(ieeeAddr);
+            LOG_WARN("Not adding 0x%016" PRIX64 ": the wizard it joined during has ended. "
+                     "It can be offered in the next one.", ieeeAddr);
+            declineLocked(ieeeAddr);
             return;
         } else if (m_declinedDevices.count(ieeeAddr) > 0) {
             LOG_INFO("Not adding 0x%016" PRIX64 ": it was declined in the wizard", ieeeAddr);
@@ -1105,6 +1128,18 @@ void ZigbeeHandler::finishPairing(uint64_t ieeeAddr) {
         LOG_INFO("Device discovered during pairing - storing as pending");
         {
             std::lock_guard<std::mutex> lock(m_deviceMutex);
+            // Asked again now, as setting up reporting takes time and the wizard may have been
+            // cancelled. Cancelling stops discovery before it clears, so this can't miss both.
+            if (!m_discovering) {
+                declineLocked(ieeeAddr);
+                return;
+            }
+            // The wizard takes one at a time. The one it was holding can be offered in the next.
+            if (m_pendingDevice && m_pendingDevice->id() != deviceId) {
+                if (const auto previous = parseIeeeAddress(m_pendingDevice->id())) {
+                    declineLocked(*previous);
+                }
+            }
             m_pendingDevice = device;
         }
         // Held during the call, so clearing the callback waits for it. Recursive, and a copy, in
@@ -1139,9 +1174,7 @@ void ZigbeeHandler::onDeviceLeft(uint64_t ieeeAddr) {
             // A device the hub keeps stays mapped, so it works as soon as it's back on the
             // network, even if it doesn't answer the pairing questions then
             if (m_savedDevices.count(ieeeAddr) == 0) {
-                m_deviceIdToIeee.erase(deviceId);
-                m_ieeeToDeviceId.erase(it);
-                m_deviceEndpoints.erase(ieeeAddr);
+                eraseMappingLocked(ieeeAddr);
             }
         }
     }
