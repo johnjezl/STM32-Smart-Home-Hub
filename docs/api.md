@@ -28,7 +28,7 @@ Authorization: Bearer <api-token>
 There's no endpoint for creating tokens yet ([#36](https://github.com/johnjezl/STM32-Smart-Home-Hub/issues/36)).
 
 ### Roles
-A `user` can read everything except pending Zigbee devices, and can control devices with `PUT /api/devices/{id}`. That route accepts only `on` (boolean) and the numbers `brightness`, `colorTemp` and `color_h`, `color_s`, `color_v`, `color_r`, `color_g`, `color_b`, for any role; anything else gets `400`. All other requests that change something, and the Zigbee pairing routes, need an `admin` and otherwise get `403`.
+A `user` can read everything except pending Zigbee devices, and can control devices with `PUT /api/devices/{id}`. All other requests that change something, and the Zigbee pairing routes, need an `admin` and otherwise get `403`.
 
 ### Public Routes
 The following routes are accessible without authentication:
@@ -391,9 +391,7 @@ Properties vary by device type:
 |------------|------------|
 | switch | on (boolean) |
 | dimmer | on (boolean), brightness (0-100) |
-| color_light | on, brightness, colorTemp (kelvin) |
-| thermostat | target_temp, mode (heat/cool/auto/off) |
-| lock | locked (boolean) |
+| color_light | on, brightness, colorTemp (1000-10000 kelvin), color_h (0-360), color_s and color_v (0-100), color_r, color_g and color_b (0-255) |
 
 **Response (200 OK):**
 ```json
@@ -402,7 +400,7 @@ Properties vary by device type:
 }
 ```
 
-**Errors:** `502` if a property couldn't be set, for example when the device's radio doesn't accept the command, the device's protocol isn't loaded, or the value has the wrong type. State is only updated for properties that were set. `400` if the body isn't a JSON object.
+**Errors:** `502` if a property couldn't be set, for example when the device's radio doesn't accept the command, the device's protocol isn't loaded, or the value has the wrong type. State is only updated for properties that were set. `400` if the body isn't a JSON object, or a property is one this device can't be told to change or its value is out of range. Nothing is set in that case. Sensors report their state and can't be written.
 
 ---
 

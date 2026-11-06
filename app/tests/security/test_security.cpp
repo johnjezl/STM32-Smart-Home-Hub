@@ -552,6 +552,17 @@ protected:
     std::unique_ptr<ApiTokenManager> tokenMgr;
 };
 
+TEST_F(ApiTokenManagerTest, LastUsedIsWrittenAtMostOnceAMinute) {
+    const std::string token = tokenMgr->createToken(1, "script");
+    tokenMgr->validateToken(token);  // First use is recorded
+    const uint64_t first = tokenMgr->validateToken(token)->lastUsed;
+    EXPECT_GT(first, 0u);
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(1100));
+    tokenMgr->validateToken(token);
+    EXPECT_EQ(tokenMgr->validateToken(token)->lastUsed, first);
+}
+
 TEST_F(ApiTokenManagerTest, CreateTokenReturnsValue) {
     std::string token = tokenMgr->createToken(1, "Test Token");
     EXPECT_FALSE(token.empty());

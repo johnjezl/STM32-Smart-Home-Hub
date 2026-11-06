@@ -283,13 +283,20 @@ class SmartHubApp {
             await this.stopZigbeePairing();
         }
 
+        // The cookie can't be cleared from here, so until the hub confirms, the
+        // session is still live and the next reload would bring it back.
         try {
-            await fetch('/api/auth/logout', {
+            const response = await fetch('/api/auth/logout', {
                 method: 'POST',
                 credentials: 'include'
             });
+            if (!response.ok && response.status !== 401) {
+                this.showToast('Could not log out. Please try again.', 'error');
+                return;
+            }
         } catch (error) {
-            console.error('Logout error:', error);
+            this.showToast('Could not log out. Please try again.', 'error');
+            return;
         }
 
         this.endSession();

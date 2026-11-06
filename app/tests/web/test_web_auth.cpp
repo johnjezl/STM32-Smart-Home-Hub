@@ -673,7 +673,7 @@ TEST_F(WebAuthTest, OnlyControlPropertiesCanBeWritten) {
     for (const char* body :
          {R"({"temperature":-40})", R"({"motion":true})", R"({"value":"<img src=x onerror=alert(1)>"})",
           R"({"on":"yes"})", R"({"brightness":"<b>"})", R"({"color_h":"x"})",
-          R"({"on":true,"value":"x"})"}) {
+          R"({"on":true,"value":"x"})", R"({"on":true})", R"({"brightness":50})"}) {
         RequestOptions options = admin;
         options.body = body;
         EXPECT_EQ(request("PUT", sensor, options).status, 400) << body;
@@ -681,6 +681,59 @@ TEST_F(WebAuthTest, OnlyControlPropertiesCanBeWritten) {
 
     // A rejected property keeps the rest of its request from being applied too
     EXPECT_EQ(request("GET", sensor, admin).json()["state"].dump(), before);
+}
+
+TEST_F(WebAuthTest, ControlValuesMustBeInRangeAndSupported) {
+    startApp();
+    RequestOptions admin;
+    admin.cookie = setUpAdmin();
+    admin.body = R"({"type":"dimmer","name":"Lamp","protocol":"local"})";
+    const Response created = request("POST", "/api/devices", admin);
+    ASSERT_EQ(created.status, 201) << created.body;
+    const std::string lamp = "/api/devices/" + created.json()["id"].get<std::string>();
+
+    RequestOptions options = admin;
+    for (const char* body : {R"({"brightness":50})", R"({"brightness":0})", R"({"brightness":100})",
+                             R"({"on":true})"}) {
+        options.body = body;
+        EXPECT_EQ(request("PUT", lamp, options).status, 200) << body;
+    }
+    // Out of range, or a capability a dimmer doesn't have
+    for (const char* body : {R"({"brightness":101})", R"({"brightness":-5})",
+                             R"({"brightness":1e300})", R"({"colorTemp":2700})",
+                             R"({"color_r":10})"}) {
+        options.body = body;
+        EXPECT_EQ(request("PUT", lamp, options).status, 400) << body;
+    }
+}
+
+TEST_F(WebAuthTest, DevicesCanStillBeControlledAfterARestart) {
+    startApp();
+    RequestOptions admin;
+    admin.cookie = setUpAdmin();
+    admin.body = R"({"type":"dimmer","name":"Lamp","protocol":"local"})";
+    const Response created = request("POST", "/api/devices", admin);
+    ASSERT_EQ(created.status, 201) << created.body;
+    const std::string lamp = "/api/devices/" + created.json()["id"].get<std::string>();
+
+    stopApp();
+    s_port++;
+    startApp();
+
+    RequestOptions options;
+    options.cookie = loginCookie(kAdminName, kAdminPassword);
+    options.body = R"({"brightness":50})";
+    const Response response = request("PUT", lamp, options);
+    EXPECT_EQ(response.status, 200) << response.body;
+}
+
+TEST_F(WebAuthTest, AllowedHostsAcceptAScalarAndAreNormalized) {
+    startApp("security:\n  allowed_hosts: hub.fritz.box:8443\n"
+             "  rate_limit_per_minute: 77\n");
+
+    RequestOptions configured(credentials(kAdminName, kAdminPassword));
+    configured.host = "hub.fritz.box.:443";
+    EXPECT_EQ(request("POST", "/api/setup", configured).status, 201);
 }
 
 TEST_F(WebAuthTest, AdministratorCanConfigure) {

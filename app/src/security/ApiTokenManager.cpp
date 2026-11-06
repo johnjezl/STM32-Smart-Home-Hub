@@ -164,8 +164,13 @@ std::optional<ApiToken> ApiTokenManager::validateToken(const std::string& token)
         }
     }
 
-    // Update last used
-    updateLastUsed(apiToken.id);
+    // Update last used, at most once a minute: this runs on every request made
+    // with a token, and each write costs the web thread and the board's flash
+    const auto nowSeconds = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count());
+    if (nowSeconds - apiToken.lastUsed >= 60) {
+        updateLastUsed(apiToken.id);
+    }
 
     return apiToken;
 }

@@ -77,6 +77,17 @@ void makeRoomFor(const std::string& ip, std::unordered_map<std::string, RateLimi
     }
 }
 
+// Lower case, without a port or the trailing dot of a fully qualified name
+std::string normalizeHost(std::string host) {
+    host = host.substr(0, host.find(':'));
+    std::transform(host.begin(), host.end(), host.begin(),
+                   [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+    if (!host.empty() && host.back() == '.') {
+        host.pop_back();
+    }
+    return host;
+}
+
 // A page on another site can make its domain resolve to the hub (DNS
 // rebinding), and then counts as same-origin. Only names in public DNS can be
 // used for that, so the routes that create a session refuse them. Other routes
@@ -89,18 +100,13 @@ bool isAllowedHostHeader(struct mg_http_message* hm, const std::vector<std::stri
     if (!header) {
         return false;
     }
-    std::string host(header->buf, header->len);
-    if (!host.empty() && host.front() == '[') {
+    const std::string raw(header->buf, header->len);
+    if (!raw.empty() && raw.front() == '[') {
         return true;  // IPv6 literal
     }
-    host = host.substr(0, host.find(':'));
+    const std::string host = normalizeHost(raw);
     if (host.empty()) {
         return false;
-    }
-    std::transform(host.begin(), host.end(), host.begin(),
-                   [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
-    if (host.back() == '.') {
-        host.pop_back();  // Fully qualified form of the same name
     }
     if (std::find(allowedHosts.begin(), allowedHosts.end(), host) != allowedHosts.end()) {
         return true;
@@ -122,14 +128,39 @@ bool isAllowedHostHeader(struct mg_http_message* hm, const std::vector<std::stri
 // What the API can change on a device. Anything else on a device's state is
 // reported by the device: a client writing it could fake a sensor reading, set
 // off automations, or store a string the dashboard then has to display.
-bool isControllableProperty(const std::string& property, const nlohmann::json& value) {
-    static const std::vector<std::string> kNumeric = {"brightness", "colorTemp", "color_h", "color_s",
-                                                      "color_v", "color_r", "color_g", "color_b"};
+bool isControllableProperty(const IDevice& device, const std::string& property,
+                            const nlohmann::json& value) {
+    struct Control {
+        const char* property;
+        DeviceCapability capability;
+        double min;
+        double max;
+    };
+    static const Control kNumeric[] = {
+        {"brightness", DeviceCapability::Brightness, 0, 100},
+        {"colorTemp", DeviceCapability::ColorTemperature, 1000, 10000},  // kelvin
+        {"color_h", DeviceCapability::ColorHSV, 0, 360},
+        {"color_s", DeviceCapability::ColorHSV, 0, 100},
+        {"color_v", DeviceCapability::ColorHSV, 0, 100},
+        {"color_r", DeviceCapability::ColorRGB, 0, 255},
+        {"color_g", DeviceCapability::ColorRGB, 0, 255},
+        {"color_b", DeviceCapability::ColorRGB, 0, 255},
+    };
+
     if (property == "on") {
-        return value.is_boolean();
+        return value.is_boolean() && device.hasCapability(DeviceCapability::OnOff);
     }
-    return value.is_number() &&
-           std::find(kNumeric.begin(), kNumeric.end(), property) != kNumeric.end();
+    if (!value.is_number()) {
+        return false;
+    }
+    for (const Control& control : kNumeric) {
+        if (property == control.property) {
+            const double number = value.get<double>();
+            return number >= control.min && number <= control.max &&
+                   device.hasCapability(control.capability);
+        }
+    }
+    return false;
 }
 
 AuthInfo authInfoFor(const security::User& user, bool isApiToken) {
@@ -350,10 +381,8 @@ void WebServer::setLoginThrottle(int maxFailures, int windowSeconds) {
 
 void WebServer::setAllowedHosts(const std::vector<std::string>& hosts) {
     m_allowedHosts.clear();
-    for (std::string host : hosts) {
-        std::transform(host.begin(), host.end(), host.begin(),
-                       [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
-        m_allowedHosts.push_back(host);
+    for (const std::string& host : hosts) {
+        m_allowedHosts.push_back(normalizeHost(host));
     }
 }
 
@@ -805,8 +834,8 @@ void WebServer::apiSetDeviceState(struct mg_connection* c, const std::string& id
         }
 
         for (auto& [key, value] : stateJson.items()) {
-            if (!isControllableProperty(key, value)) {
-                sendError(c, 400, "Can't set this property");
+            if (!isControllableProperty(*device, key, value)) {
+                sendError(c, 400, "This device can't be set to that");
                 return;
             }
         }

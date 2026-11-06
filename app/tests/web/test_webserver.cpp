@@ -9,6 +9,7 @@
 #include <smarthub/core/EventBus.hpp>
 #include <smarthub/devices/DeviceManager.hpp>
 #include <smarthub/devices/Device.hpp>
+#include <smarthub/devices/types/DimmerDevice.hpp>
 #include <smarthub/database/Database.hpp>
 #include <smarthub/automation/AutomationManager.hpp>
 #include <thread>
@@ -207,9 +208,7 @@ TEST_F(WebServerTest, ApiGetDeviceFound) {
 }
 
 TEST_F(WebServerTest, ApiSetDeviceState) {
-    auto light = std::make_shared<smarthub::Device>(
-        "light1", "Test Light", smarthub::DeviceType::Light
-    );
+    auto light = std::make_shared<smarthub::DimmerDevice>("light1", "Test Light");
     deviceManager->addDevice(light);
 
     startServer();
@@ -222,9 +221,7 @@ TEST_F(WebServerTest, ApiSetDeviceState) {
 }
 
 TEST_F(WebServerTest, ApiSetDeviceStateUpdatesTheDevice) {
-    auto light = std::make_shared<smarthub::Device>(
-        "light1", "Test Light", smarthub::DeviceType::Light
-    );
+    auto light = std::make_shared<smarthub::DimmerDevice>("light1", "Test Light");
     deviceManager->addDevice(light);
 
     startServer();

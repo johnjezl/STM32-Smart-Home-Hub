@@ -196,7 +196,12 @@ bool Config::load(const std::string& path) {
                 m_loginFailureWindowSeconds = security["login_failure_window_seconds"].as<int>();
             }
             if (security["allowed_hosts"]) {
-                m_allowedHosts = security["allowed_hosts"].as<std::vector<std::string>>();
+                const auto hosts = security["allowed_hosts"];
+                if (hosts.IsScalar()) {
+                    m_allowedHosts = {hosts.as<std::string>()};
+                } else if (hosts.IsSequence()) {
+                    m_allowedHosts = hosts.as<std::vector<std::string>>();
+                }
             }
         }
 
