@@ -693,6 +693,7 @@ TEST_F(DeviceManagerTest, UnrecognizedTypeAndConfigSurviveASave) {
 TEST_F(DeviceManagerTest, OlderRowsGetTheirSensorOptionsFromSavedState) {
     addRow(*database, "old_climate", "multi_sensor", "{}", {"temperature", "humidity", "battery"});
     addRow(*database, "old_temp", "temperature_sensor", "{}", {"temperature"});
+    addRow(*database, "old_quiet", "multi_sensor", "{}", {});
     addRow(*database, "old_motion", "multi_sensor", "{}", {"motion", "illuminance"});
 
     DeviceManager manager(eventBus, *database);
@@ -701,6 +702,7 @@ TEST_F(DeviceManagerTest, OlderRowsGetTheirSensorOptionsFromSavedState) {
     EXPECT_EQ(manager.getDevice("old_climate")->type(), DeviceType::MultiSensor);
     EXPECT_TRUE(manager.getDevice("old_climate")->hasCapability(DeviceCapability::Battery));
     EXPECT_FALSE(manager.getDevice("old_temp")->hasCapability(DeviceCapability::Humidity));
+    EXPECT_EQ(manager.getDevice("old_quiet")->type(), DeviceType::MultiSensor);
     EXPECT_EQ(manager.getDevice("old_motion")->type(), DeviceType::MotionSensor);
     EXPECT_TRUE(manager.getDevice("old_motion")->hasCapability(DeviceCapability::Illuminance));
     manager.shutdown();
