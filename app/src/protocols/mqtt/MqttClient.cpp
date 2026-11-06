@@ -6,6 +6,8 @@
 #include <smarthub/core/EventBus.hpp>
 #include <smarthub/core/Logger.hpp>
 
+#include <algorithm>
+
 #if __has_include(<mosquitto.h>)
 #include <mosquitto.h>
 #define HAVE_MOSQUITTO 1
