@@ -1372,6 +1372,9 @@ void WebServer::apiCreateAutomation(struct mg_connection* c, struct mg_http_mess
         // Generate ID if not provided
         if (automation.id.empty()) {
             automation.id = m_automationMgr->generateId();
+        } else if (m_automationMgr->getAutomation(automation.id)) {
+            sendError(c, 409, "An automation with that id already exists");
+            return;
         }
 
         if (m_automationMgr->addAutomation(automation)) {

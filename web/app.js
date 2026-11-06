@@ -1340,12 +1340,14 @@ class SmartHubApp {
         actionEl.className = 'action-item';
         actionEl.innerHTML = `
             <span class="action-item-text">Set ${deviceName} ${property} to ${value ? 'On' : 'Off'}</span>
-            <button class="action-remove-btn" data-index="${this.automationWizard.actions.length - 1}">×</button>
+            <button class="action-remove-btn">×</button>
         `;
 
-        actionEl.querySelector('.action-remove-btn').addEventListener('click', (e) => {
-            const index = parseInt(e.target.dataset.index);
-            this.automationWizard.actions.splice(index, 1);
+        actionEl.querySelector('.action-remove-btn').addEventListener('click', () => {
+            const index = this.automationWizard.actions.indexOf(action);
+            if (index >= 0) {
+                this.automationWizard.actions.splice(index, 1);
+            }
             actionEl.remove();
         });
 

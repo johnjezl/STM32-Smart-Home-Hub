@@ -422,6 +422,9 @@ std::string validateFields(const nlohmann::json& j) {
         return "id can only use letters, digits, _ and -, up to 64 characters";
     }
 
+    // Previous responses used this name, and quietly dropping a condition is dangerous
+    if (j.contains("conditions")) return "use condition rather than conditions";
+
     if (j.contains("trigger") && j.contains("triggers")) {
         return "send either trigger or triggers, not both";
     }

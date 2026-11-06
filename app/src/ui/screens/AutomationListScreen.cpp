@@ -338,11 +338,21 @@ std::string AutomationListScreen::getTriggerSummary(const std::string& automatio
         case TriggerType::Time: {
             std::stringstream ss;
             ss << "At ";
-            if (trigger.hour >= 0) {
+            if (trigger.hour >= 0 && trigger.minute >= 0) {
                 ss << std::setfill('0') << std::setw(2) << trigger.hour << ":";
-                ss << std::setfill('0') << std::setw(2) << (trigger.minute >= 0 ? trigger.minute : 0);
+                ss << std::setfill('0') << std::setw(2) << trigger.minute;
             } else {
-                ss << "every hour";
+                if (trigger.hour >= 0) {
+                    ss << "hour " << trigger.hour;
+                } else {
+                    ss << "every hour";
+                }
+                ss << ", ";
+                if (trigger.minute >= 0) {
+                    ss << "minute " << trigger.minute;
+                } else {
+                    ss << "every minute";
+                }
             }
             return ss.str();
         }

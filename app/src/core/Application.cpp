@@ -154,6 +154,7 @@ void Application::mainLoop() {
     using namespace std::chrono;
 
     const auto targetFrameTime = milliseconds(5); // ~200 Hz for LVGL
+    auto lastAutomationPoll = steady_clock::now();
 
     while (m_running) {
         auto frameStart = steady_clock::now();
@@ -178,8 +179,9 @@ void Application::mainLoop() {
             m_rpmsgClient->poll();
         }
 
-        // Run time-based automations
-        if (m_automationManager) {
+        // Run time-based automations. They work in minutes, so once a second is plenty.
+        if (m_automationManager && frameStart - lastAutomationPoll >= seconds(1)) {
+            lastAutomationPoll = frameStart;
             m_automationManager->poll(static_cast<uint64_t>(
                 duration_cast<milliseconds>(frameStart.time_since_epoch()).count()));
         }
