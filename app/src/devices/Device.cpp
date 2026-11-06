@@ -33,7 +33,13 @@ void Device::setName(const std::string& name) {
 }
 
 std::string Device::typeString() const {
-    return deviceTypeToString(m_type);
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_unrecognizedType.empty() ? deviceTypeToString(m_type) : m_unrecognizedType;
+}
+
+void Device::setUnrecognizedType(const std::string& typeName) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_unrecognizedType = typeName;
 }
 
 std::string Device::room() const {
@@ -117,7 +123,7 @@ nlohmann::json Device::toJson() const {
     nlohmann::json j;
     j["id"] = m_id;
     j["name"] = m_name;
-    j["type"] = deviceTypeToString(m_type);
+    j["type"] = m_unrecognizedType.empty() ? deviceTypeToString(m_type) : m_unrecognizedType;
     j["protocol"] = m_protocol;
     j["protocol_address"] = m_protocolAddress;
     j["room"] = m_room;

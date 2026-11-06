@@ -950,6 +950,14 @@ TEST_F(WebAuthTest, UpdatingAnAutomationKeepsWhatTheRequestLeavesOut) {
     EXPECT_EQ(request("GET", path, admin).json()["enabled"], false);
 }
 
+TEST_F(WebAuthTest, UnknownDeviceTypesAreRejected) {
+    startApp();
+    RequestOptions admin;
+    admin.cookie = setUpAdmin();
+    admin.body = R"({"type":"not_a_type","name":"Typo","protocol":"local"})";
+    EXPECT_EQ(request("POST", "/api/devices", admin).status, 400);
+}
+
 TEST_F(WebAuthTest, OnlyControlPropertiesCanBeWritten) {
     startApp();
     RequestOptions admin;

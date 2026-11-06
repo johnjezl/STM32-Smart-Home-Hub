@@ -1144,6 +1144,10 @@ void WebServer::apiCreateDevice(struct mg_connection* c, struct mg_http_message*
 
         // Create device using registry
         auto& registry = DeviceTypeRegistry::instance();
+        if (!registry.hasType(type)) {
+            sendError(c, 400, "Invalid device type: " + type);
+            return;
+        }
         auto device = registry.createFromTypeName(type, id, name, protocol, protocolAddress, config);
 
         if (!device) {

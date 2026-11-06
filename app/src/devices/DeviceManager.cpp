@@ -3,6 +3,7 @@
  */
 
 #include <optional>
+#include <set>
 #include <smarthub/devices/DeviceManager.hpp>
 #include <smarthub/devices/Device.hpp>
 #include <smarthub/devices/DeviceTypeRegistry.hpp>
@@ -672,6 +673,37 @@ bool DeviceManager::deleteDeviceFromDatabase(const std::string& id) {
     }
 }
 
+void DeviceManager::restoreSensorOptions(const std::string& id, std::string& typeName,
+                                         nlohmann::json& config) {
+    const bool sensor = typeName == "temperature_sensor" || typeName == "multi_sensor" ||
+                        typeName == "motion_sensor";
+    if (!sensor || config.contains("has_battery")) {
+        return;
+    }
+
+    // Saved before sensors recorded their options, but what they've reported shows which they have
+    std::set<std::string> properties;
+    auto stmt = m_database.prepare("SELECT property FROM device_state WHERE device_id = ?");
+    if (stmt && stmt->isValid()) {
+        stmt->bind(1, id);
+        while (stmt->step()) {
+            properties.insert(stmt->getString(0));
+        }
+    }
+
+    // A motion sensor with illuminance used to be saved as a multi sensor
+    if (typeName == "multi_sensor" && properties.count("motion") > 0) {
+        typeName = "motion_sensor";
+    }
+
+    config["has_battery"] = properties.count("battery") > 0;
+    if (typeName == "motion_sensor") {
+        config["has_illuminance"] = properties.count("illuminance") > 0;
+    } else {
+        config["has_humidity"] = properties.count("humidity") > 0;
+    }
+}
+
 void DeviceManager::loadDevicesFromDatabase() {
     LOG_INFO("Loading devices from database");
 
@@ -704,15 +736,22 @@ void DeviceManager::loadDevicesFromDatabase() {
                 config = nlohmann::json::object();
             }
 
-            // Create device using registry
-            auto device = DeviceTypeRegistry::instance().createFromTypeName(
-                typeName, id, name, protocol, address, config);
+            // One bad row shouldn't lose the others
+            try {
+                restoreSensorOptions(id, typeName, config);
 
-            if (device) {
-                device->setRoom(room);
-                m_devices[id] = device;
+                // Create device using registry
+                auto device = DeviceTypeRegistry::instance().createFromTypeName(
+                    typeName, id, name, protocol, address, config);
 
-                LOG_DEBUG("Loaded device: %s (%s)", name.c_str(), id.c_str());
+                if (device) {
+                    device->setRoom(room);
+                    m_devices[id] = device;
+
+                    LOG_DEBUG("Loaded device: %s (%s)", name.c_str(), id.c_str());
+                }
+            } catch (const std::exception& e) {
+                LOG_ERROR("Failed to load device %s: %s", id.c_str(), e.what());
             }
         }
 

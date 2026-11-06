@@ -46,6 +46,11 @@ public:
     DeviceType type() const override { return m_type; }
     std::string typeString() const override;
 
+    /**
+     * Keep a saved type name this build doesn't recognize, so saving doesn't replace it
+     */
+    void setUnrecognizedType(const std::string& typeName);
+
     // IDevice - Protocol
     std::string protocol() const override { return m_protocol; }
     std::string protocolAddress() const override { return m_protocolAddress; }
@@ -116,7 +121,8 @@ protected:
 
     std::vector<DeviceCapability> m_capabilities;
     std::map<std::string, nlohmann::json> m_state;
-    nlohmann::json m_config;
+    nlohmann::json m_config = nlohmann::json::object();
+    std::string m_unrecognizedType;
 
     DeviceAvailability m_availability = DeviceAvailability::Unknown;
     uint64_t m_lastSeen = 0;

@@ -177,19 +177,7 @@ void RoomDetailScreen::refreshDeviceList() {
     for (const auto& device : devices) {
         if (!device) continue;
 
-        std::string typeStr;
-        switch (device->type()) {
-            case DeviceType::Switch: typeStr = "Switch"; break;
-            case DeviceType::Light: typeStr = "Light"; break;
-            case DeviceType::Outlet: typeStr = "Outlet"; break;
-            case DeviceType::Dimmer: typeStr = "Dimmer"; break;
-            case DeviceType::ColorLight: typeStr = "Color Light"; break;
-            case DeviceType::TemperatureSensor: typeStr = "Temperature"; break;
-            case DeviceType::HumiditySensor: typeStr = "Humidity"; break;
-            case DeviceType::MotionSensor: typeStr = "Motion"; break;
-            case DeviceType::ContactSensor: typeStr = "Contact"; break;
-            default: typeStr = "Device"; break;
-        }
+        const std::string typeStr = deviceTypeLabel(device->type());
 
         bool isOn = false;
         auto state = device->getState();
