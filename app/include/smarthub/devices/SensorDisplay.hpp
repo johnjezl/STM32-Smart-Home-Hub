@@ -46,6 +46,9 @@ std::string roomMotionText(const RoomSensors& sensors);
 /** One device's current value, such as "72.5°F / 45%", "Motion" or "Closed". "--" with no reading. */
 std::string sensorValueText(DeviceType type, const nlohmann::json& state);
 
+/** The property a device's history charts. Empty if it has none, like a motion sensor. */
+std::string historyProperty(DeviceType type);
+
 RoomSensors summarizeRoomSensors(const std::vector<DevicePtr>& devices);
 
 /** A room's climate for a card, such as "72°F / 45%". Empty if the room has no such sensors. */

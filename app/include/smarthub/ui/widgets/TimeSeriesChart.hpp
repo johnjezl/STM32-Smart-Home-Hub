@@ -169,6 +169,16 @@ inline const char* timeRangeLabel(TimeRange range) {
 /**
  * Helper to get time range in seconds
  */
+/**
+ * Which of the chart's points a reading belongs to, so that points sit where their time is, and
+ * gaps in the data show as gaps. -1 if it's outside the range.
+ */
+inline int chartSlot(uint64_t timestamp, uint64_t now, uint64_t rangeSeconds, int points) {
+    if (timestamp > now || now - timestamp > rangeSeconds || rangeSeconds == 0) return -1;
+    const uint64_t fromStart = rangeSeconds - (now - timestamp);
+    return static_cast<int>(fromStart * static_cast<uint64_t>(points - 1) / rangeSeconds);
+}
+
 inline uint64_t timeRangeSeconds(TimeRange range) {
     switch (range) {
         case TimeRange::Hour1:   return 3600;

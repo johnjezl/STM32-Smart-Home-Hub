@@ -278,6 +278,39 @@ TEST_F(ScreenRenderTest, SensorListIncludesSensorsWithHumidity) {
     EXPECT_GE(test::countText(root, "Climate Sensor"), 1);
 }
 
+TEST_F(ScreenRenderTest, SensorHistoryWithNothingRecordedSaysSoInsteadOfMakingItUp) {
+    auto* root = showAndRender("sensor_history", std::make_unique<SensorHistoryScreen>(
+        *screenManager, *themeManager, *deviceManager),
+        [](Screen& screen) { static_cast<SensorHistoryScreen&>(screen).setSensorId("thermo"); });
+    EXPECT_EQ(test::countText(root, "No history yet", true), 1);
+}
+
+TEST_F(ScreenRenderTest, SensorHistoryOfAMotionSensorSaysThereIsNone) {
+    auto* root = showAndRender("sensor_history", std::make_unique<SensorHistoryScreen>(
+        *screenManager, *themeManager, *deviceManager),
+        [](Screen& screen) { static_cast<SensorHistoryScreen&>(screen).setSensorId("motion"); });
+    EXPECT_EQ(test::countText(root, "No history for this sensor", true), 1);
+}
+
+TEST_F(ScreenRenderTest, SensorHistoryShowsWhatWasRecorded) {
+    const int64_t now = static_cast<int64_t>(time(nullptr));
+    for (int i = 0; i < 40; i++) {
+        auto stmt = database->prepare(
+            "INSERT INTO sensor_history (device_id, property, value, timestamp) "
+            "VALUES ('thermo', 'temperature', ?, ?)");
+        stmt->bind(1, 20.0 + (i % 10) * 0.2);
+        stmt->bind(2, now - 86000 + i * 2000);
+        ASSERT_TRUE(stmt->execute());
+    }
+
+    auto* root = showAndRender("sensor_history", std::make_unique<SensorHistoryScreen>(
+        *screenManager, *themeManager, *deviceManager),
+        [](Screen& screen) { static_cast<SensorHistoryScreen&>(screen).setSensorId("thermo"); });
+
+    EXPECT_EQ(test::countText(root, "No history yet", true), 0);
+    EXPECT_GE(test::countText(root, "Hall Sensor"), 1);
+}
+
 TEST_F(ScreenRenderTest, SensorHistory) {
     auto* root = showAndRender("sensor_history", std::make_unique<SensorHistoryScreen>(
         *screenManager, *themeManager, *deviceManager),

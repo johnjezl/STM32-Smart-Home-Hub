@@ -143,6 +143,15 @@ TEST_F(RoomCardTest, Constants) {
     EXPECT_EQ(RoomCard::HEIGHT, 100);
 }
 
+TEST(ChartSlot, PlacesPointsByTime) {
+    const uint64_t now = 1000000;
+    EXPECT_EQ(chartSlot(now, now, 3600, 60), 59);
+    EXPECT_EQ(chartSlot(now - 3600, now, 3600, 60), 0);
+    EXPECT_EQ(chartSlot(now - 1800, now, 3600, 60), 29);
+    EXPECT_EQ(chartSlot(now - 3601, now, 3600, 60), -1) << "too old";
+    EXPECT_EQ(chartSlot(now + 1, now, 3600, 60), -1) << "the clock moved";
+}
+
 TEST(RoomDataTest, DefaultValues) {
     // Test RoomData default construction
     RoomData data;

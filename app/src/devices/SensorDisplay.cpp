@@ -95,6 +95,12 @@ std::string sensorValueText(DeviceType type, const nlohmann::json& state) {
     }
 }
 
+std::string historyProperty(DeviceType type) {
+    if (reportsTemperature(type)) return "temperature";
+    if (type == DeviceType::HumiditySensor) return "humidity";
+    return "";
+}
+
 RoomSensors summarizeRoomSensors(const std::vector<DevicePtr>& devices) {
     RoomSensors room;
     for (const auto& device : devices) {

@@ -13,6 +13,8 @@
 #include <smarthub/database/Database.hpp>
 #include <smarthub/devices/Device.hpp>
 #include <smarthub/devices/DeviceManager.hpp>
+#include <smarthub/devices/types/MotionSensor.hpp>
+#include <smarthub/devices/types/TemperatureSensor.hpp>
 #include <smarthub/security/ApiTokenManager.hpp>
 #include <smarthub/security/CertManager.hpp>
 #include <smarthub/security/SessionManager.hpp>
@@ -1506,4 +1508,39 @@ TEST(WebAuthSessions, ActivityExtendsTheSession) {
         EXPECT_GT(sessions.validateSession(token)->expiresAt, expiry);
     }
     fs::remove_all(dir);
+}
+
+TEST_F(WebAuthTest, SensorHistoryApiReturnsRecordedReadings) {
+    startApp();
+    RequestOptions options;
+    options.cookie = setUpAdmin();
+    ASSERT_TRUE(m_app->deviceManager().addDevice(std::make_shared<TemperatureSensor>("hist", "Hist")));
+    ASSERT_TRUE(m_app->deviceManager().addDevice(std::make_shared<MotionSensor>("still", "Still")));
+    {
+        auto stmt = m_app->database().prepare(
+            "INSERT INTO sensor_history (device_id, property, value, timestamp) "
+            "VALUES ('hist', 'temperature', 21.5, strftime('%s', 'now') - 100)");
+        ASSERT_TRUE(stmt->execute());
+    }
+
+    Response response = request("GET", "/api/devices/hist/history", options);
+    ASSERT_EQ(response.status, 200) << response.body;
+    auto body = nlohmann::json::parse(response.body);
+    EXPECT_EQ(body["property"], "temperature");
+    ASSERT_EQ(body["data"].size(), 1u);
+    EXPECT_DOUBLE_EQ(body["data"][0]["value"].get<double>(), 21.5);
+
+    EXPECT_EQ(request("GET", "/api/devices/hist/history?hours=168", options).status, 200);
+    for (const char* bad : {"0", "169", "-1", "soon", "1x"}) {
+        EXPECT_EQ(request("GET", std::string("/api/devices/hist/history?hours=") + bad,
+                          options).status, 400) << bad;
+    }
+
+    EXPECT_EQ(request("GET", "/api/devices/nobody/history", options).status, 404);
+    auto none = nlohmann::json::parse(
+        request("GET", "/api/devices/still/history", options).body);
+    EXPECT_EQ(none["property"], "");
+    EXPECT_TRUE(none["data"].empty());
+
+    EXPECT_EQ(request("GET", "/api/devices/hist/history").status, 401) << "not without logging in";
 }

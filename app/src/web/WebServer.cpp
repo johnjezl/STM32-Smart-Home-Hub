@@ -8,6 +8,9 @@
 #include <smarthub/web/WebServer.hpp>
 #include <smarthub/core/EventBus.hpp>
 #include <smarthub/devices/DeviceManager.hpp>
+#include <smarthub/devices/SensorDisplay.hpp>
+#include <ctime>
+#include <cstdlib>
 #include <smarthub/devices/Device.hpp>
 #include <smarthub/devices/DeviceTypeRegistry.hpp>
 #include <smarthub/automation/AutomationManager.hpp>
@@ -709,11 +712,13 @@ void WebServer::handleHttpRequest(struct mg_connection* c, struct mg_http_messag
                     sendError(c, 405, "Method not allowed");
                 }
             } else {
-                // /api/devices/{id}/settings
+                // /api/devices/{id}/settings, /api/devices/{id}/history
                 std::string id = remainder.substr(0, slashPos);
                 std::string action = remainder.substr(slashPos + 1);
                 if (action == "settings" && mg_strcmp(hm->method, mg_str("PUT")) == 0) {
                     apiUpdateDeviceSettings(c, id, hm);
+                } else if (action == "history" && mg_strcmp(hm->method, mg_str("GET")) == 0) {
+                    apiGetSensorHistory(c, id, hm);
                 } else {
                     sendError(c, 404, "Not found");
                 }
@@ -861,10 +866,37 @@ void WebServer::apiSetDeviceState(struct mg_connection* c, const std::string& id
     }
 }
 
-void WebServer::apiGetSensorHistory(struct mg_connection* c, const std::string& /*id*/,
-                                     struct mg_http_message* /*hm*/) {
-    // TODO: Query database for sensor history
-    sendJson(c, 200, "[]");
+void WebServer::apiGetSensorHistory(struct mg_connection* c, const std::string& id,
+                                     struct mg_http_message* hm) {
+    auto device = m_deviceManager.getDevice(id);
+    if (!device) {
+        sendError(c, 404, "Device not found");
+        return;
+    }
+
+    constexpr int kMaxHours = DeviceManager::kHistoryRetentionSeconds / 3600;
+    constexpr int kMaxPoints = 240;
+    int hours = 24;
+    char text[16] = {0};
+    if (mg_http_get_var(&hm->query, "hours", text, sizeof(text)) > 0) {
+        char* end = nullptr;
+        const long parsed = std::strtol(text, &end, 10);
+        if (*end != '\0' || parsed < 1 || parsed > kMaxHours) {
+            sendError(c, 400, "hours must be from 1 to " + std::to_string(kMaxHours));
+            return;
+        }
+        hours = static_cast<int>(parsed);
+    }
+
+    const std::string property = historyProperty(device->type());
+    nlohmann::json data = nlohmann::json::array();
+    if (!property.empty()) {
+        const int64_t from = static_cast<int64_t>(std::time(nullptr)) - static_cast<int64_t>(hours) * 3600;
+        for (const SensorSample& sample : m_deviceManager.sensorHistory(id, property, from, kMaxPoints)) {
+            data.push_back({{"timestamp", sample.timestamp}, {"value", sample.value}});
+        }
+    }
+    sendJson(c, 200, toResponse({{"deviceId", id}, {"property", property}, {"data", data}}));
 }
 
 void WebServer::apiGetSystemStatus(struct mg_connection* c) {

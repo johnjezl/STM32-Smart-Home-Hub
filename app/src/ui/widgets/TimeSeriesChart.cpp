@@ -3,6 +3,7 @@
  */
 
 #include "smarthub/ui/widgets/TimeSeriesChart.hpp"
+#include <cmath>
 #include "smarthub/ui/ThemeManager.hpp"
 #include "smarthub/core/Logger.hpp"
 
@@ -36,11 +37,12 @@ void TimeSeriesChart::createLayout() {
     // Time range dropdown
     createTimeRangeDropdown();
 
-    // Y-axis label (rotated)
+    // Y-axis label, under the title: the space beside the chart has the scale
     m_yAxisLabel = lv_label_create(m_container);
     lv_label_set_text(m_yAxisLabel, "Value");
     lv_obj_set_style_text_color(m_yAxisLabel, m_theme.textSecondary(), 0);
-    lv_obj_align(m_yAxisLabel, LV_ALIGN_LEFT_MID, 5, 0);
+    lv_obj_set_style_text_font(m_yAxisLabel, &lv_font_montserrat_12, 0);
+    lv_obj_align(m_yAxisLabel, LV_ALIGN_TOP_LEFT, 0, 24);
 
     // Chart
     m_chart = lv_chart_create(m_container);
@@ -196,24 +198,15 @@ void TimeSeriesChart::updateChartData() {
         return;
     }
 
-    // Resample data to fit MAX_POINTS
-    size_t dataSize = m_data.size();
-    if (dataSize <= MAX_POINTS) {
-        // Use data directly
-        for (size_t i = 0; i < MAX_POINTS; i++) {
-            if (i < dataSize) {
-                int value = static_cast<int>(m_data[i].value);
-                lv_chart_set_value_by_id(m_chart, m_series, i, value);
-            } else {
-                lv_chart_set_value_by_id(m_chart, m_series, i, LV_CHART_POINT_NONE);
-            }
-        }
-    } else {
-        // Resample: take evenly spaced samples
-        for (int i = 0; i < MAX_POINTS; i++) {
-            size_t idx = (i * (dataSize - 1)) / (MAX_POINTS - 1);
-            int value = static_cast<int>(m_data[idx].value);
-            lv_chart_set_value_by_id(m_chart, m_series, i, value);
+    for (int i = 0; i < MAX_POINTS; i++) {
+        lv_chart_set_value_by_id(m_chart, m_series, i, LV_CHART_POINT_NONE);
+    }
+    const uint64_t now = static_cast<uint64_t>(time(nullptr));
+    const uint64_t range = timeRangeSeconds(m_timeRange);
+    for (const DataPoint& point : m_data) {
+        const int slot = chartSlot(point.timestamp, now, range, MAX_POINTS);
+        if (slot >= 0) {
+            lv_chart_set_value_by_id(m_chart, m_series, slot, static_cast<lv_coord_t>(std::lround(point.value)));
         }
     }
 
