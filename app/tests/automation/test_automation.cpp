@@ -380,7 +380,10 @@ TEST(AutomationTest, JsonRoundTripKeepsEveryPart) {
     delay.delayMs = 250;
     automation.actions.push_back(delay);
 
-    const Automation copy = Automation::fromJson(automation.toJson());
+    const nlohmann::json json = automation.toJson();
+    EXPECT_EQ(json["trigger"]["device_id"], "a");  // Clients read the first from here
+
+    const Automation copy = Automation::fromJson(json);
     ASSERT_EQ(copy.triggers.size(), 2u);
     EXPECT_EQ(copy.triggers[1].intervalMinutes, 5);
     ASSERT_TRUE(copy.condition.has_value());

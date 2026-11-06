@@ -735,7 +735,22 @@ TEST_F(WebAuthTest, AutomationsThatCouldNeverRunAreRejected) {
          {"trigger", {{"type", "sensor_threshold"}, {"device_id", "s"}, {"property", "t"},
                       {"compare_op", ">"}, {"threshold", 5}}},
          {"actions", {action}}},
-        {{"name", "No action"}, {"trigger", {{"type", "time"}}}, {"actions", nlohmann::json::array()}},
+        {{"name", "No time"}, {"trigger", {{"type", "time"}}}, {"actions", {action}}},
+        {{"name", "Bad hour"},
+         {"trigger", {{"type", "time"}, {"hour", 24}, {"minute", 0}}},
+         {"actions", {action}}},
+        {{"name", "No action"},
+         {"trigger", {{"type", "time"}, {"hour", 8}, {"minute", 0}}},
+         {"actions", nlohmann::json::array()}},
+        {{"name", "Empty action"},
+         {"trigger", {{"type", "time"}, {"hour", 8}, {"minute", 0}}},
+         {"actions", {nlohmann::json::object()}}},
+        {{"name", "Bad action type"},
+         {"trigger", {{"type", "time"}, {"hour", 8}, {"minute", 0}}},
+         {"actions", {{{"type", "bogus"}, {"deviceId", "x"}}}}},
+        {{"name", "Long delay"},
+         {"trigger", {{"type", "time"}, {"hour", 8}, {"minute", 0}}},
+         {"actions", {{{"type", "delay"}, {"delayMs", 60001}}}}},
     };
     for (const auto& body : rejected) {
         RequestOptions options = admin;
@@ -743,6 +758,39 @@ TEST_F(WebAuthTest, AutomationsThatCouldNeverRunAreRejected) {
         EXPECT_EQ(request("POST", "/api/automations", options).status, 400) << body.dump();
     }
     EXPECT_EQ(request("GET", "/api/automations", admin).json().size(), 0u);
+}
+
+TEST_F(WebAuthTest, UpdatingAnAutomationKeepsWhatTheRequestLeavesOut) {
+    startApp();
+    RequestOptions admin;
+    admin.cookie = setUpAdmin();
+
+    const nlohmann::json body = {
+        {"name", "Morning"},
+        {"enabled", false},
+        {"trigger", {{"type", "time"}, {"hour", 8}, {"minute", 0}}},
+        {"actions", {{{"deviceId", "light"}, {"property", "on"}, {"value", true}}}},
+    };
+    RequestOptions create = admin;
+    create.body = body.dump();
+    const Response created = request("POST", "/api/automations", create);
+    ASSERT_EQ(created.status, 201) << created.body;
+    const std::string path = "/api/automations/" + created.json()["id"].get<std::string>();
+
+    nlohmann::json update = body;
+    update.erase("enabled");
+    update["trigger"]["hour"] = 9;
+    RequestOptions put = admin;
+    put.body = update.dump();
+    ASSERT_EQ(request("PUT", path, put).status, 200);
+
+    const nlohmann::json updated = request("GET", path, admin).json();
+    EXPECT_EQ(updated["enabled"], false);
+    EXPECT_EQ(updated["trigger"]["hour"], 9);
+
+    update.erase("name");
+    put.body = update.dump();
+    EXPECT_EQ(request("PUT", path, put).status, 400);
 }
 
 TEST_F(WebAuthTest, OnlyControlPropertiesCanBeWritten) {

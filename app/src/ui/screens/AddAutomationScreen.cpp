@@ -406,6 +406,17 @@ void AddAutomationScreen::createSensorThresholdTrigger() {
     if (lv_group_get_default()) {
         lv_group_add_obj(lv_group_get_default(), m_triggerThresholdInput);
     }
+
+    lv_obj_t* readingLabel = lv_label_create(m_triggerConfigContainer);
+    lv_label_set_text(readingLabel, "Reading");
+    lv_obj_set_style_text_color(readingLabel, m_theme.textPrimary(), 0);
+    lv_obj_align(readingLabel, LV_ALIGN_TOP_LEFT, 0, 70);
+
+    m_triggerPropertyDropdown = lv_dropdown_create(m_triggerConfigContainer);
+    lv_obj_set_size(m_triggerPropertyDropdown, 300, 40);
+    lv_obj_align(m_triggerPropertyDropdown, LV_ALIGN_TOP_LEFT, 0, 92);
+    lv_dropdown_set_options(m_triggerPropertyDropdown, "temperature\nhumidity");
+    styleDropdown(m_triggerPropertyDropdown);
 }
 
 void AddAutomationScreen::createStep3_Actions() {
@@ -636,7 +647,12 @@ void AddAutomationScreen::onCreateAutomation() {
             if (m_triggerIntervalInput) {
                 const char* interval = lv_textarea_get_text(m_triggerIntervalInput);
                 if (interval && strlen(interval) > 0) {
-                    trigger.intervalMinutes = std::stoi(interval);
+                    // A value too long to parse is left at 0, which validation rejects
+                    try {
+                        trigger.intervalMinutes = std::stoi(interval);
+                    } catch (const std::exception&) {
+                        trigger.intervalMinutes = 0;
+                    }
                 }
             }
             break;
@@ -647,7 +663,11 @@ void AddAutomationScreen::onCreateAutomation() {
                 if (deviceIdx >= 0 && static_cast<size_t>(deviceIdx) < m_devices.size()) {
                     trigger.deviceId = m_devices[deviceIdx].first;
                 }
-                trigger.property = "value";  // Default sensor property
+                if (m_triggerPropertyDropdown) {
+                    char propBuf[64];
+                    lv_dropdown_get_selected_str(m_triggerPropertyDropdown, propBuf, sizeof(propBuf));
+                    trigger.property = propBuf;
+                }
 
                 int opIdx = lv_dropdown_get_selected(m_triggerOpDropdown);
                 switch (opIdx) {
@@ -658,9 +678,13 @@ void AddAutomationScreen::onCreateAutomation() {
                     case 4: trigger.compareOp = CompareOp::Equal; break;
                 }
 
-                const char* thresh = lv_textarea_get_text(m_triggerThresholdInput);
-                if (thresh && strlen(thresh) > 0) {
-                    trigger.threshold = std::stod(thresh);
+                try {
+                    trigger.threshold = std::stod(lv_textarea_get_text(m_triggerThresholdInput));
+                } catch (const std::exception&) {
+                    LOG_WARN("Automation threshold isn't a number");
+                    lv_msgbox_create(nullptr, "Can't create automation",
+                                     "The value must be a number.", nullptr, true);
+                    return;
                 }
             }
             break;
@@ -698,6 +722,13 @@ void AddAutomationScreen::onCreateAutomation() {
         }
 
         automation.actions.push_back(action);
+    }
+
+    const std::string problem = Automation::validateJson(automation.toJson());
+    if (!problem.empty()) {
+        LOG_WARN("Can't create automation: %s", problem.c_str());
+        lv_msgbox_create(nullptr, "Can't create automation", problem.c_str(), nullptr, true);
+        return;
     }
 
     // Add to manager
