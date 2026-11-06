@@ -571,7 +571,8 @@ TEST_F(AutomationManagerTest, StopFlagEndsADelayAndTheRemainingActions) {
     automationManager->initialize();
     auto light = std::make_shared<SwitchDevice>("light_001", "Light");
     deviceManager->addDevice(light);
-    std::atomic<bool> stopFlag{false};
+    static std::atomic<bool> stopFlag;  // Outlives the manager, even if an assertion fails
+    stopFlag = false;
     automationManager->setStopFlag(&stopFlag);
 
     Trigger trigger;
@@ -592,9 +593,36 @@ TEST_F(AutomationManagerTest, StopFlagEndsADelayAndTheRemainingActions) {
 
     EXPECT_LT(std::chrono::steady_clock::now() - start, std::chrono::seconds(5));
     EXPECT_NE(light->getProperty("on"), true);
+}
+
+TEST_F(AutomationManagerTest, ShutdownWaitsForARunOnAnotherThread) {
+    automationManager->initialize();
+    auto light = std::make_shared<SwitchDevice>("light_001", "Light");
+    deviceManager->addDevice(light);
+
+    Trigger trigger;
+    trigger.type = TriggerType::TimeInterval;
+    trigger.intervalMinutes = 60;
+    Automation automation = lightOnWhen(trigger);
+    Action delay;
+    delay.type = ActionType::Delay;
+    delay.delayMs = 30000;
+    automation.actions.insert(automation.actions.begin(), delay);
+    ASSERT_TRUE(automationManager->addAutomation(automation));
+
+    std::atomic<bool> finished{false};
+    std::thread running([&] {
+        automationManager->triggerAutomation(automation.id);
+        finished = true;
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
     automationManager->shutdown();
-    automationManager->initialize();  // Stops watching the flag, which goes out of scope
+    // The run has ended, even if the thread hasn't quite returned from triggerAutomation
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    EXPECT_TRUE(finished);
+    EXPECT_NE(light->getProperty("on"), true);
+    running.join();
 }
 
 TEST_F(AutomationManagerTest, ReturnedAutomationsAreCopies) {

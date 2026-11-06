@@ -36,7 +36,6 @@ bool AutomationManager::initialize() {
     if (m_initialized) return true;
 
     m_stopping = false;
-    m_stopFlag = nullptr;
 
     LOG_INFO("Initializing automation manager");
 
@@ -61,13 +60,19 @@ void AutomationManager::shutdown() {
 
     LOG_INFO("Shutting down automation manager");
 
-    // Runs waiting in a delay notice this. Unsubscribing below waits for them to finish.
+    // Runs notice this before their next action, or during a delay
     m_stopping = true;
 
     if (m_eventSubscription > 0) {
         m_eventBus.unsubscribe(m_eventSubscription);
         m_eventSubscription = 0;
     }
+
+    // Manual and timed runs don't go through the event bus, so wait for those too
+    while (m_activeRuns > 0) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    m_stopFlag = nullptr;
 
     m_initialized = false;
 }
@@ -358,6 +363,13 @@ bool AutomationManager::compareValues(const nlohmann::json& actual,
 void AutomationManager::executeAutomation(const Automation& automation,
                                            const std::string& triggerInfo) {
     if (!automation.enabled) return;
+
+    struct ActiveRun {
+        std::atomic<int>& count;
+        explicit ActiveRun(std::atomic<int>& runs) : count(runs) { ++count; }
+        ~ActiveRun() { --count; }
+    };
+    const ActiveRun activeRun(m_activeRuns);
 
     // Actions can trigger other automations on this thread. Opposing ones would
     // otherwise go on until the stack ran out.

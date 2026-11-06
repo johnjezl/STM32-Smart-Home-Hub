@@ -32,7 +32,12 @@ Application::Application(const std::string& configPath)
 }
 
 Application::~Application() {
-    shutdown();
+    // This can run while an exception unwinds, when a second one would end the program
+    try {
+        shutdown();
+    } catch (const std::exception& e) {
+        LOG_ERROR("Error during shutdown: %s", e.what());
+    }
 }
 
 bool Application::initialize() {

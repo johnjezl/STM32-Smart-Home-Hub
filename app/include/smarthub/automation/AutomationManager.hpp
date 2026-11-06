@@ -44,13 +44,13 @@ public:
     bool initialize();
 
     /**
-     * Shutdown and cleanup
+     * Stop all runs, and wait for those on other threads. Don't call it from an action.
      */
     void shutdown();
 
     /**
-     * Also end delays when this flag is set, until the next initialize(). The flag has to
-     * outlive this object, or that call. It lets a signal stop a delay running on the thread
+     * Also end delays when this flag is set. It's forgotten by shutdown() or by passing
+     * nullptr, and has to last until then. It lets a signal stop a delay running on the thread
      * that would otherwise call shutdown().
      */
     void setStopFlag(const std::atomic<bool>* stopFlag) { m_stopFlag = stopFlag; }
@@ -151,6 +151,7 @@ private:
 
     // Let shutdown or a signal interrupt a run that's waiting in a delay
     std::atomic<bool> m_stopping{false};
+    std::atomic<int> m_activeRuns{0};
     std::atomic<const std::atomic<bool>*> m_stopFlag{nullptr};
     bool isStopping() const;
 

@@ -23,9 +23,11 @@ namespace {
 
 // Written by the signal handler, so these have to be safe to use from one
 std::atomic<bool> g_stopRequested{false};
-std::atomic<int64_t> g_firstSignalSeconds{0};
+std::atomic<int64_t> g_firstSignalSeconds{-1};
+std::atomic<int> g_signalNumber{0};
 static_assert(std::atomic<bool>::is_always_lock_free);
 static_assert(std::atomic<int64_t>::is_always_lock_free);
+static_assert(std::atomic<int>::is_always_lock_free);
 
 // Long enough that a repeated Ctrl-C doesn't cut off a shutdown that's going fine
 constexpr int64_t kForceExitAfterSeconds = 5;
@@ -36,12 +38,15 @@ void signalHandler(int signum) {
     timespec now{};
     clock_gettime(CLOCK_MONOTONIC, &now);
 
-    if (!g_stopRequested.exchange(true)) {
-        g_firstSignalSeconds = now.tv_sec;
-    } else if (now.tv_sec - g_firstSignalSeconds >= kForceExitAfterSeconds) {
+    // Signals can overlap, so exactly one of them records the time, before anything can read it
+    int64_t first = -1;
+    if (g_firstSignalSeconds.compare_exchange_strong(first, now.tv_sec)) {
+        g_signalNumber = signum;
+    } else if (now.tv_sec - first >= kForceExitAfterSeconds) {
         // Another signal this much later means shutdown is stuck and someone wants out
         _exit(128 + signum);
     }
+    g_stopRequested = true;
 }
 
 }  // namespace
@@ -111,6 +116,7 @@ int main(int argc, char* argv[]) {
         } else {
             // Blocks until a signal asks to stop, then shuts down
             app.run(g_stopRequested);
+            LOG_INFO("Stopped by signal %d", g_signalNumber.load());
         }
 
     } catch (const std::exception& e) {

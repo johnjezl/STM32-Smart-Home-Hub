@@ -105,7 +105,7 @@ protected:
         }
 
         for (int attempt = 0; attempt < 300; ++attempt) {
-            if (!runCommand(curl("GET", "/api/setup/status")).empty()) {
+            if (!runCommand(curl("GET", "/api/setup/status", "", 2)).empty()) {
                 return;
             }
             int status = 0;
@@ -119,8 +119,8 @@ protected:
     }
 
     std::string curl(const std::string& method, const std::string& path,
-                     const std::string& body = "") const {
-        std::string command = "curl -s --max-time 40 -X " + method +
+                     const std::string& body = "", int maxSeconds = 40) const {
+        std::string command = "curl -s --max-time " + std::to_string(maxSeconds) + " -X " + method +
                               " -H 'Content-Type: application/json'";
         if (!m_cookie.empty()) {
             command += " -H " + shellQuote("Cookie: " + m_cookie);
@@ -175,6 +175,7 @@ protected:
         EXPECT_EQ(WEXITSTATUS(status), 0) << output();
         // main prints the same words, so check for what only Application logs
         EXPECT_NE(output().find("Shutting down SmartHub"), std::string::npos) << output();
+        EXPECT_NE(output().find("Stopped by signal"), std::string::npos) << output();
     }
 
     fs::path m_dir;
@@ -200,10 +201,14 @@ TEST_F(ShutdownTest, SigtermUnderLoadExitsCleanly) {
     ASSERT_NO_FATAL_FAILURE(startProgram());
     ASSERT_NO_FATAL_FAILURE(setUpAdmin());
 
-    runCommand(curl("POST", "/api/devices", R"({"type":"switch","protocol":"local","name":"Lamp"})"));
+    ASSERT_NE(runCommand(curl("POST", "/api/devices",
+                              R"({"type":"switch","protocol":"local","name":"Lamp"})"))
+                  .find("device-lamp"),
+              std::string::npos);
 
     // Requests that change device state and publish events, through the whole shutdown
     std::atomic<bool> stop{false};
+    std::atomic<int> changes{0};
     std::vector<std::thread> clients;
     for (int client = 0; client < 4; ++client) {
         clients.emplace_back([&, client] {
@@ -211,8 +216,11 @@ TEST_F(ShutdownTest, SigtermUnderLoadExitsCleanly) {
             while (!stop) {
                 on = !on;
                 if (client % 2 == 0) {
-                    runCommand(curl("PUT", "/api/devices/device-lamp",
-                                    on ? R"({"on":true})" : R"({"on":false})"));
+                    const std::string reply = runCommand(curl(
+                        "PUT", "/api/devices/device-lamp", on ? R"({"on":true})" : R"({"on":false})"));
+                    if (reply.find("success") != std::string::npos) {
+                        ++changes;
+                    }
                 } else {
                     runCommand(curl("GET", "/api/devices"));
                 }
@@ -220,7 +228,10 @@ TEST_F(ShutdownTest, SigtermUnderLoadExitsCleanly) {
         });
     }
 
-    std::this_thread::sleep_for(std::chrono::seconds(1));
+    for (int attempt = 0; attempt < 200 && changes < 3; ++attempt) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    EXPECT_GE(changes.load(), 3) << "The load wasn't changing any state";
     EXPECT_EQ(kill(m_pid, SIGTERM), 0);
     expectCleanExit(30);
 

@@ -106,9 +106,12 @@ void EventBus::publish(const Event& event) {
 
     // Call handlers outside the lock to prevent deadlocks
     for (const auto& handler : handlers) {
+        // First, because this can throw, and nothing has to be undone yet if it does
+        t_runningHandlers.push_back(handler.get());
         {
             std::lock_guard<std::mutex> lock(handler->mutex);
             if (!handler->active) {
+                t_runningHandlers.pop_back();
                 continue;  // Unsubscribed since the list was collected
             }
             ++handler->running;
@@ -124,7 +127,6 @@ void EventBus::publish(const Event& event) {
                 handler.finished.notify_all();
             }
         };
-        t_runningHandlers.push_back(handler.get());
         Finish finish{*handler};
         handler->call(event);
     }

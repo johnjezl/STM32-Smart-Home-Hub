@@ -110,6 +110,14 @@ void AddDeviceScreen::onUpdate(uint32_t /* deltaMs */) {
 }
 
 void AddDeviceScreen::onDestroy() {
+#ifdef SMARTHUB_ENABLE_LVGL
+    // onHide doesn't run if this is destroyed while it's showing
+    if (m_eventSubscriptionId != 0) {
+        m_eventBus.unsubscribe(m_eventSubscriptionId);
+        m_eventSubscriptionId = 0;
+        m_deviceManager.setPendingDeviceCallback("zigbee", nullptr);
+    }
+#endif
     LOG_DEBUG("AddDeviceScreen destroyed");
 }
 
