@@ -109,6 +109,9 @@ bool DeviceManager::loadProtocol(const std::string& name, const nlohmann::json& 
             onDeviceAvailabilityChanged(id, avail);
         });
 
+    // Before it starts, so that a device announcing as the network comes up isn't taken for new
+    restoreDevices(*protocol, name);
+
     // Unlocked, for the same reason as in shutdown(): initialize can join threads
     // that are waiting to call back into this class.
     if (!protocol->initialize()) {
@@ -127,19 +130,8 @@ bool DeviceManager::loadProtocol(const std::string& name, const nlohmann::json& 
         return false;
     }
 
-    // Devices loaded from the database were here before their protocol
-    std::vector<DevicePtr> saved;
-    {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        for (const auto& [id, device] : m_devices) {
-            if (device->protocol() == name) {
-                saved.push_back(device);
-            }
-        }
-    }
-    for (const auto& device : saved) {
-        protocol->restoreDevice(*device);
-    }
+    // Now the protocol can reach its devices too
+    restoreDevices(*protocol, name);
 
     LOG_INFO("Loaded protocol: %s v%s", name.c_str(), protocol->version().c_str());
 
@@ -174,6 +166,27 @@ std::vector<std::string> DeviceManager::loadedProtocols() const {
     return names;
 }
 
+ProtocolHandlerPtr DeviceManager::protocolNamed(const std::string& name) const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    auto it = m_protocols.find(name);
+    return it == m_protocols.end() ? nullptr : it->second;
+}
+
+void DeviceManager::restoreDevices(IProtocolHandler& protocol, const std::string& name) {
+    std::vector<DevicePtr> saved;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        for (const auto& [id, device] : m_devices) {
+            if (device->protocol() == name) {
+                saved.push_back(device);
+            }
+        }
+    }
+    for (const auto& device : saved) {
+        protocol.restoreDevice(*device);
+    }
+}
+
 IProtocolHandler* DeviceManager::getProtocol(const std::string& name) {
     std::lock_guard<std::mutex> lock(m_mutex);
 
@@ -206,7 +219,7 @@ bool DeviceManager::addDevice(DevicePtr device) {
     }
 
     // Unlocked, because handlers can call back into this class
-    if (auto protocol = getProtocol(device->protocol())) {
+    if (auto protocol = protocolNamed(device->protocol())) {
         protocol->restoreDevice(*device);
     }
 
@@ -250,7 +263,7 @@ bool DeviceManager::removeDevice(const std::string& id) {
     }
 
     // Unlocked, because handlers can call back into this class
-    if (auto protocol = getProtocol(protocolName)) {
+    if (auto protocol = protocolNamed(protocolName)) {
         protocol->forgetDevice(id);
     }
 

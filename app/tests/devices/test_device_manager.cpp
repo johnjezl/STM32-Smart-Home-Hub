@@ -1009,7 +1009,8 @@ TEST(DeviceManagerRestore, ProtocolLearnsItsDevicesSoTheyWorkAfterARestart) {
         EXPECT_EQ(device->getProperty("endpoint"), 11);
 
         ASSERT_TRUE(manager.loadProtocol("recording", nlohmann::json::object()));
-        EXPECT_EQ(protocol->restored, std::vector<std::string>{"paired"});
+        // Before it starts, and again once it can reach them
+        EXPECT_EQ(protocol->restored, (std::vector<std::string>{"paired", "paired"}));
 
         protocol->restored.clear();
         ASSERT_TRUE(manager.addDevice(std::make_shared<SwitchDevice>("typed", "Typed", "recording")));
