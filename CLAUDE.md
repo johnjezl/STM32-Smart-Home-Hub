@@ -23,7 +23,7 @@ The board is powered via a Kasa smart plug (HS300 strip, index 5) at `192.168.4.
 
 **Prefer software reboot when possible:**
 ```bash
-ssh root@192.168.4.99 reboot
+ssh root@192.168.4.102 reboot
 ```
 
 Use power cycle only when SSH is unresponsive or the system is hung.
@@ -31,14 +31,18 @@ Use power cycle only when SSH is unresponsive or the system is hung.
 ### Network Access
 
 ```bash
-ssh root@192.168.4.99            # Ethernet (preferred)
-ssh root@192.168.4.67            # WiFi
+ssh root@192.168.4.102           # Ethernet (preferred)
+ssh root@192.168.4.99            # WiFi
 ssh root@smarthub.local          # mDNS, if this machine resolves .local names
 ```
+
+These are DHCP leases and they do move. If one stops answering, check with `ip -4 addr` on the board. The addresses in the labctl inventory may be out of date.
 
 ### Serial and SDWire
 
 Serial console and SDWire are **not currently assigned** for this SBC in labctl. Ask the maintainer if you need them. See the [labctl documentation](https://github.com/johnjezl/Embedded-Lab-Control) for details.
+
+**Never use a bare `cat` on a tty device** such as `/dev/ttyACM0`. It waits for an EOF that never comes and hangs the session. Use `timeout` or `picocom`.
 
 ---
 
@@ -67,15 +71,13 @@ ninja
 ### Deploying to Device
 
 ```bash
-# Stop the application first: a running binary can't be overwritten
-ssh root@192.168.4.99 "killall smarthub; sleep 1"
-
-# Transfer binary
-cat app/build-arm/smarthub | ssh root@192.168.4.99 "cat > /usr/bin/smarthub && chmod +x /usr/bin/smarthub"
-
-# Start the application
-ssh root@192.168.4.99 "nohup smarthub > /var/log/smarthub.log 2>&1 < /dev/null &"
+# Install under a temp name, then rename: this works while the old binary is running.
+# Uses a cat pipe because scp may fail against the board's Dropbear. Restarts only if the install succeeded.
+cat app/build-arm/smarthub | ssh root@192.168.4.102 "cat > /usr/bin/smarthub.new && chmod +x /usr/bin/smarthub.new && mv -f /usr/bin/smarthub.new /usr/bin/smarthub" && \
+  ssh root@192.168.4.102 "killall smarthub; for i in 1 2 3 4 5 6 7 8 9 10; do pidof smarthub > /dev/null || break; sleep 1; done; nohup smarthub > /var/log/smarthub.log 2>&1 < /dev/null &"
 ```
+
+`smarthub` on the board's PATH is `/usr/bin/smarthub`, so install there. The board also has older copies in `/opt/smarthub/bin` and `/root`, and `tools/deploy.sh` installs to `/opt/smarthub`, which this command doesn't run.
 
 If the board is unresponsive, use the `power_cycle` MCP tool with `sbc_name: "stm32mp157f-dk2"` before deploying.
 
