@@ -3,6 +3,7 @@
  */
 
 #include "smarthub/ui/widgets/TimeSeriesChart.hpp"
+#include <algorithm>
 #include <cmath>
 #include "smarthub/ui/ThemeManager.hpp"
 #include "smarthub/core/Logger.hpp"
@@ -13,6 +14,9 @@ namespace ui {
 std::vector<std::optional<float>> chartValues(const std::vector<DataPoint>& data, uint64_t now,
                                               uint64_t rangeSeconds, int points) {
     std::vector<std::optional<float>> values(static_cast<size_t>(points));
+    // On a long view, neighbouring averaged points are already further apart than the usual limit
+    const uint64_t maxJoinedGap = std::max<uint64_t>(CHART_MAX_JOINED_GAP_SECONDS,
+                                                     3 * rangeSeconds / static_cast<uint64_t>(std::max(1, points - 1)));
     int previousSlot = -1;
     const DataPoint* previous = nullptr;
     for (const DataPoint& point : data) {
@@ -22,7 +26,7 @@ std::vector<std::optional<float>> chartValues(const std::vector<DataPoint>& data
         }
         values[static_cast<size_t>(slot)] = point.value;
         if (previous && slot > previousSlot + 1 &&
-            point.timestamp - previous->timestamp <= CHART_MAX_JOINED_GAP_SECONDS) {
+            point.timestamp - previous->timestamp <= maxJoinedGap) {
             for (int i = previousSlot + 1; i < slot; i++) {
                 const float t = static_cast<float>(i - previousSlot) / static_cast<float>(slot - previousSlot);
                 values[static_cast<size_t>(i)] = previous->value + (point.value - previous->value) * t;
