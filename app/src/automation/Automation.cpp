@@ -228,7 +228,9 @@ nlohmann::json Action::toJson() const {
 Action Action::fromJson(const nlohmann::json& j) {
     Action a;
     // Saved automations didn't always record the type, and only delays have this field
-    const bool savedDelay = !j.contains("type") && (j.contains("delayMs") || j.contains("delay_ms"));
+    const bool savedDelay = !j.contains("type") && !j.contains("deviceId") &&
+                            !j.contains("device_id") &&
+                            (j.contains("delayMs") || j.contains("delay_ms"));
     a.type = savedDelay ? ActionType::Delay
                         : stringToActionType(j.value("type", "set_device_state"));
 
@@ -404,6 +406,9 @@ std::string validateCondition(const nlohmann::json& condition, int depth = 0) {
     const std::string op = leaf.value("op", "");
     if (!isCompareOp(op)) return "unknown condition op: " + op;
     if (!leaf.contains("value")) return "a condition needs a value";
+    if (op != "eq" && op != "neq" && !leaf["value"].is_number()) {
+        return "a condition using " + op + " needs a numeric value";
+    }
     return "";
 }
 
@@ -421,6 +426,10 @@ nlohmann::json triggerList(const nlohmann::json& j) {
 
 std::string validateFields(const nlohmann::json& j) {
     if (j.value("name", "").empty()) return "name is required";
+    if (j.contains("enabled") && !j["enabled"].is_boolean()) return "enabled must be true or false";
+    if (j.contains("description") && !j["description"].is_string()) {
+        return "description must be text";
+    }
 
     // The API addresses automations by id in the URL path
     const std::string id = j.value("id", "");

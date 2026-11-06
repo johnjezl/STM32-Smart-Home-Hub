@@ -16,7 +16,9 @@
 #include <smarthub/database/Database.hpp>
 #include <smarthub/core/EventBus.hpp>
 
+#include <chrono>
 #include <memory>
+#include <thread>
 #include <filesystem>
 
 namespace fs = std::filesystem;
@@ -517,6 +519,33 @@ TEST(AutomationTest, SavedDelayWithoutATypeLoadsAsADelay) {
     const Action action = Action::fromJson({{"delayMs", 500}});
     EXPECT_EQ(action.type, ActionType::Delay);
     EXPECT_EQ(action.delayMs, 500);
+
+    const Action deviceAction = Action::fromJson(
+        {{"deviceId", "light"}, {"property", "on"}, {"value", true}, {"delayMs", 500}});
+    EXPECT_EQ(deviceAction.type, ActionType::SetDeviceState);
+}
+
+TEST_F(AutomationManagerTest, TurningOffDuringADelayStopsTheRemainingActions) {
+    automationManager->initialize();
+    auto light = std::make_shared<SwitchDevice>("light_001", "Light");
+    deviceManager->addDevice(light);
+
+    Trigger trigger;
+    trigger.type = TriggerType::TimeInterval;
+    trigger.intervalMinutes = 60;
+    Automation automation = lightOnWhen(trigger);
+    Action delay;
+    delay.type = ActionType::Delay;
+    delay.delayMs = 300;
+    automation.actions.insert(automation.actions.begin(), delay);
+    ASSERT_TRUE(automationManager->addAutomation(automation));
+
+    std::thread running([&] { automationManager->triggerAutomation(automation.id); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    ASSERT_TRUE(automationManager->setEnabled(automation.id, false));
+    running.join();
+
+    EXPECT_NE(light->getProperty("on"), true);
 }
 
 TEST_F(AutomationManagerTest, ReEnablingAnEnabledAutomationKeepsItsCountdown) {
