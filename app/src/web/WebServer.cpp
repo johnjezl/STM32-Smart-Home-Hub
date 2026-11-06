@@ -1393,12 +1393,6 @@ void WebServer::apiCreateAutomation(struct mg_connection* c, struct mg_http_mess
     try {
         auto data = nlohmann::json::parse(body);
 
-        // Validate required fields
-        if (!data.contains("name") || data["name"].get<std::string>().empty()) {
-            sendError(c, 400, "name is required");
-            return;
-        }
-
         const std::string problem = Automation::validateJson(data);
         if (!problem.empty()) {
             sendError(c, 400, problem);
@@ -1464,6 +1458,12 @@ void WebServer::apiUpdateAutomation(struct mg_connection* c, const std::string& 
 
         Automation automation = Automation::fromJson(data);
         automation.id = id;  // Ensure ID matches URL
+
+        // A request that doesn't mention these leaves them as they are
+        if (!data.contains("enabled")) {
+            automation.enabled = existing->enabled;
+        }
+        automation.lastTriggeredAt = existing->lastTriggeredAt;
 
         if (m_automationMgr->updateAutomation(automation)) {
             sendJson(c, 200, "{\"success\":true}");

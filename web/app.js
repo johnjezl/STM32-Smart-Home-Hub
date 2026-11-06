@@ -1162,7 +1162,7 @@ class SmartHubApp {
         // Trigger device select
         const triggerSelect = document.getElementById('trigger-device');
         triggerSelect.innerHTML = '';
-        this.devices.forEach(d => {
+        allDevices.forEach(d => {
             const option = document.createElement('option');
             option.value = d.id;
             option.textContent = d.name;
