@@ -592,6 +592,24 @@ void AddAutomationScreen::updateNavigationButtons() {
     }
 }
 
+namespace {
+
+// A boolean, a whole finite number, or otherwise the text as typed
+nlohmann::json parseFormValue(const std::string& text) {
+    if (text == "true") return true;
+    if (text == "false") return false;
+    try {
+        size_t used = 0;
+        const double number = std::stod(text, &used);
+        if (used == text.size() && std::isfinite(number)) return number;
+    } catch (const std::exception&) {
+        // Not a number
+    }
+    return text;
+}
+
+}  // namespace
+
 void AddAutomationScreen::onCreateAutomation() {
     LOG_DEBUG("Creating automation: %s", m_automationName.c_str());
 
@@ -620,18 +638,7 @@ void AddAutomationScreen::onCreateAutomation() {
                 if (m_triggerValueInput) {
                     const char* val = lv_textarea_get_text(m_triggerValueInput);
                     if (val && strlen(val) > 0) {
-                        // Parse value
-                        if (strcmp(val, "true") == 0) {
-                            trigger.toValue = true;
-                        } else if (strcmp(val, "false") == 0) {
-                            trigger.toValue = false;
-                        } else {
-                            try {
-                                trigger.toValue = std::stod(val);
-                            } catch (...) {
-                                trigger.toValue = val;
-                            }
-                        }
+                        trigger.toValue = parseFormValue(val);
                     }
                 }
             }
@@ -717,23 +724,13 @@ void AddAutomationScreen::onCreateAutomation() {
 
         const char* val = lv_textarea_get_text(m_actionValueInput);
         if (val && strlen(val) > 0) {
-            if (strcmp(val, "true") == 0) {
-                action.value = true;
-            } else if (strcmp(val, "false") == 0) {
-                action.value = false;
-            } else {
-                try {
-                    action.value = std::stod(val);
-                } catch (...) {
-                    action.value = val;
-                }
-            }
+            action.value = parseFormValue(val);
         }
 
         automation.actions.push_back(action);
     }
 
-    const std::string problem = Automation::validateJson(automation.toJson());
+    const std::string problem = m_automationManager.problemWith(automation);
     if (!problem.empty()) {
         LOG_WARN("Can't create automation: %s", problem.c_str());
         lv_msgbox_create(nullptr, "Can't create automation", problem.c_str(), nullptr, true);

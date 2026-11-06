@@ -1323,28 +1323,6 @@ void WebServer::apiAddZigbeeDevice(struct mg_connection* c, struct mg_http_messa
 // Automation API Handlers
 // =============================================================================
 
-namespace {
-
-// Devices might be added later, so only the ones that exist can be checked here.
-// AutomationManager checks again when an action runs.
-std::string automationProblem(DeviceManager& devices, const nlohmann::json& data) {
-    const std::string problem = Automation::validateJson(data);
-    if (!problem.empty()) return problem;
-
-    for (const auto& action : data["actions"]) {
-        if (action.value("type", "set_device_state") != "set_device_state") continue;
-
-        const auto device = devices.getDevice(action.value("deviceId", action.value("device_id", "")));
-        const std::string property = action.value("property", "");
-        if (device && !DeviceManager::isControllableProperty(*device, property, action["value"])) {
-            return "action can't set " + property + " to that value on " + device->id();
-        }
-    }
-    return "";
-}
-
-}  // namespace
-
 void WebServer::apiGetAutomations(struct mg_connection* c) {
     if (!m_automationMgr) {
         sendError(c, 503, "Automations not available");
@@ -1377,13 +1355,19 @@ void WebServer::apiCreateAutomation(struct mg_connection* c, struct mg_http_mess
     try {
         auto data = nlohmann::json::parse(body);
 
-        const std::string problem = automationProblem(m_deviceManager, data);
+        // On the request itself first, because parsing it replaces unknown values with defaults
+        std::string problem = Automation::validateJson(data);
         if (!problem.empty()) {
             sendError(c, 400, problem);
             return;
         }
 
         Automation automation = Automation::fromJson(data);
+        problem = m_automationMgr->problemWith(automation);
+        if (!problem.empty()) {
+            sendError(c, 400, problem);
+            return;
+        }
 
         // Generate ID if not provided
         if (automation.id.empty()) {
@@ -1434,13 +1418,19 @@ void WebServer::apiUpdateAutomation(struct mg_connection* c, const std::string& 
 
     try {
         auto data = nlohmann::json::parse(body);
-        const std::string problem = automationProblem(m_deviceManager, data);
+        // On the request itself first, because parsing it replaces unknown values with defaults
+        std::string problem = Automation::validateJson(data);
         if (!problem.empty()) {
             sendError(c, 400, problem);
             return;
         }
 
         Automation automation = Automation::fromJson(data);
+        problem = m_automationMgr->problemWith(automation);
+        if (!problem.empty()) {
+            sendError(c, 400, problem);
+            return;
+        }
         automation.id = id;  // Ensure ID matches URL
 
         // A request that doesn't mention these leaves them as they are

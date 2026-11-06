@@ -409,6 +409,68 @@ TEST_F(AutomationManagerTest, ActionCantSetAReportedProperty) {
     EXPECT_EQ(sensor->getProperty("temperature"), before);
 }
 
+TEST_F(AutomationManagerTest, ReEnablingRestartsAnIntervalCountdown) {
+    automationManager->initialize();
+    auto light = std::make_shared<SwitchDevice>("light_001", "Light");
+    deviceManager->addDevice(light);
+
+    Trigger trigger;
+    trigger.type = TriggerType::TimeInterval;
+    trigger.intervalMinutes = 60;
+    const Automation automation = lightOnWhen(trigger);
+    ASSERT_TRUE(automationManager->addAutomation(automation));
+
+    const uint64_t minute = 60 * 1000;
+    automationManager->poll(1);
+    ASSERT_TRUE(automationManager->setEnabled(automation.id, false));
+    automationManager->poll(1 + 120 * minute);
+    ASSERT_TRUE(automationManager->setEnabled(automation.id, true));
+
+    automationManager->poll(2 + 120 * minute);
+    EXPECT_NE(light->getProperty("on"), true);
+    automationManager->poll(2 + 180 * minute);
+    EXPECT_EQ(light->getProperty("on"), true);
+}
+
+TEST_F(AutomationManagerTest, InternalEventsDontRunAutomations) {
+    automationManager->initialize();
+    auto source = std::make_shared<SwitchDevice>("source", "Source");
+    auto light = std::make_shared<SwitchDevice>("light_001", "Light");
+    deviceManager->addDevice(source);
+    deviceManager->addDevice(light);
+
+    Trigger trigger;
+    trigger.type = TriggerType::DeviceState;
+    trigger.deviceId = "source";
+    trigger.property = "_removed";
+    ASSERT_TRUE(automationManager->addAutomation(lightOnWhen(trigger)));
+
+    // This would deadlock if the action ran, because the event is published under a lock
+    EXPECT_TRUE(deviceManager->removeDevice("source"));
+    EXPECT_NE(light->getProperty("on"), true);
+}
+
+TEST_F(AutomationManagerTest, ProblemWithChecksWhatTheDeviceCanDo) {
+    automationManager->initialize();
+    auto light = std::make_shared<SwitchDevice>("light_001", "Light");
+    deviceManager->addDevice(light);
+
+    Trigger trigger;
+    trigger.type = TriggerType::TimeInterval;
+    trigger.intervalMinutes = 5;
+    Automation automation = lightOnWhen(trigger);
+    EXPECT_EQ(automationManager->problemWith(automation), "");
+
+    automation.actions[0].property = "brightness";
+    automation.actions[0].value = 50;
+    EXPECT_NE(automationManager->problemWith(automation), "");
+
+    automation.actions[0].property = "on";
+    automation.actions[0].value = true;
+    automation.name = "";
+    EXPECT_NE(automationManager->problemWith(automation), "");
+}
+
 TEST_F(AutomationManagerTest, ReturnedAutomationsAreCopies) {
     automationManager->initialize();
     ASSERT_TRUE(automationManager->addAutomation(createTestAutomation()));

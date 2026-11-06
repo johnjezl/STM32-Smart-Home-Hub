@@ -53,6 +53,12 @@ public:
      */
     void poll(uint64_t currentTimeMs);
 
+    /**
+     * Check an automation before adding or updating it
+     * @return A description of the problem, or an empty string if it can run
+     */
+    std::string problemWith(const Automation& automation) const;
+
     // CRUD Operations
     bool addAutomation(const Automation& automation);
     bool updateAutomation(const Automation& automation);

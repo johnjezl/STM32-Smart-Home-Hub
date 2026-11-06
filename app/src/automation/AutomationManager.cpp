@@ -109,6 +109,9 @@ void AutomationManager::onDeviceStateChanged(const std::string& deviceId,
                                               const std::string& property,
                                               const nlohmann::json& value,
                                               const nlohmann::json& previousValue) {
+    // Internal events such as _removed, which are published under DeviceManager's lock
+    if (!property.empty() && property[0] == '_') return;
+
     std::vector<PendingRun> runs;
     {
         std::lock_guard<std::mutex> lock(m_mutex);
@@ -394,6 +397,24 @@ void AutomationManager::executeAction(const Action& action) {
     }
 }
 
+std::string AutomationManager::problemWith(const Automation& automation) const {
+    const std::string problem = Automation::validateJson(automation.toJson());
+    if (!problem.empty()) return problem;
+
+    // Devices might be added later, so only the ones that exist can be checked.
+    // executeAction checks again when the action runs.
+    for (const auto& action : automation.actions) {
+        if (action.type != ActionType::SetDeviceState) continue;
+
+        const auto device = m_deviceManager.getDevice(action.deviceId);
+        if (device &&
+            !DeviceManager::isControllableProperty(*device, action.property, action.value)) {
+            return "action can't set " + action.property + " to that value on " + device->id();
+        }
+    }
+    return "";
+}
+
 // CRUD Operations
 bool AutomationManager::addAutomation(const Automation& automation) {
     std::lock_guard<std::mutex> lock(m_mutex);
@@ -500,6 +521,9 @@ bool AutomationManager::setEnabled(const std::string& id, bool enabled) {
 
     it->second->enabled = enabled;
     it->second->updatedAt = getCurrentTimestamp();
+    if (enabled) {
+        clearIntervalTimers(id);  // It wasn't counting while it was off
+    }
     return saveToDatabase(*it->second);
 }
 

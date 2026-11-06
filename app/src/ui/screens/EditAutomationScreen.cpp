@@ -258,8 +258,14 @@ void EditAutomationScreen::populateFields() {
                 break;
 
             case TriggerType::Time:
-                triggerDesc = "At " + std::to_string(trigger.hour) + ":" +
-                              (trigger.minute < 10 ? "0" : "") + std::to_string(trigger.minute);
+                if (trigger.hour < 0 || trigger.minute < 0) {
+                    triggerDesc = std::string("At ") +
+                                  (trigger.hour < 0 ? "every hour" : std::to_string(trigger.hour)) + ", " +
+                                  (trigger.minute < 0 ? "every minute" : "minute " + std::to_string(trigger.minute));
+                } else {
+                    triggerDesc = "At " + std::to_string(trigger.hour) + ":" +
+                                  (trigger.minute < 10 ? "0" : "") + std::to_string(trigger.minute);
+                }
                 break;
 
             case TriggerType::TimeInterval:
@@ -308,6 +314,13 @@ void EditAutomationScreen::onSaveClicked() {
 
     if (m_enabledSwitch) {
         automation->enabled = lv_obj_has_state(m_enabledSwitch, LV_STATE_CHECKED);
+    }
+
+    const std::string problem = m_automationManager.problemWith(*automation);
+    if (!problem.empty()) {
+        LOG_WARN("Can't save automation: %s", problem.c_str());
+        lv_msgbox_create(nullptr, "Can't save automation", problem.c_str(), nullptr, true);
+        return;
     }
 
     if (m_automationManager.updateAutomation(*automation)) {
