@@ -9,8 +9,9 @@ namespace smarthub {
 SwitchDevice::SwitchDevice(const std::string& id,
                            const std::string& name,
                            const std::string& protocol,
-                           const std::string& protocolAddress)
-    : Device(id, name, DeviceType::Switch, protocol, protocolAddress)
+                           const std::string& protocolAddress,
+                           DeviceType type)
+    : Device(id, name, type, protocol, protocolAddress)
 {
     addCapability(DeviceCapability::OnOff);
     setStateInternal("on", false);

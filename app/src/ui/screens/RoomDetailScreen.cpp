@@ -180,6 +180,8 @@ void RoomDetailScreen::refreshDeviceList() {
         std::string typeStr;
         switch (device->type()) {
             case DeviceType::Switch: typeStr = "Switch"; break;
+            case DeviceType::Light: typeStr = "Light"; break;
+            case DeviceType::Outlet: typeStr = "Outlet"; break;
             case DeviceType::Dimmer: typeStr = "Dimmer"; break;
             case DeviceType::ColorLight: typeStr = "Color Light"; break;
             case DeviceType::TemperatureSensor: typeStr = "Temperature"; break;

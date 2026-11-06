@@ -6,6 +6,8 @@
 #include <smarthub/devices/DeviceManager.hpp>
 #include <smarthub/devices/Device.hpp>
 #include <smarthub/devices/types/SwitchDevice.hpp>
+#include <smarthub/devices/DeviceTypeRegistry.hpp>
+#include <smarthub/devices/types/MotionSensor.hpp>
 #include <smarthub/devices/types/TemperatureSensor.hpp>
 #include <smarthub/core/EventBus.hpp>
 #include <smarthub/database/Database.hpp>
@@ -13,6 +15,7 @@
 #include <filesystem>
 #include <memory>
 #include <thread>
+#include <vector>
 
 namespace fs = std::filesystem;
 using namespace smarthub;
@@ -499,4 +502,136 @@ TEST_F(DeviceManagerTest, DeviceStatePersistedOnRestart) {
         EXPECT_TRUE(state.contains("on"));
         EXPECT_TRUE(state["on"].get<bool>());
     }
+}
+
+// ---------- Device types through a save and load
+
+namespace {
+
+std::vector<DeviceType> everyDeviceType() {
+    std::vector<DeviceType> types;
+    for (int value = 0; value <= static_cast<int>(smarthub::kLastDeviceType); ++value) {
+        types.push_back(static_cast<DeviceType>(value));
+    }
+    return types;
+}
+
+}  // namespace
+
+TEST_F(DeviceManagerTest, EveryDeviceTypeIsRegistered) {
+    auto& registry = DeviceTypeRegistry::instance();
+    for (const DeviceType type : everyDeviceType()) {
+        const std::string name = smarthub::deviceTypeToString(type);
+        SCOPED_TRACE(name);
+        EXPECT_TRUE(registry.hasType(type));
+        EXPECT_TRUE(registry.hasType(name));
+        EXPECT_EQ(smarthub::stringToDeviceType(name), type);
+        EXPECT_EQ(registry.getTypeName(type), name);
+    }
+}
+
+TEST_F(DeviceManagerTest, EveryDeviceTypeSurvivesASaveAndLoad) {
+    const nlohmann::json config = {{"custom_setting", 42}};
+    {
+        DeviceManager manager(eventBus, *database);
+        ASSERT_TRUE(manager.initialize());
+        for (const DeviceType type : everyDeviceType()) {
+            const std::string name = smarthub::deviceTypeToString(type);
+            auto device = DeviceTypeRegistry::instance().createFromTypeName(
+                name, "device_" + name, name, "local", "", config);
+            ASSERT_NE(device, nullptr);
+            ASSERT_TRUE(manager.addDevice(device));
+        }
+        manager.shutdown();
+    }
+
+    // Twice, because a type lost on the first load would be saved that way
+    for (int load = 0; load < 2; ++load) {
+        DeviceManager manager(eventBus, *database);
+        ASSERT_TRUE(manager.initialize());
+        for (const DeviceType type : everyDeviceType()) {
+            const std::string name = smarthub::deviceTypeToString(type);
+            SCOPED_TRACE(name);
+            auto device = manager.getDevice("device_" + name);
+            ASSERT_NE(device, nullptr);
+            EXPECT_EQ(device->type(), type);
+            EXPECT_EQ(device->getConfig().value("custom_setting", 0), 42);
+        }
+        ASSERT_TRUE(manager.saveAllDevices());
+        manager.shutdown();
+    }
+}
+
+TEST_F(DeviceManagerTest, SensorOptionsSurviveASaveAndLoad) {
+    {
+        DeviceManager manager(eventBus, *database);
+        ASSERT_TRUE(manager.initialize());
+        ASSERT_TRUE(manager.addDevice(std::make_shared<TemperatureSensor>(
+            "temp_humidity", "Climate", "local", "", true, true)));
+        ASSERT_TRUE(manager.addDevice(std::make_shared<TemperatureSensor>(
+            "temp_only", "Temperature", "local", "", false, false)));
+        ASSERT_TRUE(manager.addDevice(std::make_shared<MotionSensor>(
+            "motion_light", "Hall", "local", "", true, true)));
+        ASSERT_TRUE(manager.addDevice(std::make_shared<MotionSensor>(
+            "motion_only", "Porch", "local", "", false, false)));
+        manager.shutdown();
+    }
+
+    DeviceManager manager(eventBus, *database);
+    ASSERT_TRUE(manager.initialize());
+
+    auto climate = manager.getDevice("temp_humidity");
+    ASSERT_NE(climate, nullptr);
+    EXPECT_EQ(climate->type(), DeviceType::MultiSensor);
+    EXPECT_TRUE(climate->hasCapability(DeviceCapability::Temperature));
+    EXPECT_TRUE(climate->hasCapability(DeviceCapability::Humidity));
+    EXPECT_TRUE(climate->hasCapability(DeviceCapability::Battery));
+
+    auto temperature = manager.getDevice("temp_only");
+    ASSERT_NE(temperature, nullptr);
+    EXPECT_EQ(temperature->type(), DeviceType::TemperatureSensor);
+    EXPECT_FALSE(temperature->hasCapability(DeviceCapability::Humidity));
+    EXPECT_FALSE(temperature->hasCapability(DeviceCapability::Battery));
+
+    // Motion stays motion. As a multi sensor it would come back as a temperature sensor.
+    auto motionLight = manager.getDevice("motion_light");
+    ASSERT_NE(motionLight, nullptr);
+    EXPECT_EQ(motionLight->type(), DeviceType::MotionSensor);
+    EXPECT_TRUE(motionLight->hasCapability(DeviceCapability::Motion));
+    EXPECT_TRUE(motionLight->hasCapability(DeviceCapability::Illuminance));
+    EXPECT_TRUE(motionLight->hasCapability(DeviceCapability::Battery));
+
+    auto motion = manager.getDevice("motion_only");
+    ASSERT_NE(motion, nullptr);
+    EXPECT_FALSE(motion->hasCapability(DeviceCapability::Illuminance));
+    manager.shutdown();
+}
+
+TEST_F(DeviceManagerTest, LightAndOutletStayThoseTypesAndCanBeControlled) {
+    {
+        DeviceManager manager(eventBus, *database);
+        ASSERT_TRUE(manager.initialize());
+        auto& registry = DeviceTypeRegistry::instance();
+        ASSERT_TRUE(manager.addDevice(registry.createFromTypeName("light", "lamp", "Lamp")));
+        ASSERT_TRUE(manager.addDevice(registry.createFromTypeName("outlet", "plug", "Plug")));
+        manager.shutdown();
+    }
+
+    DeviceManager manager(eventBus, *database);
+    ASSERT_TRUE(manager.initialize());
+    EXPECT_EQ(manager.getDevice("lamp")->type(), DeviceType::Light);
+    EXPECT_EQ(manager.getDevice("plug")->type(), DeviceType::Outlet);
+    EXPECT_TRUE(manager.getDevice("lamp")->hasCapability(DeviceCapability::OnOff));
+    EXPECT_TRUE(manager.setDeviceState("plug", "on", true));
+    manager.shutdown();
+}
+
+TEST_F(DeviceManagerTest, ReplacingASensorsConfigKeepsItsOptions) {
+    TemperatureSensor sensor("s", "Sensor", "local", "", true, false);
+    sensor.setConfig({{"custom_setting", 1}});
+
+    const nlohmann::json config = sensor.getConfig();
+    EXPECT_EQ(config.value("custom_setting", 0), 1);
+    EXPECT_EQ(config.value("has_humidity", false), true);
+    EXPECT_EQ(config.value("has_battery", true), false);
 }

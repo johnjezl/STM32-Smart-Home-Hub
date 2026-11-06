@@ -14,6 +14,9 @@ namespace smarthub {
  */
 class MotionSensor : public Device {
 public:
+    // Keeps has_illuminance and has_battery, which decide what this is when it's loaded
+    void setConfig(const nlohmann::json& config) override;
+
     /**
      * Constructor
      * @param id Unique device identifier
