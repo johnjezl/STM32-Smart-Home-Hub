@@ -55,6 +55,14 @@ void detachFromDisplay(lv_obj_t* screen) {
 } // namespace
 #endif
 
+void Screen::postToUi(std::function<void()> task) {
+    m_screenManager.postToUi([alive = std::weak_ptr<void>(m_aliveToken), task = std::move(task)] {
+        if (alive.lock()) {
+            task();
+        }
+    });
+}
+
 Screen::Screen(ScreenManager& screenManager, const std::string& name)
     : m_screenManager(screenManager)
     , m_name(name)

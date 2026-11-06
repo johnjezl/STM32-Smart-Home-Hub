@@ -504,3 +504,86 @@ TEST(ScreenManagerTest, LVGLNotAvailable) {
 }
 
 #endif // SMARTHUB_ENABLE_LVGL
+
+// ---------- Tasks posted to the UI thread
+
+namespace {
+
+// Lets a test ask for a task through the screen itself
+class PostingScreen : public TestScreen {
+public:
+    using TestScreen::TestScreen;
+    using TestScreen::postToUi;
+};
+
+}  // namespace
+
+TEST_F(ScreenManagerTest, PostedTaskRunsOnTheNextUpdate) {
+    createScreenManager();
+
+    std::thread::id ranOn;
+    std::thread poster([&] {
+        screenManager->postToUi([&] { ranOn = std::this_thread::get_id(); });
+    });
+    poster.join();
+    EXPECT_EQ(ranOn, std::thread::id{});
+
+    screenManager->update(16);
+    EXPECT_EQ(ranOn, std::this_thread::get_id());
+}
+
+TEST_F(ScreenManagerTest, PostedTaskRunsOnlyOnce) {
+    createScreenManager();
+    int runs = 0;
+    screenManager->postToUi([&] { ++runs; });
+
+    screenManager->update(16);
+    screenManager->update(16);
+    EXPECT_EQ(runs, 1);
+}
+
+TEST_F(ScreenManagerTest, TaskCanPostAnotherForTheNextUpdate) {
+    createScreenManager();
+    int runs = 0;
+    screenManager->postToUi([&] {
+        ++runs;
+        screenManager->postToUi([&] { ++runs; });
+    });
+
+    screenManager->update(16);
+    EXPECT_EQ(runs, 1);
+    screenManager->update(16);
+    EXPECT_EQ(runs, 2);
+}
+
+TEST_F(ScreenManagerTest, FailingTaskDoesNotStopTheOthers) {
+    createScreenManager();
+    bool ran = false;
+    screenManager->postToUi([] { throw std::runtime_error("failed"); });
+    screenManager->postToUi([&] { ran = true; });
+
+    EXPECT_NO_THROW(screenManager->update(16));
+    EXPECT_TRUE(ran);
+}
+
+TEST_F(ScreenManagerTest, ScreensPostedTaskSkipsIfTheScreenIsDestroyed) {
+    createScreenManager();
+    bool ran = false;
+    {
+        PostingScreen screen(*screenManager, "posting");
+        screen.postToUi([&] { ran = true; });
+    }
+
+    screenManager->update(16);
+    EXPECT_FALSE(ran);
+}
+
+TEST_F(ScreenManagerTest, ScreensPostedTaskRunsWhileTheScreenExists) {
+    createScreenManager();
+    bool ran = false;
+    PostingScreen screen(*screenManager, "posting");
+    screen.postToUi([&] { ran = true; });
+
+    screenManager->update(16);
+    EXPECT_TRUE(ran);
+}

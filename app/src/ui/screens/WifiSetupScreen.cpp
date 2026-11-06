@@ -391,13 +391,16 @@ void WifiSetupScreen::refreshNetworks() {
     m_scanning = true;
     showLoading("Scanning for networks...");
 
+    // This runs on the network manager's thread
     m_networkManager.startScan([this](const std::vector<network::WifiNetwork>& networks) {
-        m_networks = networks;
-        m_scanning = false;
+        postToUi([this, networks] {
+            m_networks = networks;
+            m_scanning = false;
 
-        hideLoading();
-        updateStatusBar();
-        updateNetworkList();
+            hideLoading();
+            updateStatusBar();
+            updateNetworkList();
+        });
     });
 }
 
@@ -419,13 +422,7 @@ void WifiSetupScreen::onNetworkSelected(const network::WifiNetwork& network) {
     if (!network.secured) {
         showLoading("Connecting...");
         m_networkManager.connect(network.ssid, "", [this](const network::ConnectionResult& result) {
-            hideLoading();
-            updateStatusBar();
-            updateNetworkList();
-
-            if (!result.success) {
-                showError(result.error);
-            }
+            postToUi([this, result] { onConnectFinished(result); });
         });
         return;
     }
@@ -447,14 +444,18 @@ void WifiSetupScreen::onConnectClicked() {
     showLoading("Connecting...");
 
     m_networkManager.connect(m_selectedSsid, password, [this](const network::ConnectionResult& result) {
-        hideLoading();
-        updateStatusBar();
-        updateNetworkList();
-
-        if (!result.success) {
-            showError(result.error);
-        }
+        postToUi([this, result] { onConnectFinished(result); });
     });
+}
+
+void WifiSetupScreen::onConnectFinished(const network::ConnectionResult& result) {
+    hideLoading();
+    updateStatusBar();
+    updateNetworkList();
+
+    if (!result.success) {
+        showError(result.error);
+    }
 }
 
 void WifiSetupScreen::onCancelClicked() {

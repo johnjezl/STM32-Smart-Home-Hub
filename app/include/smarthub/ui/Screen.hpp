@@ -6,6 +6,8 @@
  */
 #pragma once
 
+#include <functional>
+#include <memory>
 #include <string>
 #include <cstdint>
 
@@ -113,9 +115,18 @@ public:
 #endif
 
 protected:
+    /**
+     * Run a task on the UI thread, unless this screen is destroyed first. Safe to call from any
+     * thread, as long as this screen isn't being destroyed at that moment.
+     */
+    void postToUi(std::function<void()> task);
+
     ScreenManager& m_screenManager;
     std::string m_name;
     ScreenState m_state = ScreenState::Created;
+
+    // Tasks hold a weak reference to this, and skip running once the screen has gone
+    std::shared_ptr<void> m_aliveToken = std::make_shared<int>(0);
 
 #ifdef SMARTHUB_ENABLE_LVGL
     lv_obj_t* m_container = nullptr;
