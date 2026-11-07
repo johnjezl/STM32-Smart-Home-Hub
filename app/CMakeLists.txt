@@ -158,6 +158,7 @@ set(CORE_SOURCES
     src/core/Logger.cpp
     src/core/Config.cpp
     src/core/EventBus.cpp
+    src/core/Process.cpp
     src/core/Application.cpp
 )
 
