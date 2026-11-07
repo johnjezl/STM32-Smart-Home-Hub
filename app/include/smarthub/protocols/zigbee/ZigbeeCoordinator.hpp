@@ -177,6 +177,12 @@ public:
     /**
      * Configure attribute reporting on a device
      */
+    /**
+     * Ask a device to send a cluster's reports to this coordinator. Reports go to a device's binding
+     * table, so configuring reporting alone may not make it send any.
+     */
+    bool bindCluster(uint16_t nwkAddr, uint64_t ieeeAddr, uint8_t endpoint, uint16_t cluster);
+
     bool configureReporting(uint16_t nwkAddr, uint8_t endpoint, uint16_t cluster,
                             uint16_t attrId, uint8_t dataType,
                             uint16_t minInterval, uint16_t maxInterval,

@@ -630,6 +630,23 @@ bool ZigbeeCoordinator::setHueSat(uint16_t nwkAddr, uint8_t endpoint,
                        zcl::cmd::color::MOVE_TO_HUE_SAT, payload);
 }
 
+bool ZigbeeCoordinator::bindCluster(uint16_t nwkAddr, uint64_t ieeeAddr, uint8_t endpoint, uint16_t cluster) {
+    constexpr uint8_t kDstAddrMode64Bit = 3;
+    constexpr uint8_t kCoordinatorEndpoint = 1;
+
+    ZnpFrame req(ZnpType::SREQ, ZnpSubsystem::ZDO, cmd::zdo::BIND_REQ);
+    req.appendWord(nwkAddr);            // Who the request goes to
+    req.appendQWord(ieeeAddr);          // Source of the binding: the device
+    req.appendByte(endpoint);
+    req.appendWord(cluster);
+    req.appendByte(kDstAddrMode64Bit);
+    req.appendQWord(m_ieeeAddr);        // Destination: this coordinator
+    req.appendByte(kCoordinatorEndpoint);
+
+    auto rsp = m_transport->request(req, COMMAND_TIMEOUT_MS);
+    return rsp && rsp->getByte(0) == 0;
+}
+
 bool ZigbeeCoordinator::requestNetworkAddress(uint64_t ieeeAddr) {
     ZnpFrame req(ZnpType::SREQ, ZnpSubsystem::ZDO, cmd::zdo::NWK_ADDR_REQ);
     req.appendQWord(ieeeAddr);
