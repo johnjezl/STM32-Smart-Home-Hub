@@ -7,6 +7,7 @@
 #pragma once
 
 #include <string>
+#include <utility>
 #include <vector>
 #include <functional>
 #include <memory>
@@ -152,6 +153,18 @@ public:
      * Convert signal dBm to percentage
      */
     static int dbmToPercent(int dbm);
+
+    /**
+     * Network id to SSID, from the output of wpa_cli list_networks. It's split by tabs, as SSIDs
+     * can have spaces.
+     */
+    static std::vector<std::pair<std::string, std::string>> parseNetworkList(const std::string& output);
+
+    /**
+     * A value for wpa_cli's set_network, quoted as both wpa_cli and the shell need. An SSID comes
+     * from whoever is broadcasting it, so it has to be safe to pass.
+     */
+    static std::string quoteForWpaCli(const std::string& value);
 
 private:
     // Execute wpa_cli command and return output

@@ -6,6 +6,9 @@
  */
 
 #include <gtest/gtest.h>
+#include <unistd.h>
+#include <filesystem>
+#include <cstdio>
 
 #include <smarthub/network/NetworkManager.hpp>
 
@@ -185,6 +188,44 @@ TEST(NetworkManagerStaticTest, DbmToPercentMid) {
 // ============================================================================
 // NetworkManager instance tests
 // ============================================================================
+
+TEST(WpaCliTest, NetworkListKeepsSpacesInSsids) {
+    const auto networks = NetworkManager::parseNetworkList(
+        "network id / ssid / bssid / flags\n"
+        "0\tMy Home WiFi\tany\t[CURRENT]\n"
+        "1\tOther\tany\t\n"
+        "2\t\tany\t[DISABLED]\n");
+    ASSERT_EQ(networks.size(), 3u);
+    EXPECT_EQ(networks[0].first, "0");
+    EXPECT_EQ(networks[0].second, "My Home WiFi");
+    EXPECT_EQ(networks[1].second, "Other");
+    EXPECT_EQ(networks[2].second, "");
+}
+
+TEST(WpaCliTest, NetworkListWithNothingInIt) {
+    EXPECT_TRUE(NetworkManager::parseNetworkList("").empty());
+    EXPECT_TRUE(NetworkManager::parseNetworkList("network id / ssid / bssid / flags\n").empty());
+}
+
+TEST(WpaCliTest, QuotedValueIsOneArgumentToTheShell) {
+    // Run it through a real shell: an SSID is whatever someone nearby chooses to broadcast
+    const std::string marker = "/tmp/smarthub_ssid_injection_" + std::to_string(getpid());
+    for (const std::string& value : {std::string("My Home"), std::string("Bob's-wifi"),
+                                     "x';touch " + marker + ";'", "$(touch " + marker + ")",
+                                     "`touch " + marker + "`", std::string("a\"b")}) {
+        const std::string command = "printf %s " + NetworkManager::quoteForWpaCli(value);
+        FILE* pipe = popen(command.c_str(), "r");
+        ASSERT_NE(pipe, nullptr);
+        std::string output;
+        char buffer[256];
+        while (fgets(buffer, sizeof(buffer), pipe)) output += buffer;
+        pclose(pipe);
+
+        EXPECT_EQ(output, "\"" + value + "\"");
+        EXPECT_FALSE(std::filesystem::exists(marker)) << value;
+    }
+    std::filesystem::remove(marker);
+}
 
 class NetworkManagerTest : public ::testing::Test {
 protected:

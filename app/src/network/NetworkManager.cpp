@@ -180,16 +180,7 @@ bool NetworkManager::forgetNetwork(const std::string& ssid) {
     std::string listOutput = executeCommand(
         "wpa_cli -i " + m_wifiInterface + " list_networks");
 
-    std::istringstream iss(listOutput);
-    std::string line;
-    std::getline(iss, line);  // Skip header
-
-    while (std::getline(iss, line)) {
-        // Format: network_id / ssid / bssid / flags
-        std::istringstream lineStream(line);
-        std::string networkId, networkSsid;
-        lineStream >> networkId >> networkSsid;
-
+    for (const auto& [networkId, networkSsid] : parseNetworkList(listOutput)) {
         if (networkSsid == ssid) {
             executeCommand("wpa_cli -i " + m_wifiInterface +
                           " remove_network " + networkId);
@@ -214,14 +205,7 @@ std::vector<std::string> NetworkManager::getSavedNetworks() const {
     std::string output = executeCommand(
         "wpa_cli -i " + m_wifiInterface + " list_networks");
 
-    std::istringstream iss(output);
-    std::string line;
-    std::getline(iss, line);  // Skip header
-
-    while (std::getline(iss, line)) {
-        std::istringstream lineStream(line);
-        std::string networkId, ssid;
-        lineStream >> networkId >> ssid;
+    for (const auto& [networkId, ssid] : parseNetworkList(output)) {
         if (!ssid.empty()) {
             networks.push_back(ssid);
         }
@@ -250,6 +234,39 @@ int NetworkManager::dbmToPercent(int dbm) {
     if (dbm <= -90) return 0;
     if (dbm >= -30) return 100;
     return (dbm + 90) * 100 / 60;
+}
+
+std::vector<std::pair<std::string, std::string>> NetworkManager::parseNetworkList(const std::string& output) {
+    std::vector<std::pair<std::string, std::string>> networks;
+    std::istringstream lines(output);
+    std::string line;
+    std::getline(lines, line);  // Skip header
+
+    // Format: network_id, ssid, bssid, flags
+    while (std::getline(lines, line)) {
+        const size_t idEnd = line.find('\t');
+        if (idEnd == std::string::npos) {
+            continue;
+        }
+        const size_t ssidEnd = line.find('\t', idEnd + 1);
+        networks.emplace_back(line.substr(0, idEnd),
+                              line.substr(idEnd + 1, ssidEnd == std::string::npos ? ssidEnd : ssidEnd - idEnd - 1));
+    }
+    return networks;
+}
+
+std::string NetworkManager::quoteForWpaCli(const std::string& value) {
+    // wpa_cli wants "value". Then single quotes for the shell, in which only ' itself is special.
+    std::string quoted = "'\"";
+    for (char c : value) {
+        if (c == '\'') {
+            quoted += "'\\''";
+        } else {
+            quoted += c;
+        }
+    }
+    quoted += "\"'";
+    return quoted;
 }
 
 std::string NetworkManager::executeCommand(const std::string& command) const {
@@ -474,15 +491,7 @@ void NetworkManager::connectWorker(const std::string& ssid,
         "wpa_cli -i " + m_wifiInterface + " list_networks");
 
     std::string networkId;
-    std::istringstream iss(listOutput);
-    std::string line;
-    std::getline(iss, line);  // Skip header
-
-    while (std::getline(iss, line)) {
-        std::istringstream lineStream(line);
-        std::string id, savedSsid;
-        lineStream >> id >> savedSsid;
-
+    for (const auto& [id, savedSsid] : parseNetworkList(listOutput)) {
         if (savedSsid == ssid) {
             networkId = id;
             break;
@@ -509,16 +518,18 @@ void NetworkManager::connectWorker(const std::string& ssid,
 
         // Set SSID (must be quoted)
         executeCommand("wpa_cli -i " + m_wifiInterface +
-                      " set_network " + networkId + " ssid '\"" + ssid + "\"'");
+                      " set_network " + networkId + " ssid " + quoteForWpaCli(ssid));
 
-        // Set password or key_mgmt for open networks
         if (password.empty()) {
             executeCommand("wpa_cli -i " + m_wifiInterface +
                           " set_network " + networkId + " key_mgmt NONE");
-        } else {
-            executeCommand("wpa_cli -i " + m_wifiInterface +
-                          " set_network " + networkId + " psk '\"" + password + "\"'");
         }
+    }
+
+    // Also for a network already listed, as this may be correcting a mistyped password
+    if (!password.empty()) {
+        executeCommand("wpa_cli -i " + m_wifiInterface +
+                      " set_network " + networkId + " psk " + quoteForWpaCli(password));
     }
 
     // Enable the network
@@ -572,7 +583,11 @@ void NetworkManager::connectWorker(const std::string& ssid,
             result.ipAddress = m_status.ipAddress;
 
             // Save config so it persists across reboots
-            executeCommand("wpa_cli -i " + m_wifiInterface + " save_config");
+            const std::string saved = executeCommand("wpa_cli -i " + m_wifiInterface + " save_config");
+            if (saved.find("OK") == std::string::npos) {
+                LOG_WARN("NetworkManager: Couldn't save '%s', so it won't be there after a reboot",
+                         ssid.c_str());
+            }
 
             LOG_INFO("NetworkManager: Connected to '%s', IP: %s",
                      ssid.c_str(), result.ipAddress.c_str());
