@@ -163,6 +163,8 @@ DeviceType ZigbeeDeviceDatabase::parseDeviceType(const std::string& typeStr) con
         return DeviceType::WaterSensor;
     } else if (lower == "co" || lower == "co_sensor") {
         return DeviceType::CoSensor;
+    } else if (lower == "alarm" || lower == "alarm_sensor") {
+        return DeviceType::AlarmSensor;
     }
 
     return DeviceType::Unknown;

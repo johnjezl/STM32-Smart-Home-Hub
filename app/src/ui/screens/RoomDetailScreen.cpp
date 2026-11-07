@@ -70,7 +70,7 @@ void RoomDetailScreen::onUpdate(uint32_t deltaMs) {
         refreshSensorPanel();
         for (const auto& [deviceId, label] : m_sensorRowValues) {
             if (auto device = m_deviceManager.getDevice(deviceId)) {
-                lv_label_set_text(label, sensorValueText(device->type(), device->getState()).c_str());
+                showSensorRowValue(label, device->type(), device->getState());
             }
         }
         m_sensorUpdateMs = 0;
@@ -257,6 +257,11 @@ void RoomDetailScreen::refreshSensorPanel() {
                                 sensors.activeAlarms.empty() ? m_theme.textSecondary() : m_theme.error(), 0);
 }
 
+void RoomDetailScreen::showSensorRowValue(lv_obj_t* label, DeviceType type, const nlohmann::json& state) {
+    lv_label_set_text(label, sensorValueText(type, state).c_str());
+    lv_obj_set_style_text_color(label, activeAlarmText(type, state).empty() ? m_theme.textPrimary() : m_theme.error(), 0);
+}
+
 void RoomDetailScreen::refreshDeviceList() {
     if (!m_deviceList) return;
 
@@ -290,8 +295,7 @@ void RoomDetailScreen::refreshDeviceList() {
         lv_obj_t* row = createDeviceRow(m_deviceList, device->id(), device->name(), typeStr, canSwitch, isOn);
         if (!canSwitch) {
             lv_obj_t* value = lv_label_create(row);
-            lv_label_set_text(value, sensorValueText(device->type(), state).c_str());
-            lv_obj_set_style_text_color(value, m_theme.textPrimary(), 0);
+            showSensorRowValue(value, device->type(), state);
             lv_obj_align(value, LV_ALIGN_RIGHT_MID, 0, 0);
             m_sensorRowValues.emplace_back(device->id(), value);
         }

@@ -334,6 +334,13 @@ TEST_F(DeviceTest, ASensorShowsAllThatItMeasures) {
     EXPECT_EQ(sensorValueText(DeviceType::MotionSensor, {{"temperature", 22.5}}), "72.5°F") << "before any motion report";
     EXPECT_EQ(sensorValueText(DeviceType::ContactSensor, {{"contact", true}, {"temperature", 22.5}}), "Closed / 72.5°F");
     EXPECT_EQ(sensorValueText(DeviceType::WaterSensor, {{"alarm", false}, {"temperature", 22.5}}), "Clear / 72.5°F");
+    EXPECT_EQ(sensorValueText(DeviceType::TemperatureSensor, {{"temperature", 22.5}, {"illuminance", 120}}), "72.5°F / 120 lux");
+    EXPECT_EQ(sensorValueText(DeviceType::TemperatureSensor, {{"illuminance", 120}}), "120 lux");
+    EXPECT_EQ(sensorValueText(DeviceType::HumiditySensor, {{"humidity", 45}, {"illuminance", 120}}), "45% / 120 lux");
+
+    MotionSensor withLight("m", "Hall", "local", "", true);
+    EXPECT_EQ(sensorValueText(withLight.type(), withLight.getState()), "--") << "no report yet isn't 0 lux";
+    EXPECT_EQ(withLight.illuminance(), 0);
 }
 
 TEST_F(DeviceTest, WhatOtherSensorsMeasureCountsTowardsTheRoom) {

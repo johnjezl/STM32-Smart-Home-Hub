@@ -585,7 +585,7 @@ class SmartHubApp {
                     <div class="room-device-type">${this.escapeHtml(sensor.type)}</div>
                 </div>
             </div>
-            <div class="room-sensor-value">${this.escapeHtml(value.text)}</div>
+            <div class="room-sensor-value ${value.colorClass === 'alarm' ? 'alarm' : ''}">${this.escapeHtml(value.text)}</div>
         `;
         return row;
     }

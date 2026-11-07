@@ -305,6 +305,9 @@ TestRunner.describe('Sensor Value Formatting', () => {
         TestRunner.assertEqual(sensorValue({ type: 'motion_sensor', state: { temperature: 22.5 } }).text, '72.5°F',
             'a reading before any motion report');
         TestRunner.assertEqual(sensorValue({ type: 'water_sensor', state: { alarm: false, temperature: 22.5 } }).text, 'Clear / 72.5°F');
+        TestRunner.assertEqual(sensorValue({ type: 'temperature_sensor', state: { temperature: 22.5, illuminance: 120 } }).text, '72.5°F / 120 lux');
+        TestRunner.assertEqual(sensorValue({ type: 'temperature_sensor', state: { illuminance: 120 } }).text, '120 lux');
+        TestRunner.assertEqual(sensorValue({ type: 'humidity_sensor', state: { humidity: 45, illuminance: 120 } }).text, '45% / 120 lux');
     });
 
     TestRunner.it('should count what other sensors measure towards the room', () => {

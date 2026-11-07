@@ -5,7 +5,10 @@
  */
 #pragma once
 
+#include "smarthub/devices/IDevice.hpp"
 #include "smarthub/ui/Screen.hpp"
+
+#include <nlohmann/json.hpp>
 #include <memory>
 #include <vector>
 #include <string>
@@ -47,6 +50,7 @@ private:
     lv_obj_t* createSensorSection(const char* title, lv_obj_t** valueLabel);
     void refreshSensorPanel();
     void refreshDeviceList();
+    void showSensorRowValue(lv_obj_t* label, DeviceType type, const nlohmann::json& state);
 
     lv_obj_t* createDeviceRow(lv_obj_t* parent, const std::string& deviceId,
                                const std::string& name, const std::string& type,
