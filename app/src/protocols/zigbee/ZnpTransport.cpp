@@ -283,6 +283,17 @@ std::optional<ZnpFrame> ZnpTransport::request(const ZnpFrame& frame, int timeout
 
     std::unique_lock<std::mutex> lock(m_requestMutex);
 
+    // Let the responses to requests that timed out arrive first, so this one isn't given one of
+    // them. A late response that hasn't come by the deadline is assumed lost.
+    if (!m_lateResponses.empty()) {
+        m_responseCv.wait_until(lock, m_lateResponsesUntil,
+                                [this] { return !m_running || m_lateResponses.empty(); });
+        if (!m_lateResponses.empty()) {
+            LOG_DEBUG("Gave up on %zu late response(s)", m_lateResponses.size());
+            m_lateResponses.clear();
+        }
+    }
+
     // Set up expected response
     // Response has same subsystem and command, but SRSP type
     m_expectedCmd0 = static_cast<uint8_t>(ZnpType::SRSP) |
@@ -304,6 +315,8 @@ std::optional<ZnpFrame> ZnpTransport::request(const ZnpFrame& frame, int timeout
         if (m_responseCv.wait_until(lock, deadline) == std::cv_status::timeout) {
             LOG_WARN("Timeout waiting for response to %s", frame.toString().c_str());
             m_waitingForResponse = false;
+            m_lateResponses.emplace_back(m_expectedCmd0, m_expectedCmd1);
+            m_lateResponsesUntil = std::chrono::steady_clock::now() + m_lateResponseWait;
             return std::nullopt;
         }
     }
@@ -417,9 +430,18 @@ void ZnpTransport::dispatchFrame(const ZnpFrame& frame) {
         // Check if this is the response we're waiting for
         std::lock_guard<std::mutex> lock(m_requestMutex);
 
-        if (m_waitingForResponse &&
+        if (!m_lateResponses.empty() && frame.cmd0() == m_lateResponses.front().first &&
+            frame.cmd1() == m_lateResponses.front().second) {
+            // No request waits while late responses are outstanding, so this is the oldest one's
+            LOG_WARN("Late response, after its request timed out: %s", frame.toString().c_str());
+            m_lateResponses.pop_front();
+            m_responseCv.notify_all();
+        } else if (m_waitingForResponse &&
             frame.cmd0() == m_expectedCmd0 &&
             frame.cmd1() == m_expectedCmd1) {
+            // The first is the answer. Any more before the request wakes are unexpected, rather
+            // than replacing it.
+            m_waitingForResponse = false;
             m_pendingResponse = frame;
             m_responseCv.notify_one();
         } else {

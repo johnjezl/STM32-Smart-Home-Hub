@@ -14,6 +14,8 @@
 #include <condition_variable>
 #include <queue>
 #include <atomic>
+#include <chrono>
+#include <deque>
 #include <memory>
 
 namespace smarthub::zigbee {
@@ -126,6 +128,12 @@ public:
     bool resetCoordinator();
 
     /**
+     * How long a request waits for the late response to an earlier request that timed out,
+     * before going ahead. The default is 1 s.
+     */
+    void setLateResponseWait(std::chrono::milliseconds wait) { m_lateResponseWait = wait; }
+
+    /**
      * Get port name
      */
     const std::string& portName() const { return m_port; }
@@ -167,6 +175,14 @@ private:
     uint8_t m_expectedCmd0 = 0;
     uint8_t m_expectedCmd1 = 0;
     bool m_waitingForResponse = false;
+
+    // Requests that timed out, oldest first, by their response's cmd0 and cmd1. The coordinator
+    // answers requests in order and an SRSP carries no sequence number, so a late response would
+    // otherwise be taken as the answer to the next request with the same command. The next request
+    // waits for these to arrive, up to m_lateResponseWait after the latest timeout.
+    std::deque<std::pair<uint8_t, uint8_t>> m_lateResponses;
+    std::chrono::steady_clock::time_point m_lateResponsesUntil;
+    std::chrono::milliseconds m_lateResponseWait{1000};
 
     // Indications are delivered on their own thread, in order. The reader thread has
     // to stay free: a callback can make a request, and only the reader delivers its reply.
