@@ -118,8 +118,7 @@ SmartHub uses **Buildroot 2025.02.5** with two external trees:
         ├── configs/smarthub_defconfig
         └── board/smarthub/
             ├── overlay/     # Root filesystem overlay
-            ├── post_build.sh
-            └── post_image.sh
+            └── post_build.sh
 ```
 
 ### Installed Packages
