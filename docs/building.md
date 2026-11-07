@@ -55,6 +55,24 @@ cd STM32-Smart-Home-Hub
 
 The paths below assume the directory holding all three is `~/projects/smarthub`, but it can be anywhere without spaces in its path, which Buildroot doesn't support.
 
+### Logging In
+
+The image has no credentials committed. Give it yours when building:
+
+```bash
+# An SSH public key, or a file of them
+export SMARTHUB_AUTHORIZED_KEYS=~/.ssh/id_ed25519.pub
+
+# Optional, for the serial console: a hash from `openssl passwd -6`
+export SMARTHUB_ROOT_PASSWORD_HASH='$6$...'
+
+./tools/build.sh
+```
+
+Without them the image works, but nobody can log in, and the build warns about it. A rebuild only picks these up if the image is built again, as they're applied when it's put together.
+
+The app and M4 firmware are part of the image, from this repository, so they start at boot with no further setup. To rebuild them after a change, run `./tools/build.sh smarthub-app-rebuild all`.
+
 ### Directory Structure
 
 ```

@@ -31,11 +31,22 @@ if [ -d "${TARGET_DIR}/etc/mosquitto" ]; then
     touch "${TARGET_DIR}/etc/mosquitto/passwd"
 fi
 
-# Set SSH directory permissions
+# Logging in. Nothing is committed: a key and a password hash come from the person building, and
+# without them the image still works, but has no login. See "Logging In" in docs/building.md.
 mkdir -p "${TARGET_DIR}/root/.ssh"
 chmod 700 "${TARGET_DIR}/root/.ssh"
+if [ -n "${SMARTHUB_AUTHORIZED_KEYS:-}" ]; then
+    cp "${SMARTHUB_AUTHORIZED_KEYS}" "${TARGET_DIR}/root/.ssh/authorized_keys"
+fi
 if [ -f "${TARGET_DIR}/root/.ssh/authorized_keys" ]; then
     chmod 600 "${TARGET_DIR}/root/.ssh/authorized_keys"
+else
+    echo "WARNING: no SSH key in this image, so it can't be logged into over the network"
+fi
+# The defconfig's empty password would let anyone in at the console
+sed -i "s|^root:[^:]*:|root:${SMARTHUB_ROOT_PASSWORD_HASH:-*}:|" "${TARGET_DIR}/etc/shadow"
+if [ -z "${SMARTHUB_ROOT_PASSWORD_HASH:-}" ]; then
+    echo "WARNING: no root password in this image, so it can't be logged into at the console"
 fi
 
 # Create WiFi firmware symlink for STM32MP157F-DK2 (Murata 1DX / BCM43430)
