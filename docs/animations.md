@@ -284,7 +284,7 @@ theme.applySuccessStyle(inputField);
 
 ## High Contrast Mode
 
-For accessibility, use high contrast mode:
+For accessibility, use high contrast mode. Set it before the screens are built: they take their colours when they're built, so a change later only reaches screens built after it.
 
 ```cpp
 ThemeManager theme;
