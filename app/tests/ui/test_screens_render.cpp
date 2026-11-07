@@ -416,6 +416,7 @@ TEST_F(ScreenRenderTest, Settings) {
 
     EXPECT_GE(test::countText(root, "Settings"), 1);
     EXPECT_GE(test::countText(root, "Security"), 1);
+    EXPECT_GE(test::countText(root, "Brightness, timeout"), 1);
 }
 
 TEST_F(ScreenRenderTest, DisplaySettings) {
@@ -423,6 +424,10 @@ TEST_F(ScreenRenderTest, DisplaySettings) {
         *screenManager, *themeManager, *displayManager));
 
     EXPECT_GE(test::countText(root, "Display Settings"), 1);
+    EXPECT_GE(test::countText(root, "Brightness"), 1);
+    // No theme choice, as it only reached screens built after it (#28)
+    EXPECT_EQ(test::countText(root, "Theme"), 0);
+    EXPECT_EQ(test::countText(root, "Light"), 0);
 }
 
 TEST_F(ScreenRenderTest, SecuritySettings) {
