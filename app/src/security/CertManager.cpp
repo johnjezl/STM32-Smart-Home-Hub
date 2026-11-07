@@ -63,6 +63,12 @@ bool writePem(const std::string& path, int mode, const std::function<bool(FILE*)
     if (fd < 0) {
         return false;
     }
+    // The mode given to open is reduced by the umask, which is 077 on the board
+    if (::fchmod(fd, static_cast<mode_t>(mode)) != 0) {
+        ::close(fd);
+        ::unlink(temporary.c_str());
+        return false;
+    }
     FilePtr file(fdopen(fd, "w"));
     if (!file) {
         ::close(fd);
