@@ -61,8 +61,10 @@ public:
     ~ThemeManager() = default;
 
     /**
-     * Set the theme mode
-     * @param mode Light or Dark
+     * Set the theme mode. Only call this before the screens are built: they take their colours
+     * when they're built, so a change afterwards reaches only screens built later and leaves the
+     * rest half themed (#28).
+     * @param mode Light, Dark or HighContrast
      */
     void setMode(ThemeMode mode);
 
@@ -72,7 +74,7 @@ public:
     ThemeMode mode() const { return m_mode; }
 
     /**
-     * Toggle between light and dark mode
+     * Toggle between light and dark mode, with the same limit as setMode
      */
     void toggle();
 
