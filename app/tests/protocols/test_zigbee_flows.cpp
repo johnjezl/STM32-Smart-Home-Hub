@@ -132,6 +132,137 @@ bool eventually(Predicate predicate, std::chrono::milliseconds timeout = 5s) {
 } // namespace
 
 // ============================================================================
+// Late responses (#44)
+// ============================================================================
+
+namespace {
+
+ZnpFrame dataRequest(uint16_t nwkAddr) {
+    ZnpFrame frame(ZnpType::SREQ, ZnpSubsystem::AF, cmd::af::DATA_REQUEST);
+    frame.appendWord(nwkAddr);
+    return frame;
+}
+
+void sendLateDataRequestResponse(FakeZnpCoordinator& fake, uint8_t status) {
+    fake.injectRaw(ZnpFrame(ZnpType::SRSP, ZnpSubsystem::AF, cmd::af::DATA_REQUEST,
+                            std::vector<uint8_t>{status})
+                       .serialize());
+}
+
+// The first AF_DATA_REQUEST gets no answer, and the rest are answered with success
+struct FirstRequestUnanswered {
+    FakeZnpCoordinator fake;
+    ZnpTransport transport{fake.createSerialPort(), "fake"};
+
+    FirstRequestUnanswered() {
+        std::shared_ptr<std::atomic<int>> calls = std::make_shared<std::atomic<int>>(0);
+        fake.setResponder(ZnpSubsystem::AF, cmd::af::DATA_REQUEST,
+                          [calls](const ZnpFrame&) -> std::optional<std::vector<uint8_t>> {
+                              if ((*calls)++ == 0) return std::nullopt;
+                              return std::vector<uint8_t>{0x00};
+                          });
+        transport.open();
+    }
+    ~FirstRequestUnanswered() { transport.close(); }
+};
+
+}  // namespace
+
+TEST(ZnpLateResponse, LateResponseIsNotTakenAsTheNextRequestsAnswer) {
+    // The coordinator answers in order: while it's busy with the first request, the second
+    // can't be answered before the first. So nothing is answered by the fake here, and this
+    // test sends the late failure, then the second request's success once that's been sent.
+    FakeZnpCoordinator fake;
+    fake.setResponder(ZnpSubsystem::AF, cmd::af::DATA_REQUEST,
+                      [](const ZnpFrame&) -> std::optional<std::vector<uint8_t>> { return std::nullopt; });
+    ZnpTransport transport{fake.createSerialPort(), "fake"};
+    ASSERT_TRUE(transport.open());
+    transport.setLateResponseWait(5s);
+    EXPECT_FALSE(transport.request(dataRequest(0x1111), 100));
+
+    std::thread coordinator([&] {
+        std::this_thread::sleep_for(100ms);
+        sendLateDataRequestResponse(fake, 0xCD);
+        // Apart, so the late answer would already have been taken by a request that wasn't
+        // waiting for it to go by
+        std::this_thread::sleep_for(100ms);
+        if (fake.waitForSent(ZnpSubsystem::AF, cmd::af::DATA_REQUEST, 2)) {
+            sendLateDataRequestResponse(fake, 0x00);
+        }
+    });
+    const auto start = std::chrono::steady_clock::now();
+    auto response = transport.request(dataRequest(0x2222), 2000);
+    coordinator.join();
+    transport.close();
+
+    ASSERT_TRUE(response);
+    EXPECT_EQ(response->getByte(0), 0x00) << "took the first request's late answer";
+    // It went ahead once the late answer came, rather than waiting out the 5 s
+    EXPECT_LT(std::chrono::steady_clock::now() - start, 2s);
+}
+
+TEST(ZnpLateResponse, ASecondResponseDoesNotReplaceTheFirst) {
+    // Two answers arrive together: the request gets the first, not whichever came last
+    FakeZnpCoordinator fake;
+    fake.setResponder(ZnpSubsystem::AF, cmd::af::DATA_REQUEST,
+                      [&fake](const ZnpFrame&) -> std::optional<std::vector<uint8_t>> {
+                          sendLateDataRequestResponse(fake, 0x00);
+                          return std::vector<uint8_t>{0xCD};
+                      });
+    ZnpTransport transport{fake.createSerialPort(), "fake"};
+    ASSERT_TRUE(transport.open());
+    auto response = transport.request(dataRequest(0x1111), 1000);
+    transport.close();
+    ASSERT_TRUE(response);
+    EXPECT_EQ(response->getByte(0), 0x00);
+}
+
+TEST(ZnpLateResponse, LateResponseBetweenRequestsIsDropped) {
+    FirstRequestUnanswered setup;
+    EXPECT_FALSE(setup.transport.request(dataRequest(0x1111), 100));
+    sendLateDataRequestResponse(setup.fake, 0xCD);
+    std::this_thread::sleep_for(100ms);
+
+    const auto start = std::chrono::steady_clock::now();
+    auto response = setup.transport.request(dataRequest(0x2222), 1000);
+    ASSERT_TRUE(response);
+    EXPECT_EQ(response->getByte(0), 0x00);
+    EXPECT_LT(std::chrono::steady_clock::now() - start, 500ms);
+}
+
+TEST(ZnpLateResponse, ResponseThatNeverComesHoldsUpOnlyBriefly) {
+    FirstRequestUnanswered setup;
+    setup.transport.setLateResponseWait(300ms);
+    EXPECT_FALSE(setup.transport.request(dataRequest(0x1111), 100));
+
+    const auto start = std::chrono::steady_clock::now();
+    auto response = setup.transport.request(dataRequest(0x2222), 1000);
+    const auto took = std::chrono::steady_clock::now() - start;
+    ASSERT_TRUE(response);
+    EXPECT_EQ(response->getByte(0), 0x00);
+    EXPECT_LT(took, 1s);
+
+    // Given up on, so it no longer holds anything up
+    const auto again = std::chrono::steady_clock::now();
+    EXPECT_TRUE(setup.transport.request(dataRequest(0x3333), 1000));
+    EXPECT_LT(std::chrono::steady_clock::now() - again, 200ms);
+}
+
+TEST(ZnpLateResponse, OtherCommandsStillGetTheirOwnAnswers) {
+    FirstRequestUnanswered setup;
+    setup.transport.setLateResponseWait(5s);
+    EXPECT_FALSE(setup.transport.request(dataRequest(0x1111), 100));
+
+    std::thread late([&] {
+        std::this_thread::sleep_for(100ms);
+        sendLateDataRequestResponse(setup.fake, 0xCD);
+    });
+    auto ping = setup.transport.request(ZnpFrame(ZnpType::SREQ, ZnpSubsystem::SYS, cmd::sys::PING), 1000);
+    late.join();
+    EXPECT_TRUE(ping);
+}
+
+// ============================================================================
 // Coordinator bring-up
 // ============================================================================
 
