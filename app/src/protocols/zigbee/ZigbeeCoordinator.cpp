@@ -631,8 +631,14 @@ bool ZigbeeCoordinator::setHueSat(uint16_t nwkAddr, uint8_t endpoint,
 }
 
 bool ZigbeeCoordinator::bindCluster(uint16_t nwkAddr, uint64_t ieeeAddr, uint8_t endpoint, uint16_t cluster) {
+    // Reports sent to address 0 would go nowhere, where a device might otherwise have reported to
+    // the coordinator with no binding at all
+    if (m_ieeeAddr == 0) {
+        return false;
+    }
+
     constexpr uint8_t kDstAddrMode64Bit = 3;
-    constexpr uint8_t kCoordinatorEndpoint = 1;
+    constexpr uint8_t kCoordinatorEndpoint = 1;  // The one startNetwork registers
 
     ZnpFrame req(ZnpType::SREQ, ZnpSubsystem::ZDO, cmd::zdo::BIND_REQ);
     req.appendWord(nwkAddr);            // Who the request goes to

@@ -1411,7 +1411,7 @@ TEST_F(ZigbeeHandlerFlowTest, DeviceRefusingABindIsLogged) {
     refusal.appendWord(LIGHT.nwkAddr);
     refusal.appendByte(0x84);  // Not supported
     fake.injectIndication(refusal);
-    std::this_thread::sleep_for(200ms);
+    std::this_thread::sleep_for(1s);  // Captured output can't be looked at until it's finished
     EXPECT_NE(testing::internal::GetCapturedStderr().find("refused a bind"), std::string::npos);
 }
 
@@ -1423,6 +1423,7 @@ TEST_F(ZigbeeHandlerFlowTest, RefusedBindDoesNotStopReportingSetup) {
 
     ASSERT_NE(pair(LIGHT), nullptr);
 
+    EXPECT_FALSE(fake.sentFrames(ZnpSubsystem::ZDO, cmd::zdo::BIND_REQ).empty());
     bool configured = false;
     for (const AirFrame& frame : airFrames(fake)) {
         configured = configured || frame.zclCommand == zcl::global_cmd::CONFIGURE_REPORTING;
