@@ -1,7 +1,9 @@
 # Phase 6: M4 Bare-Metal Firmware - Detailed TODO
 
 ## Overview
-**Status**: Alpha - Using Linux-side VirtIO polling (IPCC blocked by TrustZone)
+**Status**: Alpha - RPMsg works through `/dev/ttyRPMSG0`; sensors don't yet (#18)
+
+**Correction:** IPCC was never blocked by TrustZone. The bus fault came from the M4 not enabling its own IPCC clock (`RCC_MC_AHB3ENSETR`). With that set, Linux and the M4 use RPMsg normally through `/dev/ttyRPMSG0`. See [m4-firmware.md](m4-firmware.md). What this page says about polling is history.
 **Objective**: Implement real-time sensor acquisition and time-critical functions on the Cortex-M4 core.
 **Prerequisites**: Phase 2 complete (core application with RPMsg)
 
@@ -28,9 +30,8 @@
 | Hardware: Firmware load | ✅ | remoteproc loads and runs firmware |
 | Hardware: Resource table | ✅ | Linux detects and registers VirtIO device |
 | Hardware: VirtIO vring | ✅ | M4 writes to TX used ring correctly (idx=2) |
-| Hardware: IPCC notification | ❌ | **BLOCKED**: TrustZone prevents M4 IPCC access |
-| Hardware: Linux VirtIO polling | ✅ | rpmsg_poll tool reads messages via /dev/mem |
-| Hardware: Communication | ✅ | Alpha: Polling-based M4→A7 communication working |
+| Hardware: IPCC notification | ✅ | Needs the M4's own IPCC clock enable |
+| Hardware: Communication | ✅ | Both ways through `/dev/ttyRPMSG0` |
 
 ---
 
@@ -185,68 +186,9 @@ cat /sys/class/remoteproc/remoteproc0/state
 The M4 firmware loads and runs successfully. VirtIO vring handling is now correct
 (TX used ring shows idx=2 with proper NS announcement and status message).
 
-#### Root Cause: TrustZone Blocks IPCC Access
+#### Why IPCC Faulted
 
-**Issue**: The M4 cannot access IPCC (Inter-Processor Communication Controller) at 0x4C001000.
-Any read or write to IPCC or HSEM (0x4C000000) causes a bus fault.
-
-**Evidence**:
-- M4 trace stops at "RPMSG:IPCC test" when attempting IPCC access
-- TX used ring at 0x100400A0 shows idx=2 (messages written correctly)
-- No ttyRPMSG device because Linux never receives IPCC notification
-
-**Root Cause Analysis**:
-
-1. **IPCC is NOT in ETZPC DECPROT list** - Unlike peripherals like I2C, SPI, UART which have
-   ETZPC IDs (0-86), IPCC has no ETZPC DECPROT entry. It's protected differently.
-
-2. **Current boot chain uses OP-TEE** - The buildroot config uses:
-   - `BR2_TARGET_ARM_TRUSTED_FIRMWARE_BL32_OPTEE=y`
-   - `AARCH32_SP=optee`
-
-   This means OP-TEE runs in secure world and controls security configuration.
-
-3. **IPCC is in secure peripheral address space** - Address 0x4C001000 is in a region
-   that requires secure access. The M4 runs in non-secure mode by default.
-
-4. **ST's standard configuration blocks M4 peripheral access** - Per ST documentation:
-   "In Linux deliveries, Cortex-M4 access is forbidden inside TrustZone address space"
-
-#### Solution Options
-
-**Option 1: Rebuild TF-A with SP_MIN instead of OP-TEE** ⏸️ *Deferred - boot failure*
-
-Attempted but **failed**: SP_MIN causes boot loop at "BL2: Booting BL32".
-
-Configuration tried:
-```
-BR2_TARGET_ARM_TRUSTED_FIRMWARE_BL32_SP_MIN=y
-BR2_TARGET_ARM_TRUSTED_FIRMWARE_ADDITIONAL_VARIABLES="STM32MP_SDMMC=1 AARCH32_SP=sp_min DTB_FILE_NAME=stm32mp157f-dk2.dtb BL33_CFG=$(BINARIES_DIR)/u-boot.dtb"
-```
-
-**Failure symptoms**: Board repeatedly prints "BL2: Booting BL32" then resets.
-**Likely causes**: Memory layout mismatch, DTB configuration, or SP_MIN initialization issue.
-**Future investigation**: Debug with JTAG or add early UART prints to SP_MIN.
-
-**Option 2: Configure OP-TEE for M4 IPCC access** ⏸️ *Deferred*
-
-Requires modifying OP-TEE platform code to:
-1. Configure IPCC security registers (IPCC_C2SECCFGR, IPCC_C2PRIVCFGR)
-2. Grant M4 access to IPCC channels
-
-Location: `optee_os/core/arch/arm/plat-stm32mp1/`
-
-This is more complex but would allow keeping OP-TEE's security features.
-
-**Option 3: Linux-side VirtIO polling** ✅ *Current alpha approach*
-
-Instead of M4 sending IPCC notifications:
-1. M4 writes messages to VirtIO vring (already working - TX used ring shows idx=2)
-2. Linux A7 polls the vring for new messages using userspace tool
-3. No kernel modifications needed
-
-This approach is sufficient for alpha development and avoids TrustZone complexity.
-Implementation: `tools/rpmsg_poll` - userspace VirtIO vring polling daemon.
+The M4 has its own enable for IPCC's clock, `RCC_MC_AHB3ENSETR` bit 12. Linux enabling the clock for itself doesn't count, and until the M4 enabled it too, touching IPCC was a bus fault. That was first put down to TrustZone, and ways around that were tried here: SP_MIN instead of OP-TEE, changing OP-TEE, and polling the vrings from Linux. None are needed.
 
 #### References
 
@@ -258,8 +200,8 @@ Implementation: `tools/rpmsg_poll` - userspace VirtIO vring polling daemon.
 
 ## 6.7 Linux-Side VirtIO Polling (Alpha Workaround)
 
-Since IPCC notifications are blocked by TrustZone, we use userspace polling of the
-VirtIO vring to receive messages from the M4.
+No longer needed, as the M4 can notify Linux (see the correction above). This polled the
+VirtIO vring from userspace to receive messages from the M4.
 
 ### Memory Map
 

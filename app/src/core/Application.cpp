@@ -185,7 +185,7 @@ void Application::mainLoop(const std::atomic<bool>& stopRequested) {
         }
 
         // Poll RPMsg
-        if (m_rpmsgClient && m_rpmsgClient->isConnected()) {
+        if (m_rpmsgClient) {
             m_rpmsgClient->poll();
         }
 

@@ -1,7 +1,9 @@
 # Phase 6: M4 Bare-Metal Firmware - ALPHA COMPLETE
 
 **Completion Date**: 2025-12-31
-**Status**: Alpha (IPCC blocked by TrustZone, using Linux-side polling workaround)
+**Status**: Alpha (RPMsg works through `/dev/ttyRPMSG0`; sensors don't yet, see #18)
+
+**Correction:** IPCC was never blocked by TrustZone. The bus fault came from the M4 not enabling its own IPCC clock (`RCC_MC_AHB3ENSETR`). With that set, Linux and the M4 use RPMsg normally through `/dev/ttyRPMSG0`. See [m4-firmware.md](m4-firmware.md). What this page says about polling is history.
 
 ---
 
@@ -35,7 +37,7 @@ Phase 6 implemented bare-metal firmware for the Cortex-M4 coprocessor to handle 
 | Resource table | ✅ | Correct format, Linux detects VirtIO |
 | VirtIO vring TX | ✅ | M4 writes to used ring correctly |
 | Name Service announcement | ✅ | Sent via vring |
-| **IPCC notification** | ❌ | **BLOCKED by TrustZone** |
+| **IPCC notification** | ✅ | Needs the M4's own IPCC clock enable |
 
 ### Linux-Side Workaround
 | Component | Status | Notes |
@@ -47,39 +49,18 @@ Phase 6 implemented bare-metal firmware for the Cortex-M4 coprocessor to handle 
 
 ## What Doesn't Work
 
-### IPCC Access Blocked
+### IPCC Faulted at First
 
-The M4 cannot access the Inter-Processor Communication Controller (IPCC) at 0x4C001000. Any read or write causes a bus fault.
-
-**Root Cause**: The STM32MP1 boot chain uses OP-TEE (TrustZone), which places IPCC in the secure peripheral space. The M4 runs in non-secure mode.
-
-**Evidence**:
-- M4 trace stops at "RPMSG:IPCC test"
-- TX used ring shows correct message writes (idx=2)
-- Linux never receives IPCC interrupt → no ttyRPMSG device
+Touching the Inter-Processor Communication Controller (IPCC) at 0x4C001000 was a bus fault, which was first put down to TrustZone. The real cause was the M4 not enabling its own IPCC clock, `RCC_MC_AHB3ENSETR` bit 12. It does now.
 
 ---
 
-## Solution Options
+## What Was Tried Before That
 
-### Option 1: SP_MIN Instead of OP-TEE
-**Status**: ⏸️ Deferred (boot failure)
+SP_MIN in place of OP-TEE (a boot loop) and changing OP-TEE (not attempted). Neither is needed.
 
-Attempted configuration:
-```
-BR2_TARGET_ARM_TRUSTED_FIRMWARE_BL32_SP_MIN=y
-AARCH32_SP=sp_min
-```
-
-Result: Boot loop at "BL2: Booting BL32"
-
-### Option 2: Configure OP-TEE for M4 IPCC
-**Status**: ⏸️ Deferred (complex)
-
-Would require modifying OP-TEE platform code to grant M4 access to IPCC channels.
-
-### Option 3: Linux-Side VirtIO Polling ✅
-**Status**: Implemented (current workaround)
+### Linux-Side VirtIO Polling
+**Status**: No longer needed
 
 The `tools/rpmsg_poll` tool polls the VirtIO vring from userspace using `/dev/mem`:
 
@@ -151,7 +132,7 @@ struct SensorPayload {
 | Resource table detection | ✅ | VirtIO device registered |
 | VirtIO vring writes | ✅ | TX used ring idx=2 |
 | rpmsg_poll message read | ✅ | NS announcement visible |
-| IPCC access | ❌ | Bus fault |
+| IPCC access | ✅ | With the M4's own clock enable |
 
 ---
 
@@ -246,7 +227,6 @@ cat /sys/kernel/debug/remoteproc/remoteproc0/trace0
 | PWM output | LED dimming |
 | Watchdog timer | Reliability |
 | Low-power modes | Battery optimization |
-| IPCC fix | Requires OP-TEE modification or SP_MIN debug |
 
 ---
 
@@ -260,4 +240,4 @@ cat /sys/kernel/debug/remoteproc/remoteproc0/trace0
 
 ## Phase 6 Status: ⚠️ ALPHA COMPLETE
 
-Firmware infrastructure complete. IPCC blocked by TrustZone; using Linux-side polling workaround. Full functionality requires resolving IPCC access in future work.
+Firmware infrastructure complete. RPMsg works both ways; sensors don't yet (#18). Full functionality requires resolving IPCC access in future work.

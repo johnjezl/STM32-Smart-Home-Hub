@@ -85,13 +85,22 @@ static uint16_t g_rxLastAvailIdx = 0;  // Last RX avail->idx we processed
 
 static constexpr uint32_t LOCAL_ADDR = 0x400;  // Our endpoint address
 
-/* Registers this file uses. Direct, as stm32mp1xx.h's RCC layout is wrong (see #18). */
-#define REG(address) (*(volatile uint32_t*)(address))
-static constexpr uint32_t RCC_MC_AHB3ENSETR = 0x50000A08;
+/* From resource_table.c. Linux sets DRIVER_OK once the vrings are initialized and the name
+ * service is listening. Until then they hold whatever the last firmware left there. */
+extern "C" uint8_t rsc_vdev_status(void);
+static constexpr uint8_t VIRTIO_CONFIG_S_DRIVER_OK = 4;
+
+static constexpr uint16_t VRING_AVAIL_F_NO_INTERRUPT = 1;
+
+/* IPCC channels, as Linux's stm32_rproc uses them. Each vring has its own. */
+static constexpr uint32_t CHANNEL_TX_VRING = 0;
+static constexpr uint32_t CHANNEL_RX_VRING = 1;
+static constexpr uint32_t KICK_CHANNELS = (1u << CHANNEL_TX_VRING) | (1u << CHANNEL_RX_VRING);
+static constexpr uint32_t STOP_CHANNELS = (1u << 2) | (1u << 3);  /* Shutdown, detach */
+
+/* The M4's own enable for IPCC's clock. Direct, as stm32mp1xx.h's RCC layout is wrong (see #18). */
+#define RCC_MC_AHB3ENSETR (*(volatile uint32_t*)0x50000A08)
 static constexpr uint32_t RCC_MC_AHB3ENSETR_IPCCEN = 1u << 12;
-static constexpr uint32_t IPCC_C1TOC2SR = 0x4C001000 + 0x0C;
-static constexpr uint32_t IPCC_C2SCR = 0x4C001000 + 0x18;
-static constexpr uint32_t IPCC_C2TOC1SR = 0x4C001000 + 0x1C;
 
 /* Debug trace buffer at 0x10049000 */
 static volatile char* g_trace = (volatile char*)0x10049000;
@@ -135,43 +144,15 @@ bool Rpmsg::init() {
 
     /* The M4 has its own enable for IPCC's clock. Linux enabling it for itself doesn't count,
      * and without this, touching IPCC is a bus fault. */
-    REG(RCC_MC_AHB3ENSETR) = RCC_MC_AHB3ENSETR_IPCCEN;
+    RCC_MC_AHB3ENSETR = RCC_MC_AHB3ENSETR_IPCCEN;
     __DSB();
 
-    /* Initialize tracking indices */
+    /* Linux starts both vrings from zero. poll() announces us once they're ready. */
     g_txLastAvailIdx = 0;
-    g_rxLastAvailIdx = g_rxAvail->idx;
+    g_rxLastAvailIdx = 0;
 
     m_ready = true;
     m_lastError = nullptr;
-
-    trace("RPMSG:waiting for buffers");
-
-    /* Wait for Linux to provide TX buffers - use busy wait */
-    uint32_t timeout = 500000;  /* Simple counter-based timeout */
-    while (g_txAvail->idx == 0 && timeout > 0) {
-        timeout--;
-        for (volatile int i = 0; i < 100; i++) { __asm volatile("nop"); }
-    }
-
-    if (timeout == 0) {
-        trace("RPMSG:timeout");
-        m_lastError = "Timeout waiting for TX buffers";
-        return false;
-    }
-
-    trace("RPMSG:buffers ready");
-
-    trace("RPMSG:delay...");
-    /* Small delay before name service announcement - use busy wait */
-    for (volatile int i = 0; i < 100000; i++) { __asm volatile("nop"); }
-
-    trace("RPMSG:announce");
-    if (announceEndpoint()) {
-        trace("RPMSG:NS sent OK");
-    } else {
-        trace("RPMSG:NS send FAIL");
-    }
 
     trace("RPMSG:init done");
     return true;
@@ -205,19 +186,19 @@ bool Rpmsg::sendRaw(uint32_t src, uint32_t dst, const void* data, size_t len) {
 
     /* Get descriptor index from avail ring */
     uint16_t descIdx = g_txAvail->ring[g_txLastAvailIdx % VRING_NUM];
-    g_txLastAvailIdx++;
 
     /* Get buffer info from descriptor */
     volatile vring_desc* desc = &g_txDesc[descIdx];
     uint8_t* buf = (uint8_t*)(uintptr_t)desc->addr;
     uint32_t bufLen = desc->len;
 
-    /* Check payload fits */
+    /* Check payload fits. The buffer stays in the ring for a message that does. */
     size_t totalLen = sizeof(rpmsg_hdr) + len;
     if (totalLen > bufLen) {
         m_lastError = "Payload too large";
         return false;
     }
+    g_txLastAvailIdx++;
 
     /* Build RPMsg header */
     rpmsg_hdr* hdr = (rpmsg_hdr*)buf;
@@ -249,7 +230,7 @@ bool Rpmsg::sendRaw(uint32_t src, uint32_t dst, const void* data, size_t len) {
     __DSB();
 
     /* Notify host via IPCC */
-    notifyHost();
+    notifyHost(CHANNEL_TX_VRING);
 
     return true;
 }
@@ -264,10 +245,31 @@ void Rpmsg::shutdown() {
 void Rpmsg::poll() {
     if (!m_ready) return;
 
+    const uint32_t incoming = IPCC->C1TOC2SR;
+
+    /* Linux waits for this to be acknowledged before taking the vrings away, so leave them first */
+    if (incoming & STOP_CHANNELS) {
+        trace("RPMSG:stop");
+        shutdown();
+        IPCC->C2SCR = incoming & (KICK_CHANNELS | STOP_CHANNELS);
+        return;
+    }
+
     /* Linux can't kick us again until each kick is acknowledged */
-    const uint32_t kicks = REG(IPCC_C1TOC2SR) & 0x3F;
-    if (kicks != 0) {
-        REG(IPCC_C2SCR) = kicks;
+    if (incoming & KICK_CHANNELS) {
+        IPCC->C2SCR = incoming & KICK_CHANNELS;
+    }
+
+    ringPending();
+
+    if ((rsc_vdev_status() & VIRTIO_CONFIG_S_DRIVER_OK) == 0) {
+        return;
+    }
+
+    /* Tried again each time until it gets through, as it fails if there's no buffer yet */
+    if (!m_announced) {
+        m_announced = announceEndpoint();
+        trace(m_announced ? "RPMSG:NS sent OK" : "RPMSG:NS send FAIL");
     }
 
     /* Check for incoming messages in RX vring */
@@ -306,19 +308,28 @@ void Rpmsg::poll() {
         g_rxLastAvailIdx++;
 
         __DSB();
-        notifyHost();  /* So that Linux can reuse the buffer */
+
+        /* So that Linux can reuse the buffer, if it's waiting on one. It usually isn't. */
+        if ((g_rxAvail->flags & VRING_AVAIL_F_NO_INTERRUPT) == 0) {
+            notifyHost(CHANNEL_RX_VRING);
+        }
     }
 }
 
 void Rpmsg::handleIncomingMessage(const void* rhdr, const void* payload, size_t len) {
-    /* Replies go to whoever last wrote to us: Linux gives its end an address when it's opened */
-    m_hostAddr = static_cast<const rpmsg_hdr*>(rhdr)->src;
+    const rpmsg_hdr* rpmsgHdr = static_cast<const rpmsg_hdr*>(rhdr);
+    if (rpmsgHdr->dst != LOCAL_ADDR) {
+        return;
+    }
 
     protocol::DecodedMessage message;
     if (protocol::decodeMessage((const uint8_t*)payload, len, message) != protocol::DecodeResult::Ok) {
         /* Not our protocol - might be a control message */
         return;
     }
+
+    /* Replies go to whoever last wrote to us: Linux gives its end an address when it's opened */
+    m_hostAddr = rpmsgHdr->src;
 
     const MsgHeader* hdr = &message.header;
     const void* msgPayload = message.payload;
@@ -348,6 +359,10 @@ bool Rpmsg::send(MsgType type, const void* payload, size_t len) {
         m_lastError = "RPMsg not initialized";
         return false;
     }
+    if (m_hostAddr == 0) {
+        m_lastError = "No host endpoint yet";  /* Nothing has written to us, so nobody's listening */
+        return false;
+    }
 
     /* Build our message */
     uint8_t msgBuf[MAX_MSG_SIZE];
@@ -359,22 +374,23 @@ bool Rpmsg::send(MsgType type, const void* payload, size_t len) {
     m_seqNum++;
 
     /* Send via RPMsg */
-    if (m_hostAddr == 0) {
-        m_lastError = "No host endpoint yet";  /* Nothing has written to us, so nobody's listening */
-        return false;
-    }
     return sendRaw(LOCAL_ADDR, m_hostAddr, msgBuf, total);
 }
 
-void Rpmsg::notifyHost() {
-    /* Linux has channels for each vring, and treats an interrupt on either as work to look for */
-    const uint32_t occupied = REG(IPCC_C2TOC1SR);
-    for (uint32_t channel = 0; channel < 2; channel++) {
-        if ((occupied & (1u << channel)) == 0) {
-            REG(IPCC_C2SCR) = 1u << (16 + channel);
-        }
+void Rpmsg::notifyHost(uint32_t channel) {
+    m_pendingNotify |= 1u << channel;
+    ringPending();
+}
+
+void Rpmsg::ringPending() {
+    /* A channel Linux hasn't cleared yet may be one it has already looked at the vring for, so
+     * this can't count as told. It's rung once it's free, on a later poll if need be. */
+    const uint32_t ready = m_pendingNotify & ~IPCC->C2TOC1SR;
+    if (ready != 0) {
+        IPCC->C2SCR = ready << 16;
+        m_pendingNotify &= ~ready;
+        __DSB();
     }
-    __DSB();
 }
 
 bool Rpmsg::sendSensorData(uint8_t sensorId, SensorType type,
@@ -407,13 +423,3 @@ bool Rpmsg::sendPong() {
 }
 
 } // namespace smarthub::m4
-
-/**
- * IPCC RX interrupt handler
- */
-/* IPCC IRQ handler disabled - M4 doesn't have IPCC access currently */
-/*
-extern "C" void IPCC_RX0_IRQHandler(void) {
-    IPCC->C2SCR = (1 << 0);
-}
-*/

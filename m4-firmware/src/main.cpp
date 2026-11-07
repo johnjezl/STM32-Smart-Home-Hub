@@ -180,11 +180,6 @@ int main() {
     }
     trace_main("MAIN:init OK");
 
-    /* Send initial status */
-    rpmsg().sendStatus(Clock::getTicks(),
-                       g_sensors ? g_sensors->getSensorCount() : 0,
-                       g_sensors ? g_sensors->getPollingInterval() : 0);
-
     /* Main processing loop */
     while (true) {
         main_loop();

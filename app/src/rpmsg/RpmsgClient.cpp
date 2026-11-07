@@ -30,7 +30,26 @@ RpmsgClient::~RpmsgClient() {
 
 bool RpmsgClient::initialize(int pingTimeoutMs) {
     shutdown();  // In case this is a retry
+    m_wanted = true;
+    m_lastPing = std::chrono::steady_clock::now();
 
+    if (!openDevice()) {
+        return false;
+    }
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(pingTimeoutMs);
+    while (!m_m4Responded && m_connected && std::chrono::steady_clock::now() < deadline) {
+        poll();
+        if (!m_m4Responded) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+    }
+    if (!m_m4Responded) {
+        LOG_WARN("The M4 didn't answer a ping within %d ms", pingTimeoutMs);
+    }
+    return m_m4Responded;
+}
+
+bool RpmsgClient::openDevice() {
     // Try to open the RPMsg device
     m_fd = open(m_device.c_str(), O_RDWR | O_NONBLOCK);
 
@@ -51,24 +70,10 @@ bool RpmsgClient::initialize(int pingTimeoutMs) {
     LOG_INFO("RPMsg client connected to %s", m_device.c_str());
 
     // Writing only shows the device is open. The M4 has answered if a pong comes back.
-    m_lastPing = std::chrono::steady_clock::now();
-    if (!ping()) {
-        return false;
-    }
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(pingTimeoutMs);
-    while (!m_m4Responded && m_connected && std::chrono::steady_clock::now() < deadline) {
-        poll();
-        if (!m_m4Responded) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
-        }
-    }
-    if (!m_m4Responded) {
-        LOG_WARN("The M4 didn't answer a ping within %d ms", pingTimeoutMs);
-    }
-    return m_m4Responded;
+    return ping();
 }
 
-void RpmsgClient::shutdown() {
+void RpmsgClient::closeDevice() {
     if (m_fd >= 0) {
         close(m_fd);
         m_fd = -1;
@@ -78,15 +83,23 @@ void RpmsgClient::shutdown() {
     m_received.clear();
 }
 
+void RpmsgClient::shutdown() {
+    m_wanted = false;
+    closeDevice();
+}
+
 void RpmsgClient::poll() {
-    if (!m_connected || m_fd < 0) {
+    // It might have started after this did, or stopped and started again
+    const auto now = std::chrono::steady_clock::now();
+    const bool retry = !m_m4Responded && now - m_lastPing >= m_retryInterval;
+    if (m_fd < 0) {
+        if (m_wanted && retry) {
+            m_lastPing = now;
+            openDevice();
+        }
         return;
     }
-
-    // It might have started after this did
-    constexpr auto kPingInterval = std::chrono::seconds(5);
-    const auto now = std::chrono::steady_clock::now();
-    if (!m_m4Responded && now - m_lastPing >= kPingInterval) {
+    if (retry) {
         m_lastPing = now;
         ping();
     }
@@ -105,9 +118,10 @@ void RpmsgClient::poll() {
 
         if (n > 0) {
             handleReceived(buffer, static_cast<size_t>(n));
-        } else if (n < 0 && errno != EAGAIN) {
-            LOG_ERROR("RPMsg read error: %s", strerror(errno));
-            m_connected = false;
+        } else if (n == 0 || (errno != EAGAIN && errno != EINTR)) {
+            // Linux hangs up on us when the M4 stops, and the device goes away until it's back
+            LOG_WARN("RPMsg device %s has gone: %s", m_device.c_str(), n == 0 ? "hung up" : strerror(errno));
+            closeDevice();
         }
     }
 }

@@ -105,13 +105,16 @@ private:
     ~Rpmsg() = default;
 
     void handleIncomingMessage(const void* rhdr, const void* payload, size_t len);
-    void notifyHost();
+    void notifyHost(uint32_t channel);
+    void ringPending();
     bool announceEndpoint();
     bool sendRaw(uint32_t src, uint32_t dst, const void* data, size_t len);
 
     bool m_ready = false;
     uint16_t m_seqNum = 0;
     uint32_t m_hostAddr = 0;  /* Who to reply to. 0 until something has written to us. */
+    bool m_announced = false;
+    uint32_t m_pendingNotify = 0;  /* IPCC channels still to ring */
     RpmsgCallback m_callback;
     const char* m_lastError = nullptr;
 
