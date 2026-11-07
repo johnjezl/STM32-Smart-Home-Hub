@@ -338,6 +338,8 @@ handler.sendCommand(deviceId, "color", {
 
 ## Attribute Reporting
 
+Each reported cluster is bound to the coordinator first (`ZDO_BIND_REQ`), since reports go to a device's binding table. A refused bind only logs a warning, as some devices report to the coordinator anyway.
+
 The handler automatically configures attribute reporting for discovered devices:
 
 | Device Type | Reported Attributes | Min/Max Interval |

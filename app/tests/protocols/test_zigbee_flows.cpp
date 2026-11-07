@@ -1386,6 +1386,40 @@ TEST_F(ZigbeeHandlerFlowTest, ReportingGoesToTheEndpointWithItsCluster) {
     EXPECT_EQ(endpoints[zcl::cluster::COLOR_CONTROL], 2);
 }
 
+TEST_F(ZigbeeHandlerFlowTest, ReportedClustersAreBoundToTheCoordinator) {
+    fake.addDevice(SPLIT_LIGHT);
+    fake.clearSentFrames();
+    ASSERT_NE(pair(SPLIT_LIGHT), nullptr);
+
+    std::map<uint16_t, uint8_t> bound;
+    for (const ZnpFrame& frame : fake.sentFrames(ZnpSubsystem::ZDO, cmd::zdo::BIND_REQ)) {
+        EXPECT_EQ(frame.getWord(0), SPLIT_LIGHT.nwkAddr) << "sent to the device";
+        EXPECT_EQ(frame.getQWord(2), SPLIT_LIGHT.ieeeAddr) << "the source is the device";
+        EXPECT_EQ(frame.getByte(13), 3) << "the destination is a 64-bit address";
+        EXPECT_EQ(frame.getQWord(14), FakeZnpCoordinator::COORDINATOR_IEEE);
+        EXPECT_EQ(frame.getByte(22), 1) << "the coordinator's endpoint";
+        bound[frame.getWord(11)] = frame.getByte(10);
+    }
+    EXPECT_EQ(bound[zcl::cluster::ON_OFF], 1);
+    EXPECT_EQ(bound[zcl::cluster::LEVEL_CONTROL], 1);
+    EXPECT_EQ(bound[zcl::cluster::COLOR_CONTROL], 2);
+}
+
+TEST_F(ZigbeeHandlerFlowTest, RefusedBindDoesNotStopReportingSetup) {
+    fake.setResponder(ZnpSubsystem::ZDO, cmd::zdo::BIND_REQ, [](const ZnpFrame&) {
+        return std::optional<std::vector<uint8_t>>(std::vector<uint8_t>{0x01});
+    });
+    fake.clearSentFrames();
+
+    ASSERT_NE(pair(LIGHT), nullptr);
+
+    bool configured = false;
+    for (const AirFrame& frame : airFrames(fake)) {
+        configured = configured || frame.zclCommand == zcl::global_cmd::CONFIGURE_REPORTING;
+    }
+    EXPECT_TRUE(configured);
+}
+
 TEST_F(ZigbeeHandlerFlowTest, ReportingSkipsClustersTheDeviceDoesNotHave) {
     const FakeZigbeeDevice colorOnly{
         0x8403, 0x00124B0000008403ULL,

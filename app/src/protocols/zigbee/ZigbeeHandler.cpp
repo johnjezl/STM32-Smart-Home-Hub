@@ -1631,6 +1631,11 @@ void ZigbeeHandler::setupReporting(uint64_t ieeeAddr, uint16_t nwkAddr, DeviceTy
         if (pairingStopped()) return;  // Each request can block on an unresponsive radio
         const auto endpoint = clusterEndpoint(ieeeAddr, cluster);
         if (endpoint) {  // It might not have them all
+            // A failure isn't fatal: some devices report to the coordinator anyway
+            if (!m_coordinator->bindCluster(nwkAddr, ieeeAddr, *endpoint, cluster)) {
+                LOG_WARN("Couldn't bind cluster 0x%04X of 0x%04X", cluster, nwkAddr);
+            }
+            if (pairingStopped()) return;
             m_coordinator->configureReporting(nwkAddr, *endpoint, cluster, attribute, dataType,
                                               minInterval, 300, change);
         }
