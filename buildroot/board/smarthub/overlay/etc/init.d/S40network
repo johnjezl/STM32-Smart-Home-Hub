@@ -20,19 +20,24 @@ case "$1" in
         udhcpc -i eth0 -b -q
     fi
 
-    # Start WiFi if configured
-    if [ -f /etc/wpa_supplicant/wpa_supplicant.conf ]; then
-        if grep -q "ssid=" /etc/wpa_supplicant/wpa_supplicant.conf; then
-            echo "Starting WiFi..."
-            ip link set wlan0 up
-            wpa_supplicant -B -i wlan0 -c /etc/wpa_supplicant/wpa_supplicant.conf
-            sleep 2
-            if [ -x /usr/sbin/dhcpcd ]; then
-                dhcpcd -b wlan0
-            elif [ -x /sbin/udhcpc ]; then
-                udhcpc -i wlan0 -b -q
-            fi
-        fi
+    # Start WiFi even with no networks yet, as the touch screen's Wi-Fi setup needs it running
+    # to scan and connect, and saves what it connects to here
+    WPA_CONF=/etc/wpa_supplicant/wpa_supplicant.conf
+    if [ ! -f "$WPA_CONF" ]; then
+        mkdir -p "$(dirname "$WPA_CONF")"
+        (umask 077; printf 'ctrl_interface=/var/run/wpa_supplicant\nctrl_interface_group=0\nupdate_config=1\n' > "$WPA_CONF")
+    fi
+    # It holds the Wi-Fi password
+    chmod 600 "$WPA_CONF"
+
+    echo "Starting WiFi..."
+    ip link set wlan0 up
+    wpa_supplicant -B -i wlan0 -c "$WPA_CONF"
+    sleep 2
+    if [ -x /usr/sbin/dhcpcd ]; then
+        dhcpcd -b wlan0
+    elif [ -x /sbin/udhcpc ]; then
+        udhcpc -i wlan0 -b -q
     fi
     ;;
   stop)

@@ -113,10 +113,14 @@ ln -sf brcmfmac43430-sdio.MUR1DX.txt \
 
 ### wpa_supplicant Configuration
 
-WiFi credentials are stored in:
+An image has no Wi-Fi credentials unless you build them in. To join a network, use the touch screen: **Settings, Network**. The network is saved on the device in:
 ```
 /etc/wpa_supplicant/wpa_supplicant.conf
 ```
+
+`S40network` creates that file if it's missing, and always starts `wpa_supplicant`, so the screen can scan. Nothing about the network goes in the repository or the image.
+
+To build credentials into an image instead, copy `buildroot/board/smarthub/wpa_supplicant.conf.example` to `overlay/etc/wpa_supplicant/wpa_supplicant.conf`, which git ignores.
 
 Format:
 ```
