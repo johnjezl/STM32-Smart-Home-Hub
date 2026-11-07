@@ -85,6 +85,14 @@ static uint16_t g_rxLastAvailIdx = 0;  // Last RX avail->idx we processed
 
 static constexpr uint32_t LOCAL_ADDR = 0x400;  // Our endpoint address
 
+/* Registers this file uses. Direct, as stm32mp1xx.h's RCC layout is wrong (see #18). */
+#define REG(address) (*(volatile uint32_t*)(address))
+static constexpr uint32_t RCC_MC_AHB3ENSETR = 0x50000A08;
+static constexpr uint32_t RCC_MC_AHB3ENSETR_IPCCEN = 1u << 12;
+static constexpr uint32_t IPCC_C1TOC2SR = 0x4C001000 + 0x0C;
+static constexpr uint32_t IPCC_C2SCR = 0x4C001000 + 0x18;
+static constexpr uint32_t IPCC_C2TOC1SR = 0x4C001000 + 0x1C;
+
 /* Debug trace buffer at 0x10049000 */
 static volatile char* g_trace = (volatile char*)0x10049000;
 static size_t g_tracePos = 0;
@@ -112,7 +120,7 @@ bool Rpmsg::init() {
     }
     g_tracePos = 0;
 
-    trace("V3:RPMSG init");
+    trace("RPMSG:init");
 
     /* Set up vring pointers */
     g_txDesc = (volatile vring_desc*)VRING_TX_ADDR;
@@ -125,8 +133,10 @@ bool Rpmsg::init() {
 
     trace("RPMSG:vring ptrs set");
 
-    /* Skip IPCC for now - bus fault blocks all peripheral access */
-    trace("RPMSG:IPCC skip");
+    /* The M4 has its own enable for IPCC's clock. Linux enabling it for itself doesn't count,
+     * and without this, touching IPCC is a bus fault. */
+    REG(RCC_MC_AHB3ENSETR) = RCC_MC_AHB3ENSETR_IPCCEN;
+    __DSB();
 
     /* Initialize tracking indices */
     g_txLastAvailIdx = 0;
@@ -179,14 +189,12 @@ bool Rpmsg::announceEndpoint() {
 }
 
 bool Rpmsg::sendRaw(uint32_t src, uint32_t dst, const void* data, size_t len) {
-    trace("sendRaw:start");
     if (!m_ready) {
         trace("sendRaw:not ready");
         m_lastError = "RPMsg not initialized";
         return false;
     }
 
-    trace("sendRaw:check avail");
     /* Check if there are available buffers from Linux */
     uint16_t availIdx = g_txAvail->idx;
     if (g_txLastAvailIdx == availIdx) {
@@ -195,12 +203,10 @@ bool Rpmsg::sendRaw(uint32_t src, uint32_t dst, const void* data, size_t len) {
         return false;
     }
 
-    trace("sendRaw:get desc");
     /* Get descriptor index from avail ring */
     uint16_t descIdx = g_txAvail->ring[g_txLastAvailIdx % VRING_NUM];
     g_txLastAvailIdx++;
 
-    trace("sendRaw:get buf");
     /* Get buffer info from descriptor */
     volatile vring_desc* desc = &g_txDesc[descIdx];
     uint8_t* buf = (uint8_t*)(uintptr_t)desc->addr;
@@ -258,6 +264,12 @@ void Rpmsg::shutdown() {
 void Rpmsg::poll() {
     if (!m_ready) return;
 
+    /* Linux can't kick us again until each kick is acknowledged */
+    const uint32_t kicks = REG(IPCC_C1TOC2SR) & 0x3F;
+    if (kicks != 0) {
+        REG(IPCC_C2SCR) = kicks;
+    }
+
     /* Check for incoming messages in RX vring */
     uint16_t availIdx = g_rxAvail->idx;
 
@@ -292,10 +304,16 @@ void Rpmsg::poll() {
         g_rxUsed->idx = usedIdx + 1;
 
         g_rxLastAvailIdx++;
+
+        __DSB();
+        notifyHost();  /* So that Linux can reuse the buffer */
     }
 }
 
-void Rpmsg::handleIncomingMessage(const void* /* rhdr */, const void* payload, size_t len) {
+void Rpmsg::handleIncomingMessage(const void* rhdr, const void* payload, size_t len) {
+    /* Replies go to whoever last wrote to us: Linux gives its end an address when it's opened */
+    m_hostAddr = static_cast<const rpmsg_hdr*>(rhdr)->src;
+
     protocol::DecodedMessage message;
     if (protocol::decodeMessage((const uint8_t*)payload, len, message) != protocol::DecodeResult::Ok) {
         /* Not our protocol - might be a control message */
@@ -341,13 +359,22 @@ bool Rpmsg::send(MsgType type, const void* payload, size_t len) {
     m_seqNum++;
 
     /* Send via RPMsg */
-    return sendRaw(LOCAL_ADDR, 0, msgBuf, total);
+    if (m_hostAddr == 0) {
+        m_lastError = "No host endpoint yet";  /* Nothing has written to us, so nobody's listening */
+        return false;
+    }
+    return sendRaw(LOCAL_ADDR, m_hostAddr, msgBuf, total);
 }
 
 void Rpmsg::notifyHost() {
-    /* IPCC access blocked - skip notification for now */
-    /* TODO: Need ETZPC configuration to allow M4 IPCC access */
-    trace("NOTIFY:skip");
+    /* Linux has channels for each vring, and treats an interrupt on either as work to look for */
+    const uint32_t occupied = REG(IPCC_C2TOC1SR);
+    for (uint32_t channel = 0; channel < 2; channel++) {
+        if ((occupied & (1u << channel)) == 0) {
+            REG(IPCC_C2SCR) = 1u << (16 + channel);
+        }
+    }
+    __DSB();
 }
 
 bool Rpmsg::sendSensorData(uint8_t sensorId, SensorType type,
