@@ -3,7 +3,7 @@
 **Completion Date**: 2025-12-31
 **Status**: Alpha (RPMsg works through `/dev/ttyRPMSG0`; sensors don't yet, see #18)
 
-**Correction:** IPCC was never blocked by TrustZone. The bus fault came from the M4 not enabling its own IPCC clock (`RCC_MC_AHB3ENSETR`). With that set, Linux and the M4 use RPMsg normally through `/dev/ttyRPMSG0`. See [m4-firmware.md](m4-firmware.md). What this page says about polling is history.
+**Correction:** IPCC isn't blocked by TrustZone. The M4 reaches it on this board with the current boot chain, and Linux and the M4 use RPMsg normally through `/dev/ttyRPMSG0`. The firmware just never rang it. See [m4-firmware.md](m4-firmware.md). What this page says about polling is history.
 
 ---
 
@@ -37,7 +37,7 @@ Phase 6 implemented bare-metal firmware for the Cortex-M4 coprocessor to handle 
 | Resource table | ✅ | Correct format, Linux detects VirtIO |
 | VirtIO vring TX | ✅ | M4 writes to used ring correctly |
 | Name Service announcement | ✅ | Sent via vring |
-| **IPCC notification** | ✅ | Needs the M4's own IPCC clock enable |
+| **IPCC notification** | ✅ | `/dev/ttyRPMSG0` appears |
 
 ### Linux-Side Workaround
 | Component | Status | Notes |
@@ -51,7 +51,7 @@ Phase 6 implemented bare-metal firmware for the Cortex-M4 coprocessor to handle 
 
 ### IPCC Faulted at First
 
-Touching the Inter-Processor Communication Controller (IPCC) at 0x4C001000 was a bus fault, which was first put down to TrustZone. The real cause was the M4 not enabling its own IPCC clock, `RCC_MC_AHB3ENSETR` bit 12. It does now.
+Touching the Inter-Processor Communication Controller (IPCC) at 0x4C001000 was a bus fault, which was put down to TrustZone, so the firmware stopped touching it. The fault doesn't happen now, with or without the M4's own IPCC clock enable, and what caused it then was never established.
 
 ---
 
@@ -132,7 +132,7 @@ struct SensorPayload {
 | Resource table detection | ✅ | VirtIO device registered |
 | VirtIO vring writes | ✅ | TX used ring idx=2 |
 | rpmsg_poll message read | ✅ | NS announcement visible |
-| IPCC access | ✅ | With the M4's own clock enable |
+| IPCC access | ✅ | No fault |
 
 ---
 

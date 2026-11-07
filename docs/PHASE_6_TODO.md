@@ -3,7 +3,7 @@
 ## Overview
 **Status**: Alpha - RPMsg works through `/dev/ttyRPMSG0`; sensors don't yet (#18)
 
-**Correction:** IPCC was never blocked by TrustZone. The bus fault came from the M4 not enabling its own IPCC clock (`RCC_MC_AHB3ENSETR`). With that set, Linux and the M4 use RPMsg normally through `/dev/ttyRPMSG0`. See [m4-firmware.md](m4-firmware.md). What this page says about polling is history.
+**Correction:** IPCC isn't blocked by TrustZone. The M4 reaches it on this board with the current boot chain, and Linux and the M4 use RPMsg normally through `/dev/ttyRPMSG0`. The firmware just never rang it. See [m4-firmware.md](m4-firmware.md). What this page says about polling is history.
 **Objective**: Implement real-time sensor acquisition and time-critical functions on the Cortex-M4 core.
 **Prerequisites**: Phase 2 complete (core application with RPMsg)
 
@@ -30,7 +30,7 @@
 | Hardware: Firmware load | ✅ | remoteproc loads and runs firmware |
 | Hardware: Resource table | ✅ | Linux detects and registers VirtIO device |
 | Hardware: VirtIO vring | ✅ | M4 writes to TX used ring correctly (idx=2) |
-| Hardware: IPCC notification | ✅ | Needs the M4's own IPCC clock enable |
+| Hardware: IPCC notification | ✅ | `/dev/ttyRPMSG0` appears |
 | Hardware: Communication | ✅ | Both ways through `/dev/ttyRPMSG0` |
 
 ---
@@ -186,9 +186,9 @@ cat /sys/class/remoteproc/remoteproc0/state
 The M4 firmware loads and runs successfully. VirtIO vring handling is now correct
 (TX used ring shows idx=2 with proper NS announcement and status message).
 
-#### Why IPCC Faulted
+#### The IPCC Fault
 
-The M4 has its own enable for IPCC's clock, `RCC_MC_AHB3ENSETR` bit 12. Linux enabling the clock for itself doesn't count, and until the M4 enabled it too, touching IPCC was a bus fault. That was first put down to TrustZone, and ways around that were tried here: SP_MIN instead of OP-TEE, changing OP-TEE, and polling the vrings from Linux. None are needed.
+These notes used to say touching IPCC was a bus fault because of TrustZone, and listed ways around that: SP_MIN instead of OP-TEE, changing OP-TEE, and polling the vrings from Linux. None are needed. The firmware had stopped touching IPCC because of that fault, so nothing told Linux about its messages. The fault doesn't happen now, with or without the M4's own IPCC clock enable, and what caused it then was never established.
 
 #### References
 
