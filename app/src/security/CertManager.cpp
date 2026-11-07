@@ -5,6 +5,8 @@
 #include <smarthub/security/CertManager.hpp>
 #include <smarthub/core/Logger.hpp>
 
+#include <arpa/inet.h>
+#include <cctype>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -150,8 +152,101 @@ bool CertManager::createSelfSigned(const std::string& certPath, const std::strin
            writePem(certPath, 0644, [&](FILE* file) { return PEM_write_X509(file, cert.get()) == 1; });
 }
 
+bool CertManager::createSignedPair(const std::string& hostname, const std::string& ipAddress,
+                                   int validityDays) {
+    // A CA, and a server certificate it signs, so a client can trust the CA once and keep
+    // trusting the server across regeneration. Built here rather than with the openssl tool, so
+    // nothing from outside goes through a shell.
+    PkeyPtr caKey(EVP_EC_gen("prime256v1"), EVP_PKEY_free);
+    PkeyPtr serverKey(EVP_EC_gen("prime256v1"), EVP_PKEY_free);
+    X509Ptr caCert(X509_new(), X509_free);
+    X509Ptr serverCert(X509_new(), X509_free);
+    if (!caKey || !serverKey || !caCert || !serverCert) {
+        return false;
+    }
+
+    auto setSerial = [](X509* cert) {
+        unsigned char bytes[16];
+        if (RAND_bytes(bytes, sizeof(bytes)) != 1) {
+            return false;
+        }
+        bytes[0] &= 0x7F;  // Serial numbers have to be positive
+        BIGNUM* serial = BN_bin2bn(bytes, sizeof(bytes), nullptr);
+        const bool set = serial && BN_to_ASN1_INTEGER(serial, X509_get_serialNumber(cert));
+        BN_free(serial);
+        return set;
+    };
+
+    auto setName = [](X509_NAME* name, const std::string& commonName) {
+        return X509_NAME_add_entry_by_txt(name, "O", MBSTRING_ASC,
+                                          reinterpret_cast<const unsigned char*>("SmartHub"), -1,
+                                          -1, 0) == 1 &&
+               X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC,
+                                          reinterpret_cast<const unsigned char*>(commonName.c_str()),
+                                          -1, -1, 0) == 1;
+    };
+
+    auto addExtension = [](X509* cert, X509* issuer, int nid, const std::string& value) {
+        X509V3_CTX context;
+        X509V3_set_ctx(&context, issuer, cert, nullptr, nullptr, 0);
+        X509_EXTENSION* extension = X509V3_EXT_conf_nid(nullptr, &context, nid, value.c_str());
+        const bool added = extension && X509_add_ext(cert, extension, -1) == 1;
+        X509_EXTENSION_free(extension);
+        return added;
+    };
+
+    const long caSeconds = 3650L * 24 * 60 * 60;
+    const long serverSeconds = static_cast<long>(validityDays) * 24 * 60 * 60;
+
+    bool ok = setSerial(caCert.get()) && X509_set_version(caCert.get(), 2) == 1 &&
+              X509_gmtime_adj(X509_getm_notBefore(caCert.get()), 0) &&
+              X509_gmtime_adj(X509_getm_notAfter(caCert.get()), caSeconds) &&
+              X509_set_pubkey(caCert.get(), caKey.get()) == 1 &&
+              setName(X509_get_subject_name(caCert.get()), "SmartHub CA") &&
+              X509_set_issuer_name(caCert.get(), X509_get_subject_name(caCert.get())) == 1 &&
+              addExtension(caCert.get(), caCert.get(), NID_basic_constraints, "critical,CA:TRUE") &&
+              addExtension(caCert.get(), caCert.get(), NID_key_usage, "critical,keyCertSign,cRLSign") &&
+              X509_sign(caCert.get(), caKey.get(), EVP_sha256()) != 0;
+
+    std::string altNames = "DNS:" + hostname + ",DNS:smarthub";
+    if (!ipAddress.empty()) {
+        altNames += ",IP:" + ipAddress;
+    }
+
+    ok = ok && setSerial(serverCert.get()) && X509_set_version(serverCert.get(), 2) == 1 &&
+         X509_gmtime_adj(X509_getm_notBefore(serverCert.get()), 0) &&
+         X509_gmtime_adj(X509_getm_notAfter(serverCert.get()), serverSeconds) &&
+         X509_set_pubkey(serverCert.get(), serverKey.get()) == 1 &&
+         setName(X509_get_subject_name(serverCert.get()), hostname) &&
+         X509_set_issuer_name(serverCert.get(), X509_get_subject_name(caCert.get())) == 1 &&
+         addExtension(serverCert.get(), caCert.get(), NID_basic_constraints, "CA:FALSE") &&
+         addExtension(serverCert.get(), caCert.get(), NID_subject_alt_name, altNames) &&
+         addExtension(serverCert.get(), caCert.get(), NID_ext_key_usage, "serverAuth") &&
+         X509_sign(serverCert.get(), caKey.get(), EVP_sha256()) != 0;
+
+    if (!ok) {
+        LOG_ERROR("Failed to build TLS certificates");
+        return false;
+    }
+
+    // The CA's key isn't kept: nothing else is signed with it, and a new CA comes with each
+    // regeneration. The server key goes first, as startup leaves a certificate on its own alone.
+    return writePem(caCertPath(), 0644,
+                    [&](FILE* file) { return PEM_write_X509(file, caCert.get()) == 1; }) &&
+           writePem(serverKeyPath(), 0600, [&](FILE* file) {
+               return PEM_write_PrivateKey(file, serverKey.get(), nullptr, nullptr, 0, nullptr,
+                                           nullptr) == 1;
+           }) &&
+           writePem(serverCertPath(), 0644,
+                    [&](FILE* file) { return PEM_write_X509(file, serverCert.get()) == 1; });
+}
+
 #else
 
+bool CertManager::createSignedPair(const std::string&, const std::string&, int) {
+    LOG_ERROR("Built without OpenSSL, so certificates can't be generated");
+    return false;
+}
 bool CertManager::isUsablePair(const std::string&, const std::string&) { return false; }
 bool CertManager::createSelfSigned(const std::string&, const std::string&, const std::string&) {
     return false;
@@ -286,91 +381,28 @@ bool CertManager::loadCertInfo() {
 bool CertManager::generateCertificates(const std::string& hostname,
                                          const std::string& ipAddress,
                                          int validityDays) {
-    // Create certificate directory
-    std::string mkdirCmd = "mkdir -p '" + m_certDir + "'";
-    if (system(mkdirCmd.c_str()) != 0) {
+    if (!isValidHostname(hostname)) {
+        LOG_ERROR("Not generating TLS certificates: invalid hostname");
+        return false;
+    }
+    if (!ipAddress.empty() && !isValidIpAddress(ipAddress)) {
+        LOG_ERROR("Not generating TLS certificates: invalid IP address");
+        return false;
+    }
+    if (validityDays < 1) {
+        LOG_ERROR("Not generating TLS certificates: validity must be at least a day");
+        return false;
+    }
+
+    std::error_code error;
+    std::filesystem::create_directories(m_certDir, error);
+    if (error) {
         LOG_ERROR("Failed to create certificate directory: %s", m_certDir.c_str());
         return false;
     }
 
-    // Find the generate-certs.sh script
-    std::vector<std::string> scriptPaths = {
-        "/opt/smarthub/tools/generate-certs.sh",
-        "./tools/generate-certs.sh",
-        "../tools/generate-certs.sh"
-    };
-
-    std::string scriptPath;
-    for (const auto& path : scriptPaths) {
-        struct stat st;
-        if (stat(path.c_str(), &st) == 0) {
-            scriptPath = path;
-            break;
-        }
-    }
-
-    // Build command
-    std::ostringstream cmd;
-
-    if (!scriptPath.empty()) {
-        // Use the shell script
-        cmd << scriptPath << " --force"
-            << " --dir '" << m_certDir << "'"
-            << " --hostname '" << hostname << "'"
-            << " --days " << validityDays;
-
-        if (!ipAddress.empty()) {
-            cmd << " --ip '" << ipAddress << "'";
-        }
-    } else {
-        // Fallback: generate directly with openssl commands
-        LOG_INFO("Using inline OpenSSL commands for certificate generation");
-
-        // Create temporary config file content
-        std::string sanValue = "DNS:" + hostname + ",DNS:smarthub";
-        if (!ipAddress.empty()) {
-            sanValue += ",IP:" + ipAddress;
-        }
-
-        // Generate CA key and cert
-        cmd << "openssl genrsa -out '" << m_certDir << "/ca.key' 4096 2>/dev/null && "
-            << "openssl req -new -x509 -days 3650 "
-            << "-key '" << m_certDir << "/ca.key' "
-            << "-out '" << m_certDir << "/ca.crt' "
-            << "-subj '/C=US/ST=Home/L=Home/O=SmartHub/CN=SmartHub CA' && ";
-
-        // Generate server key
-        cmd << "openssl genrsa -out '" << m_certDir << "/server.key' 2048 2>/dev/null && ";
-
-        // Generate server CSR
-        cmd << "openssl req -new "
-            << "-key '" << m_certDir << "/server.key' "
-            << "-out '" << m_certDir << "/server.csr' "
-            << "-subj '/C=US/ST=Home/L=Home/O=SmartHub/CN=" << hostname << "' && ";
-
-        // Sign server cert with SAN extension
-        cmd << "openssl x509 -req -days " << validityDays << " "
-            << "-in '" << m_certDir << "/server.csr' "
-            << "-CA '" << m_certDir << "/ca.crt' "
-            << "-CAkey '" << m_certDir << "/ca.key' "
-            << "-CAcreateserial "
-            << "-out '" << m_certDir << "/server.crt' "
-            << "-extfile <(printf 'subjectAltName=" << sanValue << "') 2>/dev/null && ";
-
-        // Set permissions and cleanup
-        cmd << "chmod 600 '" << m_certDir << "'/*.key && "
-            << "chmod 644 '" << m_certDir << "'/*.crt && "
-            << "rm -f '" << m_certDir << "/server.csr'";
-    }
-
-    LOG_DEBUG("Running: %s", cmd.str().c_str());
-
-    // Execute command
-    std::string fullCmd = "bash -c \"" + cmd.str() + "\"";
-    int result = system(fullCmd.c_str());
-
-    if (result != 0) {
-        LOG_ERROR("Certificate generation command failed with code %d", result);
+    if (!createSignedPair(hostname, ipAddress, validityDays)) {
+        LOG_ERROR("Certificate generation failed");
         return false;
     }
 
@@ -381,6 +413,27 @@ bool CertManager::generateCertificates(const std::string& hostname,
     }
 
     return true;
+}
+
+bool CertManager::isValidHostname(const std::string& hostname) {
+    // Letters, digits, hyphens and dots, as in DNS. Anything else, such as a comma, could change
+    // the meaning of the subjectAltName it goes into.
+    if (hostname.empty() || hostname.size() > 253 || hostname.front() == '.' ||
+        hostname.front() == '-') {
+        return false;
+    }
+    for (unsigned char c : hostname) {
+        if (!std::isalnum(c) && c != '-' && c != '.') {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool CertManager::isValidIpAddress(const std::string& ipAddress) {
+    unsigned char buffer[sizeof(struct in6_addr)];
+    return inet_pton(AF_INET, ipAddress.c_str(), buffer) == 1 ||
+           inet_pton(AF_INET6, ipAddress.c_str(), buffer) == 1;
 }
 
 bool CertManager::parseCertificate(const std::string& certPath, CertInfo& info) {
@@ -452,32 +505,10 @@ bool CertManager::parseCertificate(const std::string& certPath, CertInfo& info) 
     return true;
 
 #else
-    // Fallback: Use openssl command-line tool
-    std::string cmd = "openssl x509 -in '" + certPath + "' -noout -dates 2>/dev/null";
-    FILE* pipe = popen(cmd.c_str(), "r");
-    if (!pipe) {
-        return false;
-    }
-
-    char buffer[256];
-    info.isValid = false;
-
-    while (fgets(buffer, sizeof(buffer), pipe)) {
-        std::string line(buffer);
-
-        if (line.find("notBefore=") == 0) {
-            // Parse date - simplified
-            info.isValid = true;
-        }
-        if (line.find("notAfter=") == 0) {
-            // Parse expiry date - would need proper date parsing
-            // For now just mark as valid for 365 days
-            info.notAfter = time(nullptr) + (365 * 24 * 60 * 60);
-        }
-    }
-
-    pclose(pipe);
-    return info.isValid;
+    (void)certPath;
+    (void)info;
+    LOG_ERROR("Built without OpenSSL, so certificates can't be read");
+    return false;
 #endif
 }
 

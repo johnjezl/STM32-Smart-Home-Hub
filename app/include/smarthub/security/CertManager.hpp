@@ -56,6 +56,16 @@ public:
                                  const std::string& hostname);
 
     /**
+     * Whether a certificate can be generated for this name: DNS letters, digits, '-' and '.'
+     */
+    static bool isValidHostname(const std::string& hostname);
+
+    /**
+     * Whether this is an IPv4 or IPv6 address
+     */
+    static bool isValidIpAddress(const std::string& ipAddress);
+
+    /**
      * Initialize certificate manager
      * Checks for existing certificates or generates new ones
      * @return true if certificates are ready for use
@@ -140,6 +150,10 @@ private:
     /**
      * Generate certificates using openssl
      */
+    // The CA certificate, server key and server certificate, built in process
+    bool createSignedPair(const std::string& hostname, const std::string& ipAddress,
+                          int validityDays);
+
     bool generateCertificates(const std::string& hostname,
                                const std::string& ipAddress,
                                int validityDays);

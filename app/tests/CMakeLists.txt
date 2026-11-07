@@ -41,6 +41,7 @@ if(GTEST_AVAILABLE)
         ${CMAKE_SOURCE_DIR}/src/core/Logger.cpp
         ${CMAKE_SOURCE_DIR}/src/core/Config.cpp
         ${CMAKE_SOURCE_DIR}/src/core/EventBus.cpp
+        ${CMAKE_SOURCE_DIR}/src/core/Process.cpp
         ${CMAKE_SOURCE_DIR}/src/database/Database.cpp
         ${CMAKE_SOURCE_DIR}/src/devices/Device.cpp
         ${CMAKE_SOURCE_DIR}/src/devices/DeviceManager.cpp

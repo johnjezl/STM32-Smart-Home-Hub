@@ -13,6 +13,9 @@
 #include <smarthub/security/CredentialStore.hpp>
 #include <smarthub/security/SetupManager.hpp>
 #include <smarthub/database/Database.hpp>
+#include <openssl/pem.h>
+#include <openssl/x509.h>
+#include <openssl/x509v3.h>
 #include <thread>
 #include <chrono>
 
@@ -77,24 +80,10 @@ TEST_F(CertManagerTest, DaysUntilExpiryZeroWithoutCerts) {
 }
 
 // Integration test - requires openssl to be installed
-class CertManagerIntegrationTest : public CertManagerTest {
-protected:
-    void SetUp() override {
-        CertManagerTest::SetUp();
-
-        // Check if openssl is available
-        int result = std::system("which openssl > /dev/null 2>&1");
-        opensslAvailable = (result == 0);
-    }
-
-    bool opensslAvailable = false;
-};
+// Generation is in process, with no openssl tool, so these run wherever the app is built with OpenSSL
+using CertManagerIntegrationTest = CertManagerTest;
 
 TEST_F(CertManagerIntegrationTest, InitializeGeneratesCertificates) {
-    if (!opensslAvailable) {
-        GTEST_SKIP() << "OpenSSL not available";
-    }
-
     CertManager mgr(testDir);
     bool result = mgr.initialize("test.local", "192.168.1.1");
 
@@ -108,10 +97,6 @@ TEST_F(CertManagerIntegrationTest, InitializeGeneratesCertificates) {
 }
 
 TEST_F(CertManagerIntegrationTest, GeneratedCertsHaveCorrectInfo) {
-    if (!opensslAvailable) {
-        GTEST_SKIP() << "OpenSSL not available";
-    }
-
     CertManager mgr(testDir);
     ASSERT_TRUE(mgr.initialize("myhost.local"));
 
@@ -124,10 +109,6 @@ TEST_F(CertManagerIntegrationTest, GeneratedCertsHaveCorrectInfo) {
 }
 
 TEST_F(CertManagerIntegrationTest, DaysUntilExpiryIsReasonable) {
-    if (!opensslAvailable) {
-        GTEST_SKIP() << "OpenSSL not available";
-    }
-
     CertManager mgr(testDir);
     ASSERT_TRUE(mgr.initialize("test.local"));
 
@@ -138,10 +119,6 @@ TEST_F(CertManagerIntegrationTest, DaysUntilExpiryIsReasonable) {
 }
 
 TEST_F(CertManagerIntegrationTest, ReinitializeUsesExistingCerts) {
-    if (!opensslAvailable) {
-        GTEST_SKIP() << "OpenSSL not available";
-    }
-
     CertManager mgr1(testDir);
     ASSERT_TRUE(mgr1.initialize("test.local"));
 
@@ -166,10 +143,6 @@ TEST_F(CertManagerIntegrationTest, ReinitializeUsesExistingCerts) {
 }
 
 TEST_F(CertManagerIntegrationTest, RegenerateCreateNewCerts) {
-    if (!opensslAvailable) {
-        GTEST_SKIP() << "OpenSSL not available";
-    }
-
     CertManager mgr(testDir);
     ASSERT_TRUE(mgr.initialize("test.local"));
 
@@ -188,10 +161,6 @@ TEST_F(CertManagerIntegrationTest, RegenerateCreateNewCerts) {
 }
 
 TEST_F(CertManagerIntegrationTest, NeedsRenewalReturnsFalseForNewCerts) {
-    if (!opensslAvailable) {
-        GTEST_SKIP() << "OpenSSL not available";
-    }
-
     CertManager mgr(testDir);
     ASSERT_TRUE(mgr.initialize("test.local"));
 
@@ -199,10 +168,6 @@ TEST_F(CertManagerIntegrationTest, NeedsRenewalReturnsFalseForNewCerts) {
 }
 
 TEST_F(CertManagerIntegrationTest, CertFilesHaveCorrectPermissions) {
-    if (!opensslAvailable) {
-        GTEST_SKIP() << "OpenSSL not available";
-    }
-
     CertManager mgr(testDir);
     ASSERT_TRUE(mgr.initialize("test.local"));
 
@@ -218,18 +183,78 @@ TEST_F(CertManagerIntegrationTest, CertFilesHaveCorrectPermissions) {
 
 // Test certificate chain validation
 TEST_F(CertManagerIntegrationTest, ServerCertSignedByCA) {
-    if (!opensslAvailable) {
-        GTEST_SKIP() << "OpenSSL not available";
-    }
-
     CertManager mgr(testDir);
     ASSERT_TRUE(mgr.initialize("test.local"));
 
     // Verify the server cert is signed by the CA
-    std::string cmd = "openssl verify -CAfile '" + mgr.caCertPath() + "' '" +
-                       mgr.serverCertPath() + "' 2>/dev/null";
-    int result = std::system(cmd.c_str());
-    EXPECT_EQ(result, 0);
+    auto readCert = [](const std::string& path) {
+        FILE* file = fopen(path.c_str(), "r");
+        X509* cert = file ? PEM_read_X509(file, nullptr, nullptr, nullptr) : nullptr;
+        if (file) fclose(file);
+        return cert;
+    };
+    X509* ca = readCert(mgr.caCertPath());
+    X509* server = readCert(mgr.serverCertPath());
+    ASSERT_NE(ca, nullptr);
+    ASSERT_NE(server, nullptr);
+
+    X509_STORE* store = X509_STORE_new();
+    X509_STORE_add_cert(store, ca);
+    X509_STORE_CTX* context = X509_STORE_CTX_new();
+    X509_STORE_CTX_init(context, store, server, nullptr);
+    EXPECT_EQ(X509_verify_cert(context), 1)
+        << X509_verify_cert_error_string(X509_STORE_CTX_get_error(context));
+    X509_STORE_CTX_free(context);
+    X509_STORE_free(store);
+
+    // The names it was asked for, and no more
+    EXPECT_EQ(X509_check_host(server, "test.local", 0, 0, nullptr), 1);
+    EXPECT_EQ(X509_check_host(server, "smarthub", 0, 0, nullptr), 1);
+    EXPECT_EQ(X509_check_host(server, "other.local", 0, 0, nullptr), 0);
+    X509_free(server);
+    X509_free(ca);
+}
+
+TEST_F(CertManagerIntegrationTest, IpAddressIsInTheCertificate) {
+    CertManager mgr(testDir);
+    ASSERT_TRUE(mgr.initialize("test.local", "192.168.4.102"));
+
+    FILE* file = fopen(mgr.serverCertPath().c_str(), "r");
+    ASSERT_NE(file, nullptr);
+    X509* server = PEM_read_X509(file, nullptr, nullptr, nullptr);
+    fclose(file);
+    ASSERT_NE(server, nullptr);
+    EXPECT_EQ(X509_check_ip_asc(server, "192.168.4.102", 0), 1);
+    EXPECT_EQ(X509_check_ip_asc(server, "192.168.4.103", 0), 0);
+    X509_free(server);
+}
+
+TEST(CertManagerValidationTest, Hostnames) {
+    EXPECT_TRUE(CertManager::isValidHostname("smarthub.local"));
+    EXPECT_TRUE(CertManager::isValidHostname("hub-1"));
+    EXPECT_FALSE(CertManager::isValidHostname(""));
+    EXPECT_FALSE(CertManager::isValidHostname("-hub"));
+    EXPECT_FALSE(CertManager::isValidHostname("a,DNS:evil.com"));
+    EXPECT_FALSE(CertManager::isValidHostname("x'; touch /tmp/pwned; '"));
+    EXPECT_FALSE(CertManager::isValidHostname("a b"));
+    EXPECT_FALSE(CertManager::isValidHostname(std::string(254, 'a')));
+}
+
+TEST(CertManagerValidationTest, IpAddresses) {
+    EXPECT_TRUE(CertManager::isValidIpAddress("10.0.0.1"));
+    EXPECT_TRUE(CertManager::isValidIpAddress("fe80::1"));
+    EXPECT_FALSE(CertManager::isValidIpAddress("10.0.0"));
+    EXPECT_FALSE(CertManager::isValidIpAddress("10.0.0.1,DNS:evil.com"));
+    EXPECT_FALSE(CertManager::isValidIpAddress("$(reboot)"));
+}
+
+TEST_F(CertManagerIntegrationTest, RefusesHostileNames) {
+    const std::string marker = testDir + "/injected";
+    CertManager mgr(testDir);
+    EXPECT_FALSE(mgr.initialize("x'; touch " + marker + "; '"));
+    EXPECT_FALSE(mgr.initialize("ok.local", "1.2.3.4'; touch " + marker + "; '"));
+    EXPECT_FALSE(mgr.certificatesExist());
+    EXPECT_FALSE(std::filesystem::exists(marker));
 }
 
 // ============================================================================
