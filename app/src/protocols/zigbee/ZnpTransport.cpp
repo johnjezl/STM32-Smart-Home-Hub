@@ -11,6 +11,7 @@
 #include <sys/ioctl.h>
 #include <sys/select.h>
 #include <cstring>
+#include <algorithm>
 #include <chrono>
 
 namespace smarthub::zigbee {
