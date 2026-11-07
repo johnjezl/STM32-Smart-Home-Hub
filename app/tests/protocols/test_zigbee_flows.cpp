@@ -914,6 +914,10 @@ const FakeZigbeeDevice ALARMED_LEAK{
     0x810A, 0x00124B000000810AULL,
     {{1, {zcl::cluster::IAS_ZONE}}},
     "", "", zcl::zone_type::WATER_SENSOR, uint16_t{0x0001}};
+const FakeZigbeeDevice CLEAR_LEAK{
+    0x8114, 0x00124B0000008114ULL,
+    {{1, {zcl::cluster::IAS_ZONE}}},
+    "", "", zcl::zone_type::WATER_SENSOR, uint16_t{0x0000}};
 const FakeZigbeeDevice SMOKE{
     0x810B, 0x00124B000000810BULL,
     {{1, {zcl::cluster::IAS_ZONE}}},
@@ -1195,6 +1199,97 @@ TEST_F(ZigbeeHandlerFlowTest, IlluminanceSensorSayingItHasNoReadingIsIgnored) {
     fake.reportAttribute(MOTION_MEASURING_EVERYTHING.nwkAddr, 2, zcl::cluster::ILLUMINANCE_MEASUREMENT,
                          zcl::attr::illuminance::MEASURED_VALUE, zcl::datatype::UINT16, {0x00, 0x00});
     EXPECT_EQ(waitForState(id, "illuminance"), 0) << "the first would have been some huge number";
+}
+
+TEST_F(ZigbeeHandlerFlowTest, RestartReadsAnAlarmThatStartedWhileItWasDown) {
+    fake.addDevice(ALARMED_LEAK);
+    auto paired = pair(ALARMED_LEAK);
+    ASSERT_NE(paired, nullptr);
+    paired->setState("alarm", false);  // As saved, before it started
+    handler->forgetDevice(paired->id());
+
+    handler->restoreDevice(*paired);
+
+    EXPECT_EQ(waitForState(idOf(ALARMED_LEAK), "alarm"), true);
+}
+
+TEST_F(ZigbeeHandlerFlowTest, RestartReadsAnAlarmThatClearedWhileItWasDown) {
+    fake.addDevice(CLEAR_LEAK);
+    auto paired = pair(CLEAR_LEAK);
+    ASSERT_NE(paired, nullptr);
+    paired->setState("alarm", true);
+    handler->forgetDevice(paired->id());
+
+    handler->restoreDevice(*paired);
+
+    EXPECT_EQ(waitForState(idOf(CLEAR_LEAK), "alarm"), false);
+}
+
+TEST_F(ZigbeeHandlerFlowTest, RestartOnlyReadsDevicesWithAZone) {
+    auto paired = pair(LIGHT);
+    ASSERT_NE(paired, nullptr);
+    handler->forgetDevice(paired->id());
+    fake.clearSentFrames();
+
+    handler->restoreDevice(*paired);
+    std::this_thread::sleep_for(50ms);
+
+    for (const AirFrame& frame : airFrames(fake)) {
+        EXPECT_NE(frame.cluster, zcl::cluster::IAS_ZONE);
+    }
+}
+
+TEST_F(ZigbeeHandlerFlowTest, SleepingZoneKeepsWhatWasSavedAndOthersAreStillRead) {
+    handlerConfig["pairingReadTimeoutMs"] = 200;
+    handler->shutdown();
+    handler = makeHandler(fake);
+    ASSERT_TRUE(handler->initialize());
+    fake.addDevice(ALARMED_LEAK);
+    fake.addDevice(LEAK);
+    auto sleeping = pair(LEAK);
+    auto awake = pair(ALARMED_LEAK);
+    ASSERT_NE(sleeping, nullptr);
+    ASSERT_NE(awake, nullptr);
+    handler->forgetDevice(sleeping->id());
+    handler->forgetDevice(awake->id());
+
+    FakeZigbeeDevice asleep = LEAK;
+    asleep.ignoresReads = true;
+    fake.addDevice(asleep);
+    handler->restoreDevice(*sleeping);
+    handler->restoreDevice(*awake);
+
+    EXPECT_EQ(waitForState(idOf(ALARMED_LEAK), "alarm"), true);
+    EXPECT_FALSE(stateOf(idOf(LEAK), "alarm").has_value());
+}
+
+TEST_F(ZigbeeHandlerFlowTest, ShutdownDoesNotWaitForASleepingZone) {
+    handlerConfig["pairingReadTimeoutMs"] = 60000;
+    handler->shutdown();
+    handler = makeHandler(fake);
+    ASSERT_TRUE(handler->initialize());
+    fake.addDevice(LEAK);
+    auto sleeping = pair(LEAK);
+    ASSERT_NE(sleeping, nullptr);
+    handler->forgetDevice(sleeping->id());
+    FakeZigbeeDevice asleep = LEAK;
+    asleep.ignoresReads = true;
+    fake.addDevice(asleep);
+    fake.clearSentFrames();
+
+    handler->restoreDevice(*sleeping);
+    eventually([&] {
+        for (const AirFrame& frame : airFrames(fake)) {
+            if (frame.cluster == zcl::cluster::IAS_ZONE && frame.zclCommand == zcl::global_cmd::READ_ATTRIBUTES) {
+                return true;
+            }
+        }
+        return false;
+    });
+
+    const auto start = std::chrono::steady_clock::now();
+    handler->shutdown();
+    EXPECT_LT(std::chrono::steady_clock::now() - start, 5s);
 }
 
 TEST_F(ZigbeeHandlerFlowTest, PairingKnowsWhetherADoorIsOpenAlready) {
