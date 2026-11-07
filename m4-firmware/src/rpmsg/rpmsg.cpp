@@ -99,7 +99,7 @@ static constexpr uint32_t KICK_CHANNELS = (1u << CHANNEL_TX_VRING) | (1u << CHAN
 static constexpr uint32_t STOP_CHANNELS = (1u << 2) | (1u << 3);  /* Shutdown, detach */
 
 /* The M4's own enable for IPCC's clock. Direct, as stm32mp1xx.h's RCC layout is wrong (see #18). */
-#define RCC_MC_AHB3ENSETR (*(volatile uint32_t*)0x50000A08)
+#define RCC_MC_AHB3ENSETR (*(volatile uint32_t*)0x50000AA0)
 static constexpr uint32_t RCC_MC_AHB3ENSETR_IPCCEN = 1u << 12;
 
 /* Debug trace buffer at 0x10049000 */
@@ -142,8 +142,8 @@ bool Rpmsg::init() {
 
     trace("RPMSG:vring ptrs set");
 
-    /* The M4 has its own enable for IPCC's clock. Linux enabling it for itself doesn't count,
-     * and without this, touching IPCC is a bus fault. */
+    /* The M4 has its own enable for IPCC's clock. Linux's enable has been enough on the board,
+     * but this way the M4's use of IPCC doesn't depend on Linux keeping its own on. */
     RCC_MC_AHB3ENSETR = RCC_MC_AHB3ENSETR_IPCCEN;
     __DSB();
 

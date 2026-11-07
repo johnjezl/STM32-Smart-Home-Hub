@@ -316,7 +316,7 @@ On STM32MP1, the M4 always fetches its reset vector from address 0x00000000, whi
 
 **Symptom**: M4 crashes when accessing IPCC at 0x4C001000.
 
-**Root Cause**: The M4 has its own enable for IPCC's clock, `RCC_MC_AHB3ENSETR`, separate from the one Linux uses. `Rpmsg::init` sets it. No change to TF-A or ETZPC is needed, confirmed on a board. These docs used to blame TrustZone.
+These docs used to blame TrustZone for this, and the firmware avoided IPCC because of it, which is why `/dev/ttyRPMSG0` never appeared. It doesn't happen now, on this board and boot chain, and no change to TF-A or ETZPC was needed. The cause was never established. It isn't the M4's own IPCC clock enable, `RCC_MC_AHB3ENSETR` (`0x50000AA0`): tested with and without it, IPCC works either way, as Linux's enable is on while it uses the mailbox. `Rpmsg::init` sets it anyway so as not to rely on that. If this comes back, look there first, and at whether Linux's enable (`RCC_MP_AHB3ENSETR`, `0x50000A20`, bit 12) is on.
 
 ### Verifying VirtIO Vring
 
