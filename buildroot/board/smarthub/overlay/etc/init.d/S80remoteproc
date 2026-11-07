@@ -10,6 +10,8 @@ case "$1" in
   start)
     if [ -f "/lib/firmware/$M4_FIRMWARE" ]; then
         echo "Loading M4 firmware: $M4_FIRMWARE"
+        # What makes /dev/ttyRPMSG0. Nothing else loads it, and it can't hurt to load it first.
+        modprobe rpmsg_tty 2>/dev/null
         echo "$M4_FIRMWARE" > $RPROC_PATH/firmware
         echo start > $RPROC_PATH/state
         if [ $? -eq 0 ]; then

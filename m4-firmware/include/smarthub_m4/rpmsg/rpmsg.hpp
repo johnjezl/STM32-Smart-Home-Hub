@@ -111,6 +111,7 @@ private:
 
     bool m_ready = false;
     uint16_t m_seqNum = 0;
+    uint32_t m_hostAddr = 0;  /* Who to reply to. 0 until something has written to us. */
     RpmsgCallback m_callback;
     const char* m_lastError = nullptr;
 

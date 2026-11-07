@@ -310,30 +310,13 @@ On STM32MP1, the M4 always fetches its reset vector from address 0x00000000, whi
 2. Check vring used idx: `devmem 0x100400A0 32` (should show non-zero if M4 wrote messages)
 3. Check dmesg for IPCC errors: `dmesg | grep -i ipcc`
 
-**Root Cause**: TrustZone/ETZPC blocks M4 access to IPCC (Inter-Processor Communication Controller).
-
-**Evidence**:
-- M4 trace stops at "IPCC test" when attempting IPCC access
-- TX used ring shows idx > 0 (messages written correctly)
-- No notification reaches Linux
-
-**Solution**: Modify TF-A device tree to allow M4 IPCC access. See `docs/PHASE_6_TODO.md` for details.
+**Causes to check**: `rpmsg_tty` isn't loaded (`modprobe rpmsg_tty`, which `S80remoteproc` does), or the firmware isn't running. The trace shows how far it got.
 
 ### IPCC Bus Fault
 
-**Symptom**: M4 crashes when accessing IPCC at 0x4C001000 or HSEM at 0x4C000000.
+**Symptom**: M4 crashes when accessing IPCC at 0x4C001000.
 
-**Root Cause**: TF-A configures ETZPC to restrict M4 access to APB5 peripherals.
-
-**Workaround**: Skip IPCC notification (messages won't reach Linux):
-```cpp
-void Rpmsg::notifyHost() {
-    // IPCC access blocked by TrustZone
-    trace("NOTIFY:skip");
-}
-```
-
-**Permanent Fix**: Rebuild TF-A with IPCC MCU isolation enabled.
+**Root Cause**: The M4 has its own enable for IPCC's clock, `RCC_MC_AHB3ENSETR`, separate from the one Linux uses. `Rpmsg::init` sets it. No change to TF-A or ETZPC is needed, confirmed on a board. These docs used to blame TrustZone.
 
 ### Verifying VirtIO Vring
 
@@ -397,32 +380,6 @@ m4.setMessageCallback([](const std::vector<uint8_t>& data) {
 **Header:** `app/include/smarthub/rpmsg/RpmsgClient.hpp`
 **Implementation:** `app/src/rpmsg/RpmsgClient.cpp`
 
-### Alpha Workaround: VirtIO Polling
-
-When IPCC is blocked by TrustZone (current situation), use the rpmsg_poll tool:
-
-```cpp
-#include <cstdio>
-#include <string>
-
-// Option 1: Read from subprocess
-FILE* pipe = popen("rpmsg_poll --once", "r");
-char line[256];
-while (fgets(line, sizeof(line), pipe)) {
-    // Parse: "RPMsg: src=0x0001 dst=0x0400 len=8"
-    //        "  Data: <payload>"
-}
-pclose(pipe);
-
-// Option 2: Background polling with pipe
-FILE* pipe = popen("rpmsg_poll --interval 100", "r");
-// Set non-blocking and poll in main loop
-int fd = fileno(pipe);
-fcntl(fd, F_SETFL, O_NONBLOCK);
-```
-
-**Tool:** `tools/rpmsg_poll/rpmsg_poll`
-**Documentation:** `tools/rpmsg_poll/README.md`
 
 ### Message Format
 
