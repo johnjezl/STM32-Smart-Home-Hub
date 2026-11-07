@@ -215,6 +215,7 @@ bool ZigbeeHandler::initialize() {
         std::lock_guard<std::mutex> lock(m_enrollMutex);
         m_stopEnrolling = false;
         m_enrollQueue.clear();
+        m_zoneReadQueue.clear();
     }
 
     LOG_INFO("Initializing Zigbee handler on %s at %d baud", port.c_str(), baudRate);
@@ -252,6 +253,7 @@ bool ZigbeeHandler::initialize() {
         });
 
     m_enrollThread = std::thread(&ZigbeeHandler::enrollWorker, this);
+    m_zoneReadThread = std::thread(&ZigbeeHandler::zoneReadWorker, this);
 
     // Initialize coordinator
     if (!m_coordinator->initialize()) {
@@ -686,6 +688,15 @@ void ZigbeeHandler::restoreDevice(const IDevice& device) {
     } else if (!m_coordinator->getDevice(*ieeeAddr)) {
         lookUpNetworkAddress(*ieeeAddr);
     }
+
+    // An alarm only says when it changes, so what was saved may be out of date
+    if (clusterEndpoint(*ieeeAddr, zcl::cluster::IAS_ZONE)) {
+        {
+            std::lock_guard<std::mutex> lock(m_enrollMutex);
+            m_zoneReadQueue.push_back(*ieeeAddr);
+        }
+        m_zoneReadCv.notify_all();
+    }
 }
 
 void ZigbeeHandler::forgetDevice(const std::string& deviceId) {
@@ -819,8 +830,12 @@ void ZigbeeHandler::stopPairing() {
         m_stopEnrolling = true;
     }
     m_enrollCv.notify_all();
+    m_zoneReadCv.notify_all();
     if (m_enrollThread.joinable()) {
         m_enrollThread.join();
+    }
+    if (m_zoneReadThread.joinable()) {
+        m_zoneReadThread.join();
     }
 }
 
@@ -1061,6 +1076,43 @@ void ZigbeeHandler::enrollWorker() {
         lock.unlock();
         m_coordinator->sendZoneEnrollResponse(nwkAddr, endpoint, kZoneId);
         lock.lock();
+    }
+}
+
+void ZigbeeHandler::zoneReadWorker() {
+    std::unique_lock<std::mutex> lock(m_enrollMutex);
+    for (;;) {
+        m_zoneReadCv.wait(lock, [this] { return m_stopEnrolling || !m_zoneReadQueue.empty(); });
+        if (m_stopEnrolling) {
+            return;
+        }
+        const uint64_t ieeeAddr = m_zoneReadQueue.front();
+        m_zoneReadQueue.pop_front();
+        lock.unlock();
+        readZoneStatus(ieeeAddr);
+        lock.lock();
+    }
+}
+
+void ZigbeeHandler::readZoneStatus(uint64_t ieeeAddr) {
+    const auto endpoint = clusterEndpoint(ieeeAddr, zcl::cluster::IAS_ZONE);
+    const auto info = m_coordinator->getDevice(ieeeAddr);
+    const auto deviceId = savedDeviceId(ieeeAddr);
+    if (!endpoint || !info || !deviceId) {
+        return;
+    }
+
+    const auto attributes = m_coordinator->readAttributes(info->networkAddress, *endpoint, zcl::cluster::IAS_ZONE,
+                                                          {zcl::attr::ias_zone::ZONE_STATUS}, m_pairingReadTimeoutMs);
+    if (!attributes) {
+        // Normal for a battery device, which sleeps. What it has saved stays, until it next says.
+        LOG_DEBUG("Zone %s didn't answer", deviceId->c_str());
+        return;
+    }
+    for (const ZclAttributeValue& attr : *attributes) {
+        if (attr.attributeId == zcl::attr::ias_zone::ZONE_STATUS) {
+            notifyZoneStatus(*deviceId, ieeeAddr, attr.asUint16());
+        }
     }
 }
 

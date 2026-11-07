@@ -228,6 +228,14 @@ private:
     std::mutex m_enrollMutex;
     std::condition_variable m_enrollCv;
     std::deque<std::pair<uint16_t, uint8_t>> m_enrollQueue;
+
+    // Reads a restored zone's alarm state. On its own thread, as a sleeping device takes a timeout
+    // to not answer, and an enroll request shouldn't wait for that. Shares m_enrollMutex and m_stopEnrolling.
+    void zoneReadWorker();
+    void readZoneStatus(uint64_t ieeeAddr);
+    std::thread m_zoneReadThread;
+    std::condition_variable m_zoneReadCv;
+    std::deque<uint64_t> m_zoneReadQueue;
     bool m_stopEnrolling = false;
     std::deque<uint64_t> m_addressChecks;  // Saved addresses still to confirm
     std::chrono::steady_clock::time_point m_lastAddressCheck{};
