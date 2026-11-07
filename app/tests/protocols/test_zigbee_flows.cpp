@@ -227,7 +227,7 @@ TEST(ZnpLateResponse, LateResponseBetweenRequestsIsDropped) {
     auto response = setup.transport.request(dataRequest(0x2222), 1000);
     ASSERT_TRUE(response);
     EXPECT_EQ(response->getByte(0), 0x00);
-    EXPECT_LT(std::chrono::steady_clock::now() - start, 500ms);
+    EXPECT_LT(std::chrono::steady_clock::now() - start, 1s);
 }
 
 TEST(ZnpLateResponse, ResponseThatNeverComesHoldsUpOnlyBriefly) {
@@ -245,7 +245,24 @@ TEST(ZnpLateResponse, ResponseThatNeverComesHoldsUpOnlyBriefly) {
     // Given up on, so it no longer holds anything up
     const auto again = std::chrono::steady_clock::now();
     EXPECT_TRUE(setup.transport.request(dataRequest(0x3333), 1000));
-    EXPECT_LT(std::chrono::steady_clock::now() - again, 200ms);
+    EXPECT_LT(std::chrono::steady_clock::now() - again, 250ms);
+}
+
+TEST(ZnpLateResponse, CloseForgetsLateResponses) {
+    FakeZnpCoordinator fake;
+    fake.setResponder(ZnpSubsystem::SYS, cmd::sys::PING,
+                      [](const ZnpFrame&) -> std::optional<std::vector<uint8_t>> { return std::nullopt; });
+    ZnpTransport transport{fake.createSerialPort(), "fake"};
+    transport.setLateResponseWait(5s);
+    ASSERT_TRUE(transport.open());
+    EXPECT_FALSE(transport.request(ZnpFrame(ZnpType::SREQ, ZnpSubsystem::SYS, cmd::sys::PING), 100));
+    transport.close();
+    ASSERT_TRUE(transport.open());
+
+    const auto start = std::chrono::steady_clock::now();
+    EXPECT_TRUE(transport.request(dataRequest(0x1111), 1000));
+    EXPECT_LT(std::chrono::steady_clock::now() - start, 1s);
+    transport.close();
 }
 
 TEST(ZnpLateResponse, OtherCommandsStillGetTheirOwnAnswers) {

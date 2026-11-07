@@ -182,6 +182,8 @@ bool ZnpTransport::open() {
         return false;
     }
 
+    clearLateResponses();
+
     // Start reader thread
     m_running = true;
     m_readerThread = std::thread(&ZnpTransport::readerThread, this);
@@ -224,6 +226,7 @@ void ZnpTransport::close() {
         std::lock_guard<std::mutex> lock(m_indicationMutex);
         m_indications = {};
     }
+    clearLateResponses();
 
     LOG_INFO("ZNP transport closed");
 }
@@ -312,7 +315,8 @@ std::optional<ZnpFrame> ZnpTransport::request(const ZnpFrame& frame, int timeout
     // from here on, so giving up early would report failure for something that happened.
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
     while (m_running && !m_pendingResponse) {
-        if (m_responseCv.wait_until(lock, deadline) == std::cv_status::timeout) {
+        if (m_responseCv.wait_until(lock, deadline) == std::cv_status::timeout &&
+            !m_pendingResponse) {  // It may have come just as the time ran out
             LOG_WARN("Timeout waiting for response to %s", frame.toString().c_str());
             m_waitingForResponse = false;
             m_lateResponses.emplace_back(m_expectedCmd0, m_expectedCmd1);
@@ -336,8 +340,16 @@ void ZnpTransport::setIndicationCallback(IndicationCallback callback) {
     m_indicationCallback = std::move(callback);
 }
 
+void ZnpTransport::clearLateResponses() {
+    std::lock_guard<std::mutex> lock(m_requestMutex);
+    m_lateResponses.clear();
+    m_responseCv.notify_all();
+}
+
 bool ZnpTransport::resetCoordinator() {
     LOG_INFO("Resetting coordinator via DTR/RTS...");
+    // A reset coordinator owes no answers
+    clearLateResponses();
 
     // Toggle DTR to reset the coordinator
     m_serialPort->setDTR(false);
@@ -430,11 +442,13 @@ void ZnpTransport::dispatchFrame(const ZnpFrame& frame) {
         // Check if this is the response we're waiting for
         std::lock_guard<std::mutex> lock(m_requestMutex);
 
-        if (!m_lateResponses.empty() && frame.cmd0() == m_lateResponses.front().first &&
-            frame.cmd1() == m_lateResponses.front().second) {
-            // No request waits while late responses are outstanding, so this is the oldest one's
+        // No request waits while a late response is outstanding, as each waits for or forgets
+        // them before sending, so a match is the one owed
+        const auto late = std::find(m_lateResponses.begin(), m_lateResponses.end(),
+                                    std::make_pair(frame.cmd0(), frame.cmd1()));
+        if (late != m_lateResponses.end()) {
             LOG_WARN("Late response, after its request timed out: %s", frame.toString().c_str());
-            m_lateResponses.pop_front();
+            m_lateResponses.erase(m_lateResponses.begin(), late + 1);
             m_responseCv.notify_all();
         } else if (m_waitingForResponse &&
             frame.cmd0() == m_expectedCmd0 &&

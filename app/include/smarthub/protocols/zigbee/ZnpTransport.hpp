@@ -148,6 +148,8 @@ private:
     void indicationThread();
     void processReceivedData();
     void dispatchFrame(const ZnpFrame& frame);
+    // Forgets the answers owed by requests that timed out, as after a reset
+    void clearLateResponses();
 
     std::unique_ptr<ISerialPort> m_serialPort;
     std::string m_port;
