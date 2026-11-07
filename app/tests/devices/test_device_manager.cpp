@@ -1170,9 +1170,11 @@ TEST_F(SensorHistoryTest, QueryAveragesIntoTheNumberOfPointsAskedFor) {
         insertRow(now - 3600 + i * 30, i < 60 ? 10.0 : 20.0);
     }
 
-    auto samples = manager->sensorHistory("t", "temperature", now - 3600, 2);
+    // Slots are aligned to the clock, so a range can touch one more than asked for, and with very
+    // few it can fit in one. With four, the hour always spans several.
+    auto samples = manager->sensorHistory("t", "temperature", now - 3600, 4);
 
-    ASSERT_LE(samples.size(), 3u);
+    ASSERT_LE(samples.size(), 5u);
     ASSERT_GE(samples.size(), 2u);
     EXPECT_LT(samples.front().value, samples.back().value);
     for (const auto& sample : samples) {
