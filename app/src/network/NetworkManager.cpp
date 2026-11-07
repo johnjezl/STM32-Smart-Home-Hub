@@ -529,6 +529,8 @@ void NetworkManager::connectWorker(const std::string& ssid,
     // Also for a network already listed, as this may be correcting a mistyped password
     if (!password.empty()) {
         executeCommand("wpa_cli -i " + m_wifiInterface +
+                      " set_network " + networkId + " key_mgmt WPA-PSK");  // It may have been open
+        executeCommand("wpa_cli -i " + m_wifiInterface +
                       " set_network " + networkId + " psk " + quoteForWpaCli(password));
     }
 
