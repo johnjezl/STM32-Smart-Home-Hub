@@ -42,27 +42,18 @@ Buildroot requires significant disk space:
 
 ## Repository Setup
 
-### Clone Repositories
+### Get the Sources
 
 ```bash
-mkdir -p ~/projects/smarthub
-cd ~/projects/smarthub
-
-# Clone Buildroot
-git clone https://github.com/buildroot/buildroot.git buildroot-src
-cd buildroot-src
-git checkout 2025.02.5
-
-# Clone Bootlin ST external tree
-cd ~/projects/smarthub
-git clone https://github.com/bootlin/buildroot-external-st.git
-cd buildroot-external-st
-git checkout st/2025.02.5
-
-# Clone SmartHub project
-cd ~/projects/smarthub
 git clone <your-repo-url> STM32-Smart-Home-Hub
+cd STM32-Smart-Home-Hub
+./tools/setup.sh
+./tools/build.sh
 ```
+
+`setup.sh` clones Buildroot and the Bootlin ST external tree next to this repository, at the commits the image is known to build with. The versions the build itself downloads, such as the kernel and U-Boot, are pinned in `smarthub_defconfig`. To put Buildroot and the ST tree elsewhere, set `SMARTHUB_BUILDROOT_DIR` and `SMARTHUB_ST_EXTERNAL`.
+
+The paths below assume the directory holding all three is `~/projects/smarthub`, but it can be anywhere without spaces in its path, which Buildroot doesn't support.
 
 ### Directory Structure
 
@@ -88,8 +79,7 @@ git clone <your-repo-url> STM32-Smart-Home-Hub
     │   ├── configs/smarthub_defconfig
     │   └── board/smarthub/
     │       ├── overlay/        # Root filesystem overlay
-    │       ├── post_build.sh
-    │       └── post_image.sh
+    │       └── post_build.sh
     ├── docs/                   # Documentation
     └── tools/                  # Build & lab scripts
 ```

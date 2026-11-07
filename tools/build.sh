@@ -13,9 +13,14 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-BUILDROOT_DIR="$HOME/projects/smarthub/buildroot-src"
-ST_EXTERNAL="$HOME/projects/smarthub/buildroot-external-st"
+BUILDROOT_DIR="${SMARTHUB_BUILDROOT_DIR:-$(dirname "$PROJECT_DIR")/buildroot-src}"
+ST_EXTERNAL="${SMARTHUB_ST_EXTERNAL:-$(dirname "$PROJECT_DIR")/buildroot-external-st}"
 SMARTHUB_EXTERNAL="$PROJECT_DIR/buildroot"
+
+if [ ! -d "$BUILDROOT_DIR" ] || [ ! -d "$ST_EXTERNAL" ]; then
+    echo "Error: Buildroot or the ST tree isn't there. Run ./tools/setup.sh first." >&2
+    exit 1
+fi
 
 cd "$BUILDROOT_DIR"
 

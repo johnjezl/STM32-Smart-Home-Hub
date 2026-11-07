@@ -38,8 +38,7 @@ buildroot/
 │   │   │       └── wpa_supplicant.conf
 │   │   └── root/.ssh/
 │   │       └── authorized_keys
-│   ├── post_build.sh       # Post-build customization
-│   └── post_image.sh       # Post-image generation
+│   └── post_build.sh       # Post-build customization
 └── package/                # Custom packages (future)
 ```
 

@@ -13,7 +13,7 @@ if BR2_PACKAGE_LVGL
 
 config BR2_PACKAGE_LVGL_VERSION
 	string "LVGL version"
-	default "9.2.2"
+	default "8.3.11"
 	help
 	  Version of LVGL to download and build.
 

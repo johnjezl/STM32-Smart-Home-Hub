@@ -12,7 +12,8 @@
 
 set -euo pipefail
 
-BUILDROOT_DIR="$HOME/projects/smarthub/buildroot-src"
+PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+BUILDROOT_DIR="${SMARTHUB_BUILDROOT_DIR:-$(dirname "$PROJECT_DIR")/buildroot-src}"
 IMAGE="${SMARTHUB_IMAGE:-$BUILDROOT_DIR/output/images/sdcard.img}"
 SYS_BLOCK="${SMARTHUB_SYS_BLOCK:-/sys/block}"
 
