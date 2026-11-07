@@ -11,6 +11,7 @@
 #include <smarthub/devices/types/TemperatureSensor.hpp>
 #include <smarthub/devices/types/MotionSensor.hpp>
 #include <smarthub/devices/types/ContactSensor.hpp>
+#include <smarthub/devices/types/AlarmSensor.hpp>
 
 namespace smarthub {
 
@@ -86,6 +87,17 @@ void DeviceTypeRegistry::registerBuiltinTypes() {
             return std::make_shared<ContactSensor>(
                 id, name, protocol, address, config.value("has_battery", false));
         });
+
+    // Sensors that raise an alarm
+    for (const DeviceType type : {DeviceType::SmokeSensor, DeviceType::WaterSensor,
+                                  DeviceType::CoSensor, DeviceType::AlarmSensor}) {
+        registerType(type, deviceTypeToString(type),
+            [type](const std::string& id, const std::string& name,
+                   const std::string& protocol, const std::string& address,
+                   const nlohmann::json&) -> DevicePtr {
+                return std::make_shared<AlarmSensor>(id, name, type, protocol, address);
+            });
+    }
 
     // Multi-sensor (temperature + humidity)
     registerType(DeviceType::MultiSensor, "multi_sensor",

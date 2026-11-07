@@ -24,8 +24,11 @@ struct RoomSensors {
     bool hasMotionSensor = false;
     bool motionReported = false;
     bool motionDetected = false;
+    bool hasAlarmSensor = false;
+    bool alarmReported = false;
+    std::vector<std::string> activeAlarms;  // "Leak", "Smoke" and so on
 
-    bool any() const { return hasTemperatureSensor || hasHumiditySensor || hasMotionSensor; }
+    bool any() const { return hasTemperatureSensor || hasHumiditySensor || hasMotionSensor || hasAlarmSensor; }
 };
 
 /** Temperature reading in Fahrenheit; sensors report Celsius. Empty until the first report. */
@@ -43,7 +46,22 @@ std::string humidityText(const std::optional<double>& percent);
 /** "Motion" or "Clear", or "--" before any motion sensor in the room has reported */
 std::string roomMotionText(const RoomSensors& sensors);
 
-/** One device's current value, such as "72.5°F / 45%", "Motion" or "Closed". "--" with no reading. */
+/** "Clear" or what's going off, such as "Leak, Smoke". "--" before any of the room's alarm sensors has reported. */
+std::string roomAlarmText(const RoomSensors& sensors);
+
+/** Whether this is a smoke, water, carbon monoxide or other sensor whose job is to raise an alarm */
+bool isAlarmSensor(DeviceType type);
+
+/** What's going off, such as "Leak", or empty if this sensor's alarm isn't active */
+std::string activeAlarmText(DeviceType type, const nlohmann::json& state);
+
+/** Every active alarm on these devices, such as "Leak: Basement, Smoke: Kitchen". Empty if there are none. */
+std::string activeAlarmsSummary(const std::vector<DevicePtr>& devices);
+
+/**
+ * One device's current value, such as "72.5°F / 45%", "Motion" or "Closed", followed by
+ * whatever else it measures, such as "Motion / 72.5°F". "--" with no reading.
+ */
 std::string sensorValueText(DeviceType type, const nlohmann::json& state);
 
 /** The property a device's history charts. Empty if it has none, like a motion sensor. */

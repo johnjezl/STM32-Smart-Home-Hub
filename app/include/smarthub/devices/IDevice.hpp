@@ -63,6 +63,8 @@ enum class DeviceType {
     PowerMeter,         // Power monitoring device
     SmokeSensor,        // Smoke/fire detector
     WaterSensor,        // Water/leak sensor
+    CoSensor,           // Carbon monoxide detector
+    AlarmSensor,        // Anything else that only raises an alarm, like a glass break sensor
     Fan,                // Smart fan
     Blinds,             // Window blinds/shades
     Lock,               // Smart lock
@@ -150,6 +152,8 @@ inline std::string deviceTypeToString(DeviceType type) {
         case DeviceType::PowerMeter:        return "power_meter";
         case DeviceType::SmokeSensor:       return "smoke_sensor";
         case DeviceType::WaterSensor:       return "water_sensor";
+        case DeviceType::CoSensor:          return "co_sensor";
+        case DeviceType::AlarmSensor:       return "alarm_sensor";
         case DeviceType::Fan:               return "fan";
         case DeviceType::Blinds:            return "blinds";
         case DeviceType::Lock:              return "lock";
@@ -180,6 +184,8 @@ inline std::string deviceTypeLabel(DeviceType type) {
         case DeviceType::PowerMeter:        return "Power Meter";
         case DeviceType::SmokeSensor:       return "Smoke";
         case DeviceType::WaterSensor:       return "Water Leak";
+        case DeviceType::CoSensor:          return "Carbon Monoxide";
+        case DeviceType::AlarmSensor:       return "Alarm";
         case DeviceType::Fan:               return "Fan";
         case DeviceType::Blinds:            return "Blinds";
         case DeviceType::Lock:              return "Lock";
@@ -208,6 +214,8 @@ inline DeviceType stringToDeviceType(const std::string& str) {
     if (str == "power_meter")        return DeviceType::PowerMeter;
     if (str == "smoke_sensor")       return DeviceType::SmokeSensor;
     if (str == "water_sensor")       return DeviceType::WaterSensor;
+    if (str == "co_sensor")          return DeviceType::CoSensor;
+    if (str == "alarm_sensor")       return DeviceType::AlarmSensor;
     if (str == "fan")                return DeviceType::Fan;
     if (str == "blinds")             return DeviceType::Blinds;
     if (str == "lock")               return DeviceType::Lock;

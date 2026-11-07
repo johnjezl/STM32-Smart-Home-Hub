@@ -359,6 +359,13 @@ namespace cmd::color {
 /**
  * Temperature Measurement Cluster Attributes
  */
+namespace attr::illuminance {
+    constexpr uint16_t MEASURED_VALUE     = 0x0000;  // 10000 * log10(lux) + 1
+}
+
+/**
+ * Temperature Measurement Cluster Attributes
+ */
 namespace attr::temperature {
     constexpr uint16_t MEASURED_VALUE     = 0x0000;  // In 0.01°C
     constexpr uint16_t MIN_MEASURED       = 0x0001;

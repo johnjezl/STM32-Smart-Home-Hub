@@ -328,6 +328,10 @@ body:not(.is-admin) .admin-only {
     cursor: pointer;
 }
 
+.room-card.alarm-active {
+    border-color: var(--error);
+}
+
 .room-card.motion-active {
     border: 2px solid var(--warning);
     box-shadow: 0 0 8px rgba(245, 158, 11, 0.3);
@@ -550,6 +554,18 @@ body:not(.is-admin) .admin-only {
 
 .sensor-value.motion {
     color: var(--success);
+}
+
+.sensor-value.alarm,
+.sensor-value-large.alarm {
+    color: var(--error);
+}
+
+.alarm-banner {
+    background: var(--error);
+    color: #fff;
+    font-weight: 600;
+    padding: 0.75rem 1.5rem;
 }
 
 .sensor-updated {

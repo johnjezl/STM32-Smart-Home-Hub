@@ -12,6 +12,7 @@
 
 namespace smarthub {
 
+class IDevice;
 class DeviceManager;
 
 namespace ui {
@@ -42,6 +43,7 @@ private:
     void createNavBar();
     void createSensorCards();
     void refreshSensorValues();
+    void showValue(lv_obj_t* label, const IDevice& device);
 
     void onSensorClicked(const std::string& sensorId);
     void onNavTabSelected(const std::string& tabId);

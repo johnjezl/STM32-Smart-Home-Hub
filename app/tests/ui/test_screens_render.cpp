@@ -36,6 +36,7 @@
 #include <smarthub/ui/screens/EditDeviceScreen.hpp>
 #include <smarthub/ui/screens/LightControlScreen.hpp>
 #include <smarthub/ui/screens/NotificationScreen.hpp>
+#include <smarthub/devices/types/AlarmSensor.hpp>
 #include <smarthub/ui/screens/RoomDetailScreen.hpp>
 #include <smarthub/ui/screens/SecuritySettingsScreen.hpp>
 #include <smarthub/ui/screens/SensorHistoryScreen.hpp>
@@ -192,6 +193,45 @@ TEST_F(ScreenRenderTest, RoomDetail) {
 
     EXPECT_GE(test::countText(root, "Living Room"), 1);
     EXPECT_GE(test::countText(root, "Reading Lamp"), 1);
+}
+
+TEST_F(ScreenRenderTest, AlarmShowsOnTheDashboardSensorsAndRoom) {
+    auto leak = std::make_shared<AlarmSensor>("leak", "Basement Leak", DeviceType::WaterSensor);
+    leak->setRoom("alarm-room");
+    auto multi = std::make_shared<MotionSensor>("multi", "Hall Multi");
+    multi->setRoom("alarm-room");
+    multi->setMotionDetected(true);
+    multi->setState("temperature", 22.5);
+    multi->setState("humidity", 45);
+    multi->setState("illuminance", 120);
+    ASSERT_TRUE(deviceManager->addDevice(leak));
+    ASSERT_TRUE(deviceManager->addDevice(multi));
+    leak->setState("alarm", false);
+
+    auto* dashboard = showAndRender("dashboard", std::make_unique<DashboardScreen>(
+        *screenManager, *themeManager, *deviceManager));
+    EXPECT_EQ(test::countText(dashboard, "SmartHub", true), 1);
+
+    leak->setState("alarm", true);
+    auto* screen = screenManager->getScreen("dashboard");
+    screen->onShow();
+    test::render();
+    EXPECT_EQ(test::countText(dashboard, "SmartHub", true), 0);
+    EXPECT_EQ(test::countText(dashboard, LV_SYMBOL_WARNING " Leak: Basement Leak", true), 1);
+    if (const char* dir = std::getenv("SMARTHUB_UI_FRAME_DIR")) {
+        EXPECT_TRUE(test::saveFrame(std::string(dir) + "/alarm_dashboard.ppm"));
+    }
+
+    auto* sensors = showAndRender("sensors", std::make_unique<SensorListScreen>(
+        *screenManager, *themeManager, *deviceManager));
+    EXPECT_EQ(test::countText(sensors, "Leak", true), 1);
+    EXPECT_EQ(test::countText(sensors, "Motion / 72.5°F / 45% / 120 lux", true), 1);
+
+    auto* room = showAndRender("room_detail", std::make_unique<RoomDetailScreen>(
+        *screenManager, *themeManager, *deviceManager),
+        [](Screen& detail) { static_cast<RoomDetailScreen&>(detail).setRoom("alarm-room", "Basement"); });
+    EXPECT_EQ(test::countText(room, "Alarm", true), 1);
+    EXPECT_GE(test::countText(room, "Leak", true), 1);
 }
 
 TEST_F(ScreenRenderTest, RoomDetailShowsTheSensorsOfEachRoom) {

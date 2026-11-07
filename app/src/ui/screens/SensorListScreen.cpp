@@ -154,6 +154,13 @@ void SensorListScreen::createSensorCards() {
                 isSensor = true;
                 icon = LV_SYMBOL_CLOSE;
                 break;
+            case DeviceType::SmokeSensor:
+            case DeviceType::WaterSensor:
+            case DeviceType::CoSensor:
+            case DeviceType::AlarmSensor:
+                isSensor = true;
+                icon = LV_SYMBOL_WARNING;
+                break;
             default:
                 break;
         }
@@ -191,10 +198,11 @@ void SensorListScreen::createSensorCards() {
 
         // Value (large)
         lv_obj_t* valueLabel = lv_label_create(card);
-        lv_obj_set_style_text_color(valueLabel, m_theme.textPrimary(), 0);
+        // Wraps within the card if it measures a lot
+        lv_obj_set_width(valueLabel, lv_pct(100));
+        lv_obj_set_style_text_align(valueLabel, LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_align(valueLabel, LV_ALIGN_CENTER, 0, 10);
-
-        lv_label_set_text(valueLabel, sensorValueText(device->type(), device->getState()).c_str());
+        showValue(valueLabel, *device);
 
         // Store reference
         SensorCard sc;
@@ -212,12 +220,19 @@ void SensorListScreen::createSensorCards() {
     }
 }
 
+void SensorListScreen::showValue(lv_obj_t* label, const IDevice& device) {
+    const auto state = device.getState();
+    lv_label_set_text(label, sensorValueText(device.type(), state).c_str());
+    lv_obj_set_style_text_color(label, activeAlarmText(device.type(), state).empty()
+                                           ? m_theme.textPrimary() : m_theme.error(), 0);
+}
+
 void SensorListScreen::refreshSensorValues() {
     for (auto& sc : m_sensorCards) {
         auto device = m_deviceManager.getDevice(sc.id);
         if (!device || !sc.valueLabel) continue;
 
-        lv_label_set_text(sc.valueLabel, sensorValueText(device->type(), device->getState()).c_str());
+        showValue(sc.valueLabel, *device);
     }
 }
 

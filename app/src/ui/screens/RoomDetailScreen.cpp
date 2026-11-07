@@ -190,6 +190,7 @@ void RoomDetailScreen::createSensorPanel() {
     m_tempSection = createSensorSection("Temperature", &m_tempValueLabel);
     m_humiditySection = createSensorSection("Humidity", &m_humidityValueLabel);
     m_motionSection = createSensorSection("Motion", &m_motionValueLabel);
+    m_alarmSection = createSensorSection("Alarm", &m_alarmValueLabel);
 
     lv_obj_add_flag(m_sensorPanel, LV_OBJ_FLAG_HIDDEN);
 }
@@ -249,6 +250,11 @@ void RoomDetailScreen::refreshSensorPanel() {
     lv_label_set_text(m_motionValueLabel, roomMotionText(sensors).c_str());
     lv_obj_set_style_text_color(m_motionValueLabel,
                                 sensors.motionDetected ? m_theme.warning() : m_theme.textSecondary(), 0);
+
+    setSection(m_alarmSection, sensors.hasAlarmSensor);
+    lv_label_set_text(m_alarmValueLabel, roomAlarmText(sensors).c_str());
+    lv_obj_set_style_text_color(m_alarmValueLabel,
+                                sensors.activeAlarms.empty() ? m_theme.textSecondary() : m_theme.error(), 0);
 }
 
 void RoomDetailScreen::refreshDeviceList() {

@@ -431,6 +431,12 @@ class SmartHubApp {
         document.getElementById('active-devices').textContent = this.devices.filter(d => d.state?.on).length;
         document.getElementById('total-sensors').textContent = this.sensors.length;
         document.getElementById('total-rooms').textContent = this.rooms.length;
+
+        // A leak or smoke alarm needs seeing from here, not only by going to look at the sensors
+        const alarms = SensorDisplay.activeAlarmsSummary(this.sensors);
+        const banner = document.getElementById('alarm-banner');
+        banner.textContent = alarms ? `⚠️ ${alarms}` : '';
+        banner.classList.toggle('hidden', !alarms);
     }
 
     renderRooms() {
@@ -455,7 +461,8 @@ class SmartHubApp {
             const sensors = SensorDisplay.roomSensors(roomDevices);
 
             const card = document.createElement('div');
-            card.className = 'room-card' + (sensors.motionDetected ? ' motion-active' : '');
+            card.className = 'room-card' +
+                (sensors.activeAlarms.length > 0 ? ' alarm-active' : (sensors.motionDetected ? ' motion-active' : ''));
             card.innerHTML = `
                 <button class="room-card-menu admin-only" data-room-id="${this.escapeHtml(room.id)}">⋮</button>
                 <div class="room-header">
@@ -514,7 +521,8 @@ class SmartHubApp {
         const sensors = SensorDisplay.roomSensors(roomDevices);
 
         document.getElementById('room-sensor-panel').classList.toggle('hidden',
-            !sensors.hasTemperatureSensor && !sensors.hasHumiditySensor && !sensors.hasMotionSensor);
+            !sensors.hasTemperatureSensor && !sensors.hasHumiditySensor && !sensors.hasMotionSensor &&
+            !sensors.hasAlarmSensor);
 
         document.getElementById('room-temp-section').classList.toggle('hidden', !sensors.hasTemperatureSensor);
         document.getElementById('room-detail-temp').textContent = SensorDisplay.temperatureText(sensors.temperatureF);
@@ -527,6 +535,11 @@ class SmartHubApp {
         const motionLabel = document.getElementById('room-motion-label');
         motionLabel.textContent = SensorDisplay.roomMotionText(sensors);
         motionLabel.classList.toggle('active', sensors.motionDetected);
+
+        document.getElementById('room-alarm-section').classList.toggle('hidden', !sensors.hasAlarmSensor);
+        const alarmValue = document.getElementById('room-detail-alarm');
+        alarmValue.textContent = SensorDisplay.roomAlarmText(sensors);
+        alarmValue.classList.toggle('alarm', sensors.activeAlarms.length > 0);
 
         document.getElementById('room-empty-devices').classList.toggle('hidden', roomDevices.length > 0);
 
@@ -1598,6 +1611,9 @@ class SmartHubApp {
         if (type.includes('humidity')) return '💧';
         if (type.includes('motion')) return '👁️';
         if (type.includes('contact')) return '🚪';
+        if (type.includes('smoke')) return '🔥';
+        if (type.includes('water')) return '🌊';
+        if (type.startsWith('co_') || type.includes('alarm')) return '⚠️';
         if (type.includes('light')) return '☀️';
         return '📊';
     }
