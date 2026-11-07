@@ -422,14 +422,16 @@ bool CertManager::generateCertificates(const std::string& hostname,
 }
 
 bool CertManager::isValidHostname(const std::string& hostname) {
-    // Letters, digits, hyphens and dots, as in DNS. Anything else, such as a comma, could change
-    // the meaning of the subjectAltName it goes into.
+    // Letters, digits, hyphens, underscores and dots: DNS names, plus the underscore a system
+    // hostname can have. Anything else, such as a comma, could change the meaning of the
+    // subjectAltName it goes into.
     if (hostname.empty() || hostname.size() > 253 || hostname.front() == '.' ||
-        hostname.front() == '-') {
+        hostname.front() == '-' || hostname.back() == '.' ||
+        hostname.find("..") != std::string::npos) {
         return false;
     }
     for (unsigned char c : hostname) {
-        if (!std::isalnum(c) && c != '-' && c != '.') {
+        if (!std::isalnum(c) && c != '-' && c != '.' && c != '_') {
             return false;
         }
     }

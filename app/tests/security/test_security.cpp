@@ -232,6 +232,9 @@ TEST_F(CertManagerIntegrationTest, IpAddressIsInTheCertificate) {
 TEST(CertManagerValidationTest, Hostnames) {
     EXPECT_TRUE(CertManager::isValidHostname("smarthub.local"));
     EXPECT_TRUE(CertManager::isValidHostname("hub-1"));
+    EXPECT_TRUE(CertManager::isValidHostname("smart_hub"));  // gethostname can give these
+    EXPECT_FALSE(CertManager::isValidHostname("hub."));
+    EXPECT_FALSE(CertManager::isValidHostname("a..b"));
     EXPECT_FALSE(CertManager::isValidHostname(""));
     EXPECT_FALSE(CertManager::isValidHostname("-hub"));
     EXPECT_FALSE(CertManager::isValidHostname("a,DNS:evil.com"));
