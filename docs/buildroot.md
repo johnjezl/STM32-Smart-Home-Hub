@@ -174,7 +174,6 @@ Multiple overlays and post-build scripts are applied in order.
 | OpenSSL | `BR2_PACKAGE_OPENSSL=y` | TLS/crypto |
 | SQLite | `BR2_PACKAGE_SQLITE=y` | Database |
 | nlohmann-json | `BR2_PACKAGE_NLOHMANN_JSON=y` | JSON parsing |
-| OpenAMP | `BR2_PACKAGE_OPENAMP=y` | A7↔M4 comm |
 
 ### Debug (Development)
 

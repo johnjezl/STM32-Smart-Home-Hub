@@ -34,9 +34,9 @@ Buildroot requires significant disk space:
 | Item | Size |
 |------|------|
 | Buildroot source | ~100 MB |
-| Build output | ~5 GB |
+| Build output | ~12 GB |
 | Downloaded packages | ~2 GB |
-| **Total recommended** | **10+ GB** |
+| **Total recommended** | **20+ GB** |
 
 ---
 
@@ -51,7 +51,7 @@ cd STM32-Smart-Home-Hub
 ./tools/build.sh
 ```
 
-`setup.sh` clones Buildroot and the Bootlin ST external tree next to this repository, at the commits the image is known to build with. The versions the build itself downloads, such as the kernel and U-Boot, are pinned in `smarthub_defconfig`. To put Buildroot and the ST tree elsewhere, set `SMARTHUB_BUILDROOT_DIR` and `SMARTHUB_ST_EXTERNAL`.
+`setup.sh` clones Buildroot and the Bootlin ST external tree next to this repository, at the commits the image is known to build with. The versions the build itself downloads, such as the kernel and U-Boot, are named in `smarthub_defconfig`, and checked against the hashes in `buildroot/board/smarthub/patches/`. To put Buildroot and the ST tree elsewhere, set `SMARTHUB_BUILDROOT_DIR` and `SMARTHUB_ST_EXTERNAL`.
 
 The paths below assume the directory holding all three is `~/projects/smarthub`, but it can be anywhere without spaces in its path, which Buildroot doesn't support.
 
