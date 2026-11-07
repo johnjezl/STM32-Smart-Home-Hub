@@ -35,7 +35,7 @@ buildroot/
 │   │   │   │   ├── S40network
 │   │   │   │   └── S80remoteproc
 │   │   │   └── wpa_supplicant/
-│   │   │       └── wpa_supplicant.conf
+│   │   │       └── wpa_supplicant.conf  # Optional, and git-ignored
 │   │   └── root/.ssh/
 │   │       └── authorized_keys
 │   └── post_build.sh       # Post-build customization
@@ -221,7 +221,7 @@ overlay/
 │   │   ├── S40network         # Network initialization
 │   │   └── S80remoteproc      # M4 firmware loader
 │   └── wpa_supplicant/
-│       └── wpa_supplicant.conf # WiFi credentials
+│       └── wpa_supplicant.conf # Optional, and git-ignored
 └── root/
     └── .ssh/
         └── authorized_keys     # SSH public key
@@ -232,7 +232,7 @@ overlay/
 
 ## Wi-Fi Credentials
 
-`wpa_supplicant.conf` is git-ignored and must not be committed. Copy `board/smarthub/wpa_supplicant.conf.example` to `board/smarthub/overlay/etc/wpa_supplicant/wpa_supplicant.conf` and fill in your network before building an image. Without it, the image boots without Wi-Fi.
+An image needs none: it can join Wi-Fi from its touch screen, under Settings, Network. To build them in instead, copy `board/smarthub/wpa_supplicant.conf.example` to `board/smarthub/overlay/etc/wpa_supplicant/wpa_supplicant.conf`, which is git-ignored and must not be committed. See `docs/networking.md`.
 
 ## Image Generation
 

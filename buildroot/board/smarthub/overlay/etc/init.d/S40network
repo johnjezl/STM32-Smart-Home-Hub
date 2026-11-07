@@ -21,23 +21,31 @@ case "$1" in
     fi
 
     # Start WiFi even with no networks yet, as the touch screen's Wi-Fi setup needs it running
-    # to scan and connect, and saves what it connects to here
+    # to scan and connect, and saves what it connects to here. S41dhcpcd gets it an address.
     WPA_CONF=/etc/wpa_supplicant/wpa_supplicant.conf
-    if [ ! -f "$WPA_CONF" ]; then
-        mkdir -p "$(dirname "$WPA_CONF")"
-        (umask 077; printf 'ctrl_interface=/var/run/wpa_supplicant\nctrl_interface_group=0\nupdate_config=1\n' > "$WPA_CONF")
-    fi
+    mkdir -p "$(dirname "$WPA_CONF")"
+    touch "$WPA_CONF"
+    # Without these, an empty or hand-written file couldn't be used by the screen or saved to
+    for setting in update_config=1 ctrl_interface=/var/run/wpa_supplicant; do
+        if ! grep -q "^${setting%%=*}=" "$WPA_CONF"; then
+            (umask 077; { echo "$setting"; cat "$WPA_CONF"; } > "$WPA_CONF.new" && mv "$WPA_CONF.new" "$WPA_CONF")
+        fi
+    done
     # It holds the Wi-Fi password
     chmod 600 "$WPA_CONF"
 
+    # The driver is a module, and its firmware can take a moment to load
+    i=0
+    while [ ! -e /sys/class/net/wlan0 ] && [ $i -lt 10 ]; do
+        sleep 1
+        i=$((i + 1))
+    done
+
     echo "Starting WiFi..."
     ip link set wlan0 up
-    wpa_supplicant -B -i wlan0 -c "$WPA_CONF"
-    sleep 2
-    if [ -x /usr/sbin/dhcpcd ]; then
-        dhcpcd -b wlan0
-    elif [ -x /sbin/udhcpc ]; then
-        udhcpc -i wlan0 -b -q
+    # Saving replaces the file with a new one, which gets this umask
+    if ! (umask 077; wpa_supplicant -B -i wlan0 -c "$WPA_CONF"); then
+        echo "Failed to start wpa_supplicant"
     fi
     ;;
   stop)
