@@ -111,8 +111,10 @@ void NetworkManager::shutdown() {
     {
         std::lock_guard<std::mutex> lock(m_queueMutex);
         m_stopping = true;
-        // Tasks that haven't started are dropped, and so are their callbacks
+        // Tasks that haven't started are dropped, and so are their callbacks, as whatever they
+        // call back into may be going too
         m_queue.clear();
+        m_connectsQueued = 0;
     }
     m_queueChanged.notify_all();
 
@@ -222,7 +224,11 @@ void NetworkManager::connect(const std::string& ssid,
     }
     notifyStatus();
 
-    enqueue([this, ssid, password, callback] { connectWorker(ssid, password, callback); });
+    ++m_connectsQueued;
+    enqueue([this, ssid, password, callback] {
+        --m_connectsQueued;
+        connectWorker(ssid, password, callback);
+    });
 }
 
 void NetworkManager::disconnect() {
@@ -563,14 +569,15 @@ void NetworkManager::scanWorker(const ScanCallback& callback) {
     std::vector<WifiNetwork> networks = parseScanOutput(wpaCli({"scan_results"}));
 
     // Mark currently connected network
-    updateStatus();
+    const NetworkStatus status = parseStatusOutput(wpaCli({"status"}));
+    for (auto& net : networks) {
+        net.connected = status.state == ConnectionState::Connected && net.ssid == status.ssid;
+    }
     {
         std::lock_guard<std::mutex> lock(m_mutex);
-        for (auto& net : networks) {
-            if (m_status.state == ConnectionState::Connected &&
-                net.ssid == m_status.ssid) {
-                net.connected = true;
-            }
+        // A connect waiting behind this scan has set Connecting, which stands until it runs
+        if (m_connectsQueued == 0) {
+            m_status = status;
         }
         m_scanResults = networks;
     }

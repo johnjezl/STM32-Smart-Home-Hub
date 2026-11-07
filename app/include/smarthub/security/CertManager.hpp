@@ -56,7 +56,7 @@ public:
                                  const std::string& hostname);
 
     /**
-     * Whether a certificate can be generated for this name: DNS letters, digits, '-' and '.'
+     * Whether a certificate can be generated for this name: letters, digits, '-', '_' and '.'
      */
     static bool isValidHostname(const std::string& hostname);
 

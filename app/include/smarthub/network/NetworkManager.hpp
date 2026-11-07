@@ -233,6 +233,8 @@ private:
     StatusCallback m_statusCallback;
 
     std::atomic<bool> m_running{false};
+    // Connects queued but not started. Their Connecting state stands until they start.
+    std::atomic<int> m_connectsQueued{0};
 
     std::mutex m_queueMutex;
     std::condition_variable m_queueChanged;

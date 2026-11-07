@@ -4,11 +4,14 @@
 
 #include "smarthub/core/Process.hpp"
 
+#include <algorithm>
 #include <cerrno>
 #include <csignal>
 #include <cstdlib>
 #include <fcntl.h>
+#include <poll.h>
 #include <sys/resource.h>
+#include <sys/stat.h>
 #include <sys/syscall.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -16,6 +19,12 @@
 namespace smarthub::core {
 
 namespace {
+
+bool isExecutableFile(const std::string& path) {
+    struct stat info {};
+    return ::stat(path.c_str(), &info) == 0 && S_ISREG(info.st_mode) &&
+           ::access(path.c_str(), X_OK) == 0;
+}
 
 // Looked up before fork, as only async-signal-safe calls are allowed in the child of a threaded
 // program
@@ -33,7 +42,7 @@ std::string findExecutable(const std::string& name) {
         }
         std::string directory = directories.substr(start, end - start);
         const std::string candidate = (directory.empty() ? "." : directory) + "/" + name;
-        if (::access(candidate.c_str(), X_OK) == 0) {
+        if (isExecutableFile(candidate)) {
             return candidate;
         }
         start = end + 1;
@@ -54,7 +63,8 @@ void closeDescriptorsFrom(int first, int limit) {
 
 }  // namespace
 
-ProcessResult runProcess(const std::vector<std::string>& argv, bool includeStderr) {
+ProcessResult runProcess(const std::vector<std::string>& argv, bool includeStderr,
+                         std::chrono::milliseconds timeout) {
     ProcessResult result;
     if (argv.empty()) {
         return result;
@@ -116,8 +126,25 @@ ProcessResult runProcess(const std::vector<std::string>& argv, bool includeStder
     ::close(devNull);
     ::close(pipeFds[1]);
 
+    // Read until the output closes, or the time runs out. A program that hangs, or leaves a
+    // child holding its output open, would otherwise hold up the caller for good.
+    const auto deadline = std::chrono::steady_clock::now() + timeout;
     char buffer[4096];
     for (;;) {
+        const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(
+            deadline - std::chrono::steady_clock::now());
+        if (left.count() <= 0) {
+            result.timedOut = true;
+            break;
+        }
+        struct pollfd readable {pipeFds[0], POLLIN, 0};
+        const int ready = ::poll(&readable, 1, static_cast<int>(std::min<long long>(left.count(), 60000)));
+        if (ready < 0 && errno != EINTR) {
+            break;
+        }
+        if (ready <= 0) {
+            continue;
+        }
         const ssize_t count = ::read(pipeFds[0], buffer, sizeof(buffer));
         if (count > 0) {
             result.output.append(buffer, static_cast<size_t>(count));
@@ -127,13 +154,17 @@ ProcessResult runProcess(const std::vector<std::string>& argv, bool includeStder
     }
     ::close(pipeFds[0]);
 
+    if (result.timedOut) {
+        ::kill(pid, SIGKILL);
+    }
+
     int status = 0;
     pid_t waited;
     do {
         waited = ::waitpid(pid, &status, 0);
     } while (waited < 0 && errno == EINTR);
 
-    if (waited == pid && WIFEXITED(status)) {
+    if (waited == pid && WIFEXITED(status) && !result.timedOut) {
         result.exitCode = WEXITSTATUS(status);
     }
     return result;

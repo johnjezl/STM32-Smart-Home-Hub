@@ -284,6 +284,30 @@ TEST(ProcessTest, ExitCodeAndStderr) {
     EXPECT_EQ(smarthub::core::runProcess({}).exitCode, -1);
 }
 
+TEST(ProcessTest, StopsAProgramThatTakesTooLong) {
+    const auto start = std::chrono::steady_clock::now();
+    const auto result = smarthub::core::runProcess({"sh", "-c", "echo started; sleep 30"}, false,
+                                                   std::chrono::milliseconds(300));
+    EXPECT_LT(std::chrono::steady_clock::now() - start, std::chrono::seconds(5));
+    EXPECT_TRUE(result.timedOut);
+    EXPECT_EQ(result.exitCode, -1);
+    EXPECT_EQ(result.output, "started\n");
+}
+
+TEST(ProcessTest, PathSearchSkipsDirectories) {
+    const auto dir = std::filesystem::temp_directory_path() /
+                     ("smarthub_path_" + std::to_string(getpid()));
+    std::filesystem::create_directories(dir / "first" / "sh");  // A directory named like the program
+    const char* oldPath = std::getenv("PATH");
+    const std::string saved = oldPath ? oldPath : "";
+    setenv("PATH", ((dir / "first").string() + ":" + saved).c_str(), 1);
+    const auto result = smarthub::core::runProcess({"sh", "-c", "echo ok"});
+    setenv("PATH", saved.c_str(), 1);
+    std::filesystem::remove_all(dir);
+    EXPECT_EQ(result.exitCode, 0);
+    EXPECT_EQ(result.output, "ok\n");
+}
+
 // A wpa_cli that records each call's arguments, and answers from files, so connecting can be
 // checked without a radio. Arguments are separated by \037 and calls by \036.
 class FakeWpaCliTest : public ::testing::Test {
@@ -469,6 +493,28 @@ TEST_F(FakeWpaCliTest, ScanDecodesAndDropsDuplicateSsids) {
     EXPECT_EQ((*found)[1].signalStrength, -50);
 }
 
+TEST_F(FakeWpaCliTest, ScanDoesNotUndoAQueuedConnectsStatus) {
+    write("status", "wpa_state=DISCONNECTED\n");
+    options.scanWait = std::chrono::milliseconds(200);
+    NetworkManager manager(options);
+    ASSERT_TRUE(manager.initialize());
+
+    // The scan's callback runs on the worker before the connect behind it has started
+    std::mutex mutex;
+    std::condition_variable done;
+    std::optional<ConnectionState> stateAfterScan;
+    manager.startScan([&](const std::vector<WifiNetwork>&) {
+        std::lock_guard<std::mutex> lock(mutex);
+        stateAfterScan = manager.getStatus().state;
+        done.notify_all();
+    });
+    manager.connect("Home", "password", nullptr);
+
+    std::unique_lock<std::mutex> lock(mutex);
+    ASSERT_TRUE(done.wait_for(lock, std::chrono::seconds(10), [&] { return stateAfterScan.has_value(); }));
+    EXPECT_EQ(*stateAfterScan, ConnectionState::Connecting);
+}
+
 TEST_F(FakeWpaCliTest, ConnectDoesNotBlockTheCallerAndShutdownStopsIt) {
     // The network never comes up, and each poll waits a long time
     write("status", "wpa_state=SCANNING\n");
@@ -570,18 +616,20 @@ protected:
     std::unique_ptr<NetworkManager> networkManager;
 };
 
-TEST_F(NetworkManagerTest, InitializeWithoutNmcli) {
-    // Initialize should work even without nmcli
-    // It will just report WiFi as unavailable
-    bool result = networkManager->initialize();
+TEST_F(NetworkManagerTest, InitializeWithoutWpaCli) {
+    // No wpa_cli: initialize says so, and WiFi is unavailable
+    NetworkManagerOptions missing = options;
+    missing.wpaCli = (dir / "no-such-wpa_cli").string();
+    NetworkManager manager(missing);
+    EXPECT_FALSE(manager.initialize());
+    EXPECT_FALSE(manager.isWifiAvailable());
+}
 
-    // The result depends on whether nmcli is installed
-    // Either way, we should be able to call isWifiAvailable
-    (void)result;
-    bool available = networkManager->isWifiAvailable();
-
-    // Just verify it doesn't crash
-    EXPECT_TRUE(result || !available);
+TEST_F(NetworkManagerTest, InitializeWithoutWifiInterface) {
+    std::filesystem::remove_all(dir / "net" / "wlan0");
+    std::filesystem::remove_all(dir / "net" / "wlan1");
+    EXPECT_TRUE(networkManager->initialize());
+    EXPECT_FALSE(networkManager->isWifiAvailable());
 }
 
 TEST_F(NetworkManagerTest, GetStatusBeforeInit) {
@@ -605,13 +653,8 @@ TEST_F(NetworkManagerTest, GetScanResultsEmpty) {
 }
 
 TEST_F(NetworkManagerTest, GetSavedNetworksEmpty) {
-    // Initialize first
     networkManager->initialize();
-
-    // May or may not have saved networks depending on system
-    std::vector<std::string> saved = networkManager->getSavedNetworks();
-    // Just verify it returns without crashing
-    EXPECT_GE(saved.size(), 0u);
+    EXPECT_TRUE(networkManager->getSavedNetworks().empty());
 }
 
 // ============================================================================
@@ -706,13 +749,7 @@ TEST_F(NetworkManagerTest, SetStatusCallback) {
 
 TEST_F(NetworkManagerTest, IsWifiAvailableAfterInit) {
     networkManager->initialize();
-
-    // On a system with WiFi, this should be true
-    // On CI without WiFi, this may be false
-    bool available = networkManager->isWifiAvailable();
-
-    // Just verify the method works without crashing
-    EXPECT_TRUE(available || !available);  // Always passes, tests method call
+    EXPECT_TRUE(networkManager->isWifiAvailable());
 }
 
 TEST_F(NetworkManagerTest, DisconnectSafe) {

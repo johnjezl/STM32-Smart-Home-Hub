@@ -3,14 +3,17 @@
  */
 #pragma once
 
+#include <chrono>
 #include <string>
 #include <vector>
 
 namespace smarthub::core {
 
 struct ProcessResult {
-    // The exit code, or -1 if the program couldn't be started or didn't exit normally
+    // The exit code, or -1 if the program couldn't be started, didn't exit normally or was
+    // stopped for taking too long
     int exitCode = -1;
+    bool timedOut = false;
     std::string output;
 };
 
@@ -21,7 +24,9 @@ struct ProcessResult {
  *
  * @param argv The program and its arguments
  * @param includeStderr Whether stderr goes into the output too, rather than /dev/null
+ * @param timeout How long it may run before it's killed, with the output so far returned
  */
-ProcessResult runProcess(const std::vector<std::string>& argv, bool includeStderr = false);
+ProcessResult runProcess(const std::vector<std::string>& argv, bool includeStderr = false,
+                         std::chrono::milliseconds timeout = std::chrono::seconds(30));
 
 }  // namespace smarthub::core
