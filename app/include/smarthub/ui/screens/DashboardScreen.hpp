@@ -59,6 +59,7 @@ private:
     void createRoomCards();
     void updateRoomCards();
     void updateClock();
+    void updateAlarmTitle();
 
     void onRoomClicked(const std::string& roomId);
     void onNavTabSelected(const std::string& tabId);

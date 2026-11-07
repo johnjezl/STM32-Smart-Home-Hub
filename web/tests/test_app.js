@@ -286,7 +286,48 @@ TestRunner.describe('Icon Mapping', () => {
 // ============================================================================
 
 TestRunner.describe('Sensor Value Formatting', () => {
-    const { sensorValue, roomSensors, roomClimateText, roomMotionText } = SensorDisplayApi;
+    const { sensorValue, roomSensors, roomClimateText, roomMotionText, roomAlarmText, activeAlarmsSummary } = SensorDisplayApi;
+
+    TestRunner.it('should say what an alarm sensor is raising', () => {
+        for (const [type, word] of [['smoke_sensor', 'Smoke'], ['water_sensor', 'Leak'], ['co_sensor', 'CO'], ['alarm_sensor', 'Alarm']]) {
+            const on = sensorValue({ type, state: { alarm: true } });
+            TestRunner.assertEqual(on.text, word);
+            TestRunner.assertEqual(on.colorClass, 'alarm');
+            TestRunner.assertEqual(sensorValue({ type, state: { alarm: false } }).text, 'Clear');
+            TestRunner.assertEqual(sensorValue({ type, state: {} }).text, '--');
+        }
+    });
+
+    TestRunner.it('should show everything a sensor measures', () => {
+        const state = { motion: true, temperature: 22.5, humidity: 45, illuminance: 120 };
+        TestRunner.assertEqual(sensorValue({ type: 'motion_sensor', state }).text, 'Motion / 72.5°F / 45% / 120 lux');
+        TestRunner.assertEqual(sensorValue({ type: 'contact_sensor', state: { contact: true, temperature: 22.5 } }).text, 'Closed / 72.5°F');
+        TestRunner.assertEqual(sensorValue({ type: 'motion_sensor', state: { temperature: 22.5 } }).text, '72.5°F',
+            'a reading before any motion report');
+        TestRunner.assertEqual(sensorValue({ type: 'water_sensor', state: { alarm: false, temperature: 22.5 } }).text, 'Clear / 72.5°F');
+    });
+
+    TestRunner.it('should count what other sensors measure towards the room', () => {
+        const room = roomSensors([{ type: 'motion_sensor', state: { motion: false, temperature: 20, humidity: 40 } }]);
+        TestRunner.assertEqual(roomClimateText(room), '68°F / 40%');
+        const none = roomSensors([{ type: 'motion_sensor', state: { motion: false } }]);
+        TestRunner.assertEqual(roomClimateText(none), '', 'it says nothing of a room it does not measure');
+    });
+
+    TestRunner.it('should sum up the alarms in a room and everywhere', () => {
+        TestRunner.assertEqual(roomSensors([]).hasAlarmSensor, false);
+        TestRunner.assertEqual(roomAlarmText(roomSensors([{ type: 'water_sensor', state: {} }])), '--');
+        TestRunner.assertEqual(roomAlarmText(roomSensors([{ type: 'water_sensor', state: { alarm: false } }])), 'Clear');
+        const devices = [
+            { type: 'water_sensor', name: 'Basement', state: { alarm: true } },
+            { type: 'water_sensor', name: 'Attic', state: { alarm: false } },
+            { type: 'smoke_sensor', name: 'Kitchen', state: { alarm: true } },
+            { type: 'motion_sensor', name: 'Hall', state: { alarm: true } }
+        ];
+        TestRunner.assertEqual(roomAlarmText(roomSensors(devices)), 'Leak, Smoke');
+        TestRunner.assertEqual(activeAlarmsSummary(devices), 'Leak: Basement, Smoke: Kitchen');
+        TestRunner.assertEqual(activeAlarmsSummary([]), '');
+    });
 
     TestRunner.it('should convert temperature from the Celsius sensors report', () => {
         const result = sensorValue({ type: 'temperature_sensor', state: { temperature: 22.5 } });

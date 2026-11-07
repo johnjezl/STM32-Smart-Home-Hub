@@ -157,6 +157,12 @@ DeviceType ZigbeeDeviceDatabase::parseDeviceType(const std::string& typeStr) con
         return DeviceType::ContactSensor;
     } else if (lower == "motion" || lower == "motion_sensor" || lower == "occupancy") {
         return DeviceType::MotionSensor;
+    } else if (lower == "smoke" || lower == "smoke_sensor" || lower == "fire") {
+        return DeviceType::SmokeSensor;
+    } else if (lower == "water" || lower == "water_sensor" || lower == "leak") {
+        return DeviceType::WaterSensor;
+    } else if (lower == "co" || lower == "co_sensor") {
+        return DeviceType::CoSensor;
     }
 
     return DeviceType::Unknown;

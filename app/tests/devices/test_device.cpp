@@ -11,6 +11,7 @@
 #include <smarthub/devices/types/ColorLightDevice.hpp>
 #include <smarthub/devices/types/TemperatureSensor.hpp>
 #include <smarthub/devices/types/MotionSensor.hpp>
+#include <smarthub/devices/types/AlarmSensor.hpp>
 #include <smarthub/devices/types/ContactSensor.hpp>
 #include <smarthub/devices/DeviceTypeRegistry.hpp>
 
@@ -302,6 +303,72 @@ TEST_F(DeviceTest, TemperatureSensorNoHumidity) {
     // Humidity not supported - returns -1
     EXPECT_EQ(sensor.humidity(), -1.0);
     EXPECT_EQ(sensor.batteryLevel(), -1);
+}
+
+// === Alarm Sensor Tests ===
+
+TEST_F(DeviceTest, AlarmSensorsSayWhatTheyAreRaising) {
+    const std::vector<std::pair<DeviceType, std::string>> kinds = {
+        {DeviceType::SmokeSensor, "Smoke"}, {DeviceType::WaterSensor, "Leak"},
+        {DeviceType::CoSensor, "CO"}, {DeviceType::AlarmSensor, "Alarm"}};
+    for (const auto& [type, word] : kinds) {
+        AlarmSensor sensor("alarm", "Alarm", type);
+        EXPECT_EQ(sensor.type(), type);
+        EXPECT_FALSE(sensor.alarmActive());
+        EXPECT_EQ(sensorValueText(type, sensor.getState()), "--") << "no report yet isn't all clear";
+
+        sensor.setState("alarm", false);
+        EXPECT_EQ(sensorValueText(type, sensor.getState()), "Clear");
+        EXPECT_EQ(activeAlarmText(type, sensor.getState()), "");
+
+        sensor.setState("alarm", true);
+        EXPECT_TRUE(sensor.alarmActive());
+        EXPECT_EQ(sensorValueText(type, sensor.getState()), word);
+        EXPECT_EQ(activeAlarmText(type, sensor.getState()), word);
+    }
+}
+
+TEST_F(DeviceTest, ASensorShowsAllThatItMeasures) {
+    const nlohmann::json everything = {{"motion", true}, {"temperature", 22.5}, {"humidity", 45}, {"illuminance", 120}};
+    EXPECT_EQ(sensorValueText(DeviceType::MotionSensor, everything), "Motion / 72.5°F / 45% / 120 lux");
+    EXPECT_EQ(sensorValueText(DeviceType::MotionSensor, {{"temperature", 22.5}}), "72.5°F") << "before any motion report";
+    EXPECT_EQ(sensorValueText(DeviceType::ContactSensor, {{"contact", true}, {"temperature", 22.5}}), "Closed / 72.5°F");
+    EXPECT_EQ(sensorValueText(DeviceType::WaterSensor, {{"alarm", false}, {"temperature", 22.5}}), "Clear / 72.5°F");
+}
+
+TEST_F(DeviceTest, WhatOtherSensorsMeasureCountsTowardsTheRoom) {
+    auto motion = std::make_shared<MotionSensor>("m", "Hall");
+    motion->setState("motion", false);
+    RoomSensors room = summarizeRoomSensors({motion});
+    EXPECT_FALSE(room.hasTemperatureSensor) << "it says nothing of a room it doesn't measure";
+    EXPECT_FALSE(room.hasHumiditySensor);
+
+    motion->setState("temperature", 20.0);
+    motion->setState("humidity", 40);
+    room = summarizeRoomSensors({motion});
+    EXPECT_EQ(roomClimateText(room), "68°F / 40%");
+}
+
+TEST_F(DeviceTest, AlarmsAreSummedUpForARoomAndEverywhere) {
+    auto basement = std::make_shared<AlarmSensor>("b", "Basement", DeviceType::WaterSensor);
+    auto attic = std::make_shared<AlarmSensor>("a", "Attic", DeviceType::WaterSensor);
+    auto kitchen = std::make_shared<AlarmSensor>("k", "Kitchen", DeviceType::SmokeSensor);
+    const std::vector<DevicePtr> devices = {basement, attic, kitchen, nullptr};
+
+    RoomSensors room = summarizeRoomSensors(devices);
+    EXPECT_TRUE(room.hasAlarmSensor);
+    EXPECT_TRUE(room.any());
+    EXPECT_EQ(roomAlarmText(room), "--");
+    EXPECT_EQ(activeAlarmsSummary(devices), "");
+
+    attic->setState("alarm", false);
+    EXPECT_EQ(roomAlarmText(summarizeRoomSensors(devices)), "Clear");
+
+    basement->setState("alarm", true);
+    kitchen->setState("alarm", true);
+    attic->setState("alarm", true);
+    EXPECT_EQ(roomAlarmText(summarizeRoomSensors(devices)), "Leak, Smoke");
+    EXPECT_EQ(activeAlarmsSummary(devices), "Leak: Basement, Leak: Attic, Smoke: Kitchen");
 }
 
 // === Motion Sensor Tests ===

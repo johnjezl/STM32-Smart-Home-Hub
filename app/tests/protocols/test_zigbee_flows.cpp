@@ -12,6 +12,7 @@
 #include "../mocks/FakeZnpCoordinator.hpp"
 
 #include <smarthub/core/EventBus.hpp>
+#include <smarthub/devices/DeviceTypeRegistry.hpp>
 #include <smarthub/devices/types/ContactSensor.hpp>
 #include <smarthub/devices/types/SwitchDevice.hpp>
 #include <smarthub/protocols/zigbee/ZigbeeCoordinator.hpp>
@@ -25,6 +26,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <string>
 #include <thread>
 #include <vector>
@@ -908,6 +910,31 @@ const FakeZigbeeDevice CLOSED_DOOR{
 const FakeZigbeeDevice MOTION_WITH_TEMPERATURE{
     0x8109, 0x00124B0000008109ULL,
     {{1, {zcl::cluster::OCCUPANCY_SENSING, zcl::cluster::TEMPERATURE_MEASUREMENT}}}};
+const FakeZigbeeDevice ALARMED_LEAK{
+    0x810A, 0x00124B000000810AULL,
+    {{1, {zcl::cluster::IAS_ZONE}}},
+    "", "", zcl::zone_type::WATER_SENSOR, uint16_t{0x0001}};
+const FakeZigbeeDevice SMOKE{
+    0x810B, 0x00124B000000810BULL,
+    {{1, {zcl::cluster::IAS_ZONE}}},
+    "", "", zcl::zone_type::FIRE_SENSOR};
+const FakeZigbeeDevice CO_ALARM{
+    0x810C, 0x00124B000000810CULL,
+    {{1, {zcl::cluster::IAS_ZONE}}},
+    "", "", zcl::zone_type::CO_SENSOR};
+const FakeZigbeeDevice GLASS_BREAK{
+    0x810D, 0x00124B000000810DULL,
+    {{1, {zcl::cluster::IAS_ZONE}}},
+    "", "", zcl::zone_type::GLASS_BREAK};
+const FakeZigbeeDevice LEAK_WITH_TEMPERATURE{
+    0x810E, 0x00124B000000810EULL,
+    {{1, {zcl::cluster::IAS_ZONE, zcl::cluster::TEMPERATURE_MEASUREMENT}}},
+    "", "", zcl::zone_type::WATER_SENSOR};
+const FakeZigbeeDevice MOTION_MEASURING_EVERYTHING{
+    0x810F, 0x00124B000000810FULL,
+    {{1, {zcl::cluster::OCCUPANCY_SENSING}},
+     {2, {zcl::cluster::TEMPERATURE_MEASUREMENT, zcl::cluster::RELATIVE_HUMIDITY,
+          zcl::cluster::ILLUMINANCE_MEASUREMENT}}}};
 const FakeZigbeeDevice OCCUPANCY{
     0x8104, 0x00124B0000008104ULL,
     {{1, {zcl::cluster::OCCUPANCY_SENSING}}}};
@@ -1004,6 +1031,126 @@ TEST_F(ZigbeeHandlerFlowTest, AlarmFromAnotherKindOfZoneIsNotMotionAfterARestart
 
     EXPECT_EQ(waitForState(idOf(LEAK), "alarm"), true);
     EXPECT_FALSE(stateOf(idOf(LEAK), "motion").has_value());
+}
+
+TEST_F(ZigbeeHandlerFlowTest, IasZonesBecomeTheSensorTheySayTheyAre) {
+    const std::vector<std::pair<const FakeZigbeeDevice*, DeviceType>> zones = {
+        {&LEAK, DeviceType::WaterSensor},
+        {&SMOKE, DeviceType::SmokeSensor},
+        {&CO_ALARM, DeviceType::CoSensor},
+        {&GLASS_BREAK, DeviceType::AlarmSensor},
+    };
+    for (const auto& [zone, type] : zones) {
+        fake.addDevice(*zone);
+        auto device = pair(*zone);
+        ASSERT_NE(device, nullptr);
+        EXPECT_EQ(device->type(), type);
+    }
+}
+
+TEST_F(ZigbeeHandlerFlowTest, IasZoneThatDoesNotSayIsStillTakenForMotion) {
+    fake.addDevice(NO_ZONE_TYPE);
+    auto device = pair(NO_ZONE_TYPE);
+    ASSERT_NE(device, nullptr);
+    EXPECT_EQ(device->type(), DeviceType::MotionSensor);
+}
+
+TEST_F(ZigbeeHandlerFlowTest, SensorWithAlarmAndTemperatureIsTheAlarmFirst) {
+    fake.addDevice(LEAK_WITH_TEMPERATURE);
+    auto device = pair(LEAK_WITH_TEMPERATURE);
+    ASSERT_NE(device, nullptr);
+    EXPECT_EQ(device->type(), DeviceType::WaterSensor);
+}
+
+TEST_F(ZigbeeHandlerFlowTest, LeakAlarmReachesTheSensorAndClears) {
+    fake.addDevice(LEAK);
+    auto device = pair(LEAK);
+    ASSERT_NE(device, nullptr);
+
+    fake.clusterCommand(LEAK.nwkAddr, 1, zcl::cluster::IAS_ZONE, 0x00, {0x01, 0x00});
+    EXPECT_EQ(waitForState(idOf(LEAK), "alarm"), true);
+
+    fake.clusterCommand(LEAK.nwkAddr, 1, zcl::cluster::IAS_ZONE, 0x00, {0x00, 0x00});
+    eventually([&] { return stateOf(idOf(LEAK), "alarm") == nlohmann::json(false); });
+    EXPECT_EQ(stateOf(idOf(LEAK), "alarm"), nlohmann::json(false));
+}
+
+TEST_F(ZigbeeHandlerFlowTest, PairingKnowsWhetherAnAlarmIsGoingOffAlready) {
+    fake.addDevice(ALARMED_LEAK);
+    auto device = pair(ALARMED_LEAK);
+    ASSERT_NE(device, nullptr);
+    EXPECT_EQ(device->getProperty("alarm"), true);
+}
+
+TEST_F(ZigbeeHandlerFlowTest, AlarmSensorSavedAndLoadedIsTheSameKind) {
+    fake.addDevice(SMOKE);
+    auto device = pair(SMOKE);
+    ASSERT_NE(device, nullptr);
+    auto loaded = smarthub::DeviceTypeRegistry::instance().createFromTypeName(
+        smarthub::deviceTypeToString(device->type()), device->id(), device->name(), "zigbee", "", nlohmann::json::object());
+    ASSERT_NE(loaded, nullptr);
+    EXPECT_EQ(loaded->type(), DeviceType::SmokeSensor);
+}
+
+TEST_F(ZigbeeHandlerFlowTest, SensorIsAskedToReportAllThatItMeasures) {
+    fake.addDevice(MOTION_MEASURING_EVERYTHING);
+    fake.clearSentFrames();
+    ASSERT_NE(pair(MOTION_MEASURING_EVERYTHING), nullptr);
+
+    std::set<std::pair<int, uint16_t>> asked;
+    for (const AirFrame& frame : airFrames(fake)) {
+        if (frame.zclCommand == zcl::global_cmd::CONFIGURE_REPORTING) {
+            asked.insert({frame.endpoint, frame.cluster});
+        }
+    }
+    const std::set<std::pair<int, uint16_t>> expected = {
+        {1, zcl::cluster::OCCUPANCY_SENSING},
+        {2, zcl::cluster::TEMPERATURE_MEASUREMENT},
+        {2, zcl::cluster::RELATIVE_HUMIDITY},
+        {2, zcl::cluster::ILLUMINANCE_MEASUREMENT},
+    };
+    EXPECT_EQ(asked, expected);
+}
+
+TEST_F(ZigbeeHandlerFlowTest, SensorOnlyAsksForWhatItHas) {
+    fake.addDevice(LEAK);
+    fake.clearSentFrames();
+    ASSERT_NE(pair(LEAK), nullptr);
+    for (const AirFrame& frame : airFrames(fake)) {
+        EXPECT_NE(frame.zclCommand, zcl::global_cmd::CONFIGURE_REPORTING) << "cluster " << frame.cluster;
+    }
+}
+
+TEST_F(ZigbeeHandlerFlowTest, SensorKeepsAllItsReadings) {
+    fake.addDevice(MOTION_MEASURING_EVERYTHING);
+    auto device = pair(MOTION_MEASURING_EVERYTHING);
+    ASSERT_NE(device, nullptr);
+    const auto id = idOf(MOTION_MEASURING_EVERYTHING);
+
+    fake.reportAttribute(MOTION_MEASURING_EVERYTHING.nwkAddr, 1, zcl::cluster::OCCUPANCY_SENSING,
+                         zcl::attr::occupancy::OCCUPANCY, zcl::datatype::BITMAP8, {0x01});
+    fake.reportAttribute(MOTION_MEASURING_EVERYTHING.nwkAddr, 2, zcl::cluster::TEMPERATURE_MEASUREMENT,
+                         zcl::attr::temperature::MEASURED_VALUE, zcl::datatype::INT16, {0xCA, 0x08});  // 22.5°C
+    fake.reportAttribute(MOTION_MEASURING_EVERYTHING.nwkAddr, 2, zcl::cluster::RELATIVE_HUMIDITY,
+                         zcl::attr::humidity::MEASURED_VALUE, zcl::datatype::UINT16, {0x94, 0x11});  // 45%
+    fake.reportAttribute(MOTION_MEASURING_EVERYTHING.nwkAddr, 2, zcl::cluster::ILLUMINANCE_MEASUREMENT,
+                         zcl::attr::illuminance::MEASURED_VALUE, zcl::datatype::UINT16, {0x11, 0x27});  // 10 lux
+
+    EXPECT_EQ(waitForState(id, "motion"), true);
+    EXPECT_EQ(waitForState(id, "temperature"), 22.5);
+    EXPECT_EQ(waitForState(id, "humidity"), 45.0);
+    EXPECT_EQ(waitForState(id, "illuminance"), 10);
+}
+
+TEST_F(ZigbeeHandlerFlowTest, IlluminanceSensorSayingItHasNoReadingIsIgnored) {
+    fake.addDevice(MOTION_MEASURING_EVERYTHING);
+    ASSERT_NE(pair(MOTION_MEASURING_EVERYTHING), nullptr);
+    const auto id = idOf(MOTION_MEASURING_EVERYTHING);
+    fake.reportAttribute(MOTION_MEASURING_EVERYTHING.nwkAddr, 2, zcl::cluster::ILLUMINANCE_MEASUREMENT,
+                         zcl::attr::illuminance::MEASURED_VALUE, zcl::datatype::UINT16, {0xFF, 0xFF});
+    fake.reportAttribute(MOTION_MEASURING_EVERYTHING.nwkAddr, 2, zcl::cluster::ILLUMINANCE_MEASUREMENT,
+                         zcl::attr::illuminance::MEASURED_VALUE, zcl::datatype::UINT16, {0x00, 0x00});
+    EXPECT_EQ(waitForState(id, "illuminance"), 0) << "the first would have been some huge number";
 }
 
 TEST_F(ZigbeeHandlerFlowTest, PairingKnowsWhetherADoorIsOpenAlready) {

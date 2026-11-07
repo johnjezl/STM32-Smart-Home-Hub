@@ -11,6 +11,7 @@
 #include <smarthub/devices/types/TemperatureSensor.hpp>
 #include <smarthub/devices/types/MotionSensor.hpp>
 #include <smarthub/devices/types/ContactSensor.hpp>
+#include <smarthub/devices/types/AlarmSensor.hpp>
 #include <cinttypes>
 #include <cstdint>
 #include <cctype>
@@ -68,6 +69,10 @@ std::vector<uint16_t> clustersFor(DeviceType type) {
         case DeviceType::MotionSensor:
             return {zcl::cluster::IAS_ZONE, zcl::cluster::OCCUPANCY_SENSING};
         case DeviceType::ContactSensor:
+        case DeviceType::SmokeSensor:
+        case DeviceType::WaterSensor:
+        case DeviceType::CoSensor:
+        case DeviceType::AlarmSensor:
             return {zcl::cluster::IAS_ZONE};
         default:
             return {zcl::cluster::ON_OFF};
@@ -1204,6 +1209,7 @@ void ZigbeeHandler::finishPairing(uint64_t ieeeAddr) {
     // The state it's in now, as a door might not move for days
     if (deviceInfo->zoneStatus) {
         const bool alarm = (*deviceInfo->zoneStatus & 0x03) != 0;
+        device->setState("alarm", alarm);
         const ZoneAlarm meaning = zoneAlarmFor(type, deviceInfo->zoneType);
         if (meaning == ZoneAlarm::Motion) {
             device->setState("motion", alarm);
@@ -1381,6 +1387,17 @@ void ZigbeeHandler::onAttributeReport(uint16_t nwkAddr, const ZclAttributeValue&
             }
             break;
 
+        case zcl::cluster::ILLUMINANCE_MEASUREMENT:
+            if (attr.attributeId == zcl::attr::illuminance::MEASURED_VALUE) {
+                // 10000 * log10(lux) + 1. 0xFFFF means the sensor has no valid reading.
+                if (attr.asUint16() != 0xFFFF) {
+                    const int lux = attr.asUint16() == 0
+                        ? 0 : static_cast<int>(std::lround(std::pow(10.0, (attr.asUint16() - 1) / 10000.0)));
+                    notifyState(deviceId, "illuminance", lux);
+                }
+            }
+            break;
+
         case zcl::cluster::IAS_ZONE:
             if (attr.attributeId == zcl::attr::ias_zone::ZONE_STATUS) {
                 notifyZoneStatus(deviceId, deviceInfo->ieeeAddress, attr.asUint16());
@@ -1478,6 +1495,15 @@ DeviceType ZigbeeHandler::resolveDeviceType(const ZigbeeDeviceInfo& info) {
     if (info.zoneType == zcl::zone_type::MOTION_SENSOR) {
         return DeviceType::MotionSensor;
     }
+    if (info.zoneType == zcl::zone_type::FIRE_SENSOR) {
+        return DeviceType::SmokeSensor;
+    }
+    if (info.zoneType == zcl::zone_type::WATER_SENSOR) {
+        return DeviceType::WaterSensor;
+    }
+    if (info.zoneType == zcl::zone_type::CO_SENSOR) {
+        return DeviceType::CoSensor;
+    }
 
     // The device database knows better than the clusters, if it has an answer
     auto dbEntry = m_deviceDb.lookup(info.manufacturer, info.model);
@@ -1534,6 +1560,13 @@ DevicePtr ZigbeeHandler::createDeviceFromInfo(const ZigbeeDeviceInfo& info) {
 
         case DeviceType::ContactSensor:
             device = std::make_shared<ContactSensor>(deviceId, name, "zigbee");
+            break;
+
+        case DeviceType::SmokeSensor:
+        case DeviceType::WaterSensor:
+        case DeviceType::CoSensor:
+        case DeviceType::AlarmSensor:
+            device = std::make_shared<AlarmSensor>(deviceId, name, type, "zigbee");
             break;
 
         default:
@@ -1614,7 +1647,8 @@ DeviceType ZigbeeHandler::inferDeviceType(const ZigbeeDeviceInfo& info) {
         // Prioritize temperature sensor for sensors with temp/humidity clusters
         return DeviceType::TemperatureSensor;
     } else if (hasIasZone) {
-        return DeviceType::MotionSensor;
+        // Saying it's some other kind of zone means it isn't motion. Saying nothing, it may well be.
+        return info.zoneType ? DeviceType::AlarmSensor : DeviceType::MotionSensor;
     } else if (hasOnOff) {
         return DeviceType::Switch;
     }
@@ -1661,18 +1695,33 @@ void ZigbeeHandler::setupReporting(uint64_t ieeeAddr, uint16_t nwkAddr, DeviceTy
             }
             break;
 
-        case DeviceType::TemperatureSensor:
-            // Report temperature every 5 minutes or on 0.5°C change
-            report(zcl::cluster::TEMPERATURE_MEASUREMENT, zcl::attr::temperature::MEASURED_VALUE,
-                   zcl::datatype::INT16, 60, {0x32, 0x00});  // 50 = 0.5°C
-            break;
-
         case DeviceType::MotionSensor:
             // IAS Zone status arrives as notifications. An occupancy sensor needs asking to report.
             report(zcl::cluster::OCCUPANCY_SENSING, zcl::attr::occupancy::OCCUPANCY,
                    zcl::datatype::BITMAP8, 1, {});
             break;
 
+        default:
+            break;
+    }
+
+    // Any sensor can measure these too. A device without them isn't asked.
+    switch (type) {
+        case DeviceType::TemperatureSensor:
+        case DeviceType::MotionSensor:
+        case DeviceType::ContactSensor:
+        case DeviceType::SmokeSensor:
+        case DeviceType::WaterSensor:
+        case DeviceType::CoSensor:
+        case DeviceType::AlarmSensor:
+            // At least every 5 minutes, or on a change of 0.5°C, 1% or about a quarter of the light
+            report(zcl::cluster::TEMPERATURE_MEASUREMENT, zcl::attr::temperature::MEASURED_VALUE,
+                   zcl::datatype::INT16, 60, {0x32, 0x00});
+            report(zcl::cluster::RELATIVE_HUMIDITY, zcl::attr::humidity::MEASURED_VALUE,
+                   zcl::datatype::UINT16, 60, {0x64, 0x00});
+            report(zcl::cluster::ILLUMINANCE_MEASUREMENT, zcl::attr::illuminance::MEASURED_VALUE,
+                   zcl::datatype::UINT16, 60, {0xE8, 0x03});
+            break;
         default:
             break;
     }

@@ -79,6 +79,8 @@ private:
     lv_obj_t* m_humidityValueLabel = nullptr;
     lv_obj_t* m_motionSection = nullptr;
     lv_obj_t* m_motionValueLabel = nullptr;
+    lv_obj_t* m_alarmSection = nullptr;
+    lv_obj_t* m_alarmValueLabel = nullptr;
     std::vector<std::pair<std::string, lv_obj_t*>> m_sensorRowValues;  // Device id, value label
     uint32_t m_sensorUpdateMs = 0;
     static constexpr uint32_t SENSOR_UPDATE_INTERVAL = 5000;

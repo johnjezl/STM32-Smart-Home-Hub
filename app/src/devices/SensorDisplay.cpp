@@ -4,6 +4,7 @@
 
 #include <smarthub/devices/SensorDisplay.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 
@@ -32,14 +33,45 @@ double roundHalfUp(double value, int decimals) {
     return rounded == 0.0 ? 0.0 : rounded;  // No "-0°F"
 }
 
-bool reportsTemperature(DeviceType type) {
-    return type == DeviceType::TemperatureSensor || type == DeviceType::MultiSensor;
+// Sensors for something else, which may also measure the room
+bool mayAlsoMeasure(DeviceType type) {
+    return type == DeviceType::MotionSensor || type == DeviceType::ContactSensor || isAlarmSensor(type);
+}
+
+bool reportsTemperature(DeviceType type, const nlohmann::json& state) {
+    return type == DeviceType::TemperatureSensor || type == DeviceType::MultiSensor ||
+           (mayAlsoMeasure(type) && temperatureFahrenheit(state).has_value());
 }
 
 // A plain temperature sensor can still report humidity, for instance over Zigbee
 bool reportsHumidity(DeviceType type, const nlohmann::json& state) {
     return type == DeviceType::HumiditySensor || type == DeviceType::MultiSensor ||
-           (type == DeviceType::TemperatureSensor && humidityPercent(state).has_value());
+           ((type == DeviceType::TemperatureSensor || mayAlsoMeasure(type)) && humidityPercent(state).has_value());
+}
+
+const char* alarmWord(DeviceType type) {
+    switch (type) {
+        case DeviceType::SmokeSensor: return "Smoke";
+        case DeviceType::WaterSensor: return "Leak";
+        case DeviceType::CoSensor:    return "CO";
+        default:                      return "Alarm";
+    }
+}
+
+// What it's for, with any other readings after it
+std::string withOtherReadings(const std::string& main, const nlohmann::json& state) {
+    std::string text = main;
+    const auto add = [&text](const std::string& reading) {
+        text += text.empty() ? reading : " / " + reading;
+    };
+    if (const auto temperature = temperatureFahrenheit(state)) add(temperatureText(temperature, 1));
+    if (const auto humidity = humidityPercent(state)) add(humidityText(humidity));
+    if (const auto lux = numberIn(state, "illuminance")) {
+        char buf[24];
+        std::snprintf(buf, sizeof(buf), "%.0f lux", *lux);
+        add(buf);
+    }
+    return text.empty() ? "--" : text;
 }
 
 } // namespace
@@ -82,21 +114,48 @@ std::string sensorValueText(DeviceType type, const nlohmann::json& state) {
             return humidity ? humidityText(humidity) : "--";
         case DeviceType::MotionSensor: {
             const auto motion = boolIn(state, "motion");
-            if (!motion) return "--";
-            return *motion ? "Motion" : "Clear";
+            return withOtherReadings(!motion ? "" : (*motion ? "Motion" : "Clear"), state);
         }
         case DeviceType::ContactSensor: {
             const auto contact = boolIn(state, "contact");
-            if (!contact) return "--";
-            return *contact ? "Closed" : "Open";
+            return withOtherReadings(!contact ? "" : (*contact ? "Closed" : "Open"), state);
+        }
+        case DeviceType::SmokeSensor:
+        case DeviceType::WaterSensor:
+        case DeviceType::CoSensor:
+        case DeviceType::AlarmSensor: {
+            const auto alarm = boolIn(state, "alarm");
+            return withOtherReadings(!alarm ? "" : (*alarm ? alarmWord(type) : "Clear"), state);
         }
         default:
             return "--";
     }
 }
 
+bool isAlarmSensor(DeviceType type) {
+    return type == DeviceType::SmokeSensor || type == DeviceType::WaterSensor ||
+           type == DeviceType::CoSensor || type == DeviceType::AlarmSensor;
+}
+
+std::string activeAlarmText(DeviceType type, const nlohmann::json& state) {
+    if (!isAlarmSensor(type) || !boolIn(state, "alarm").value_or(false)) return "";
+    return alarmWord(type);
+}
+
+std::string activeAlarmsSummary(const std::vector<DevicePtr>& devices) {
+    std::string summary;
+    for (const auto& device : devices) {
+        if (!device) continue;
+        const std::string alarm = activeAlarmText(device->type(), device->getState());
+        if (alarm.empty()) continue;
+        if (!summary.empty()) summary += ", ";
+        summary += alarm + ": " + device->name();
+    }
+    return summary;
+}
+
 std::string historyProperty(DeviceType type) {
-    if (reportsTemperature(type)) return "temperature";
+    if (type == DeviceType::TemperatureSensor || type == DeviceType::MultiSensor) return "temperature";
     if (type == DeviceType::HumiditySensor) return "humidity";
     return "";
 }
@@ -108,7 +167,7 @@ RoomSensors summarizeRoomSensors(const std::vector<DevicePtr>& devices) {
         const auto type = device->type();
         const auto state = device->getState();
 
-        if (reportsTemperature(type)) {
+        if (reportsTemperature(type, state)) {
             room.hasTemperatureSensor = true;
             if (!room.temperatureF) room.temperatureF = temperatureFahrenheit(state);
         }
@@ -123,6 +182,14 @@ RoomSensors summarizeRoomSensors(const std::vector<DevicePtr>& devices) {
                 room.motionDetected = room.motionDetected || *motion;
             }
         }
+        if (isAlarmSensor(type)) {
+            room.hasAlarmSensor = true;
+            room.alarmReported = room.alarmReported || boolIn(state, "alarm").has_value();
+            const std::string alarm = activeAlarmText(type, state);
+            if (!alarm.empty() && std::find(room.activeAlarms.begin(), room.activeAlarms.end(), alarm) == room.activeAlarms.end()) {
+                room.activeAlarms.push_back(alarm);
+            }
+        }
     }
     return room;
 }
@@ -130,6 +197,18 @@ RoomSensors summarizeRoomSensors(const std::vector<DevicePtr>& devices) {
 std::string roomMotionText(const RoomSensors& sensors) {
     if (!sensors.motionReported) return "--";
     return sensors.motionDetected ? "Motion" : "Clear";
+}
+
+std::string roomAlarmText(const RoomSensors& sensors) {
+    if (!sensors.activeAlarms.empty()) {
+        std::string text;
+        for (const auto& alarm : sensors.activeAlarms) {
+            if (!text.empty()) text += ", ";
+            text += alarm;
+        }
+        return text;
+    }
+    return sensors.alarmReported ? "Clear" : "--";
 }
 
 std::string roomClimateText(const RoomSensors& sensors) {

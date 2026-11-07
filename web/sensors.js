@@ -20,11 +20,40 @@
         (fahrenheit === undefined ? '--°F' : `${fixed(fahrenheit, decimals)}°F`);
     const humidityText = percent => (percent === undefined ? '--%' : `${Math.round(percent)}%`);
 
-    const reportsTemperature = type => type === 'temperature_sensor' || type === 'multi_sensor';
+    const ALARM_WORDS = { smoke_sensor: 'Smoke', water_sensor: 'Leak', co_sensor: 'CO', alarm_sensor: 'Alarm' };
+    const isAlarmSensor = type => Object.hasOwn(ALARM_WORDS, type);
+    // Sensors for something else, which may also measure the room
+    const mayAlsoMeasure = type => type === 'motion_sensor' || type === 'contact_sensor' || isAlarmSensor(type);
+
+    const reportsTemperature = device =>
+        device.type === 'temperature_sensor' || device.type === 'multi_sensor' ||
+        (mayAlsoMeasure(device.type) && temperatureF(device.state) !== undefined);
     // A plain temperature sensor can still report humidity, for instance over Zigbee
     const reportsHumidity = device =>
         device.type === 'humidity_sensor' || device.type === 'multi_sensor' ||
-        (device.type === 'temperature_sensor' && humidityPercent(device.state) !== undefined);
+        ((device.type === 'temperature_sensor' || mayAlsoMeasure(device.type)) &&
+            humidityPercent(device.state) !== undefined);
+
+    /** What's going off, such as "Leak", or empty if this sensor's alarm isn't active */
+    const activeAlarmText = sensor =>
+        (isAlarmSensor(sensor.type) && sensor.state?.alarm === true ? ALARM_WORDS[sensor.type] : '');
+
+    /** Every active alarm, such as "Leak: Basement, Smoke: Kitchen". Empty if there are none. */
+    const activeAlarmsSummary = devices => devices
+        .filter(activeAlarmText)
+        .map(device => `${activeAlarmText(device)}: ${device.name}`)
+        .join(', ');
+
+    // What it's for, with any other readings after it
+    function withOtherReadings(main, state) {
+        const parts = main ? [main] : [];
+        const temperature = temperatureF(state);
+        const humidity = humidityPercent(state);
+        if (temperature !== undefined) parts.push(temperatureText(temperature, 1));
+        if (humidity !== undefined) parts.push(humidityText(humidity));
+        if (isNumber(state?.illuminance)) parts.push(`${fixed(state.illuminance, 0)} lux`);
+        return parts.length > 0 ? parts.join(' / ') : '--';
+    }
 
     /** One sensor's current value, as { text, colorClass } */
     function sensorValue(sensor) {
@@ -47,11 +76,20 @@
                     ? { text: '--', colorClass: '' }
                     : { text: humidityText(humidity), colorClass: 'humidity' };
             case 'motion_sensor':
-                if (typeof state?.motion !== 'boolean') return { text: '--', colorClass: '' };
-                return { text: state.motion ? 'Motion' : 'Clear', colorClass: 'motion' };
+                if (typeof state?.motion !== 'boolean') return { text: withOtherReadings('', state), colorClass: '' };
+                return { text: withOtherReadings(state.motion ? 'Motion' : 'Clear', state), colorClass: 'motion' };
             case 'contact_sensor':
-                if (typeof state?.contact !== 'boolean') return { text: '--', colorClass: '' };
-                return { text: state.contact ? 'Closed' : 'Open', colorClass: '' };
+                if (typeof state?.contact !== 'boolean') return { text: withOtherReadings('', state), colorClass: '' };
+                return { text: withOtherReadings(state.contact ? 'Closed' : 'Open', state), colorClass: '' };
+            case 'smoke_sensor':
+            case 'water_sensor':
+            case 'co_sensor':
+            case 'alarm_sensor':
+                if (typeof state?.alarm !== 'boolean') return { text: withOtherReadings('', state), colorClass: '' };
+                return {
+                    text: withOtherReadings(state.alarm ? ALARM_WORDS[sensor.type] : 'Clear', state),
+                    colorClass: state.alarm ? 'alarm' : ''
+                };
             default:
                 return { text: '--', colorClass: '' };
         }
@@ -66,10 +104,13 @@
             humidity: undefined,
             hasMotionSensor: false,
             motionReported: false,
-            motionDetected: false
+            motionDetected: false,
+            hasAlarmSensor: false,
+            alarmReported: false,
+            activeAlarms: []
         };
         devices.forEach(device => {
-            if (reportsTemperature(device.type)) {
+            if (reportsTemperature(device)) {
                 room.hasTemperatureSensor = true;
                 room.temperatureF ??= temperatureF(device.state);
             }
@@ -84,6 +125,12 @@
                     room.motionDetected = room.motionDetected || device.state.motion;
                 }
             }
+            if (isAlarmSensor(device.type)) {
+                room.hasAlarmSensor = true;
+                room.alarmReported ||= typeof device.state?.alarm === 'boolean';
+                const alarm = activeAlarmText(device);
+                if (alarm && !room.activeAlarms.includes(alarm)) room.activeAlarms.push(alarm);
+            }
         });
         return room;
     }
@@ -94,6 +141,12 @@
         return room.motionDetected ? 'Motion' : 'Clear';
     }
 
+    /** "Clear" or what's going off, such as "Leak, Smoke". "--" before any of the room's alarm sensors has reported. */
+    function roomAlarmText(room) {
+        if (room.activeAlarms.length > 0) return room.activeAlarms.join(', ');
+        return room.alarmReported ? 'Clear' : '--';
+    }
+
     /** A room's climate for a card, such as "72°F / 45%". Empty if the room has no such sensors. */
     function roomClimateText(room) {
         const parts = [];
@@ -102,7 +155,10 @@
         return parts.join(' / ');
     }
 
-    const api = { sensorValue, roomSensors, roomClimateText, roomMotionText, temperatureText, humidityText };
+    const api = {
+        sensorValue, roomSensors, roomClimateText, roomMotionText, roomAlarmText, activeAlarmsSummary,
+        temperatureText, humidityText
+    };
     if (typeof module !== 'undefined' && module.exports) {
         module.exports = api;
     } else {

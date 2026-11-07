@@ -55,6 +55,7 @@ void DashboardScreen::onShow() {
 
     updateRoomCards();
     updateClock();
+    updateAlarmTitle();
     m_clockUpdateMs = 0;
     m_roomUpdateMs = 0;
 
@@ -75,6 +76,7 @@ void DashboardScreen::onUpdate(uint32_t deltaMs) {
                 card->setRoomData(roomData(name->first, name->second));
             }
         }
+        updateAlarmTitle();
         m_roomUpdateMs = 0;
     }
 
@@ -249,6 +251,13 @@ void DashboardScreen::createRoomCards() {
 void DashboardScreen::updateRoomCards() {
     // Refresh room cards from database to pick up any changes
     refreshRoomCards();
+}
+
+void DashboardScreen::updateAlarmTitle() {
+    if (!m_header) return;
+    // A leak or smoke alarm needs seeing from here, not only by going to look at the sensors
+    const std::string alarms = activeAlarmsSummary(m_deviceManager.getAllDevices());
+    m_header->setTitle(alarms.empty() ? "SmartHub" : LV_SYMBOL_WARNING " " + alarms);
 }
 
 void DashboardScreen::updateClock() {

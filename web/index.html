@@ -78,6 +78,8 @@
         </nav>
 
         <!-- Dashboard Tab -->
+        <div id="alarm-banner" class="alarm-banner hidden" role="alert"></div>
+
         <main id="tab-dashboard" class="tab-content active">
             <div class="stats-grid">
                 <div class="stat-card">
@@ -545,6 +547,13 @@
                             <span class="motion-icon">👁️</span>
                         </div>
                         <div class="sensor-label" id="room-motion-label">Clear</div>
+                    </div>
+                    <div class="sensor-section" id="room-alarm-section">
+                        <div class="sensor-section-header">
+                            <span class="sensor-icon">⚠️</span>
+                            <span class="sensor-label">Alarm</span>
+                        </div>
+                        <div class="sensor-value-large" id="room-detail-alarm">--</div>
                     </div>
                 </div>
 
