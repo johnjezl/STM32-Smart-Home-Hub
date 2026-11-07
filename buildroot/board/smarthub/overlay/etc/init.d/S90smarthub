@@ -1,0 +1,37 @@
+#!/bin/sh
+#
+# Start the SmartHub application
+#
+
+DAEMON="/usr/bin/smarthub"
+CONFIG="/etc/smarthub/config.yaml"
+PIDFILE="/var/run/smarthub.pid"
+LOGFILE="/var/log/smarthub.log"
+
+start() {
+    printf "Starting smarthub: "
+    # Through sh, for the log, which also makes the pid file the shell's. So exec.
+    start-stop-daemon -S -b -m -p "$PIDFILE" -x /bin/sh -- \
+        -c "exec $DAEMON -c $CONFIG >> $LOGFILE 2>&1"
+    [ $? -eq 0 ] && echo "OK" || echo "FAIL"
+}
+
+stop() {
+    printf "Stopping smarthub: "
+    start-stop-daemon -K -p "$PIDFILE" -o -q
+    # It saves its state on the way out, so give it time
+    i=0
+    while [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null && [ $i -lt 15 ]; do
+        sleep 1
+        i=$((i + 1))
+    done
+    rm -f "$PIDFILE"
+    echo "OK"
+}
+
+case "$1" in
+    start) start ;;
+    stop) stop ;;
+    restart) stop; start ;;
+    *) echo "Usage: $0 {start|stop|restart}"; exit 1 ;;
+esac

@@ -224,11 +224,11 @@ rsync -avz buildroot/board/smarthub/overlay/ root@smarthub.local:/
 
 ```bash
 # Copy firmware
-scp m4_firmware.elf root@smarthub.local:/lib/firmware/smarthub_m4.elf
+scp m4_firmware.elf root@smarthub.local:/lib/firmware/smarthub-m4.elf
 
 # Restart M4 (on target)
 ssh root@smarthub.local "echo stop > /sys/class/remoteproc/remoteproc0/state; \
-    echo smarthub_m4.elf > /sys/class/remoteproc/remoteproc0/firmware; \
+    echo smarthub-m4.elf > /sys/class/remoteproc/remoteproc0/firmware; \
     echo start > /sys/class/remoteproc/remoteproc0/state"
 ```
 

@@ -59,8 +59,14 @@ venv/
 .claude/*
 !.claude/settings.json
 
+# Not a compiler's dependency file, which the *.d rule above is for
+!buildroot/board/smarthub/overlay/etc/init.d/
+
 # Local Wi-Fi credentials (see buildroot/board/smarthub/wpa_supplicant.conf.example)
 buildroot/board/smarthub/overlay/etc/wpa_supplicant/wpa_supplicant.conf
+
+# Local SSH keys for the image (see "Logging In" in docs/building.md)
+buildroot/board/smarthub/overlay/root/.ssh/authorized_keys
 
 # Built tools and vendor documents
 tools/rpmsg_test

@@ -1,53 +1,35 @@
 #!/bin/bash
 #
-# deploy.sh - Deploy SmartHub application to target device
+# deploy.sh - Install a development build of the app and dashboard on a running board
 #
-# Usage: ./deploy.sh [target-ip]
+# Usage: ./tools/deploy.sh [target-ip]
+#
+# Build it first, for the board: see "Deploying to Device" in CLAUDE.md.
 #
 
-set -e
+set -euo pipefail
 
-# Configuration
-TARGET_IP="${1:-smarthub.local}"
-TARGET_USER="root"
-APP_NAME="smarthub"
-BUILD_DIR="../build"
-REMOTE_DIR="/opt/smarthub"
+PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+TARGET="root@${1:-smarthub.local}"
+BINARY="${SMARTHUB_BINARY:-$PROJECT_DIR/app/build-arm/smarthub}"
 
-echo "=== SmartHub Deployment Script ==="
-echo "Target: ${TARGET_USER}@${TARGET_IP}"
-
-# Check if build exists
-if [ ! -f "${BUILD_DIR}/app/${APP_NAME}" ]; then
-    echo "Error: Application not found at ${BUILD_DIR}/app/${APP_NAME}"
-    echo "Please build the application first with:"
-    echo "  mkdir -p build && cd build && cmake .. && make"
+if [ ! -f "$BINARY" ]; then
+    echo "Error: $BINARY not found. Build it for the board first." >&2
     exit 1
 fi
 
-# Create remote directory
-echo "Creating remote directory..."
-ssh "${TARGET_USER}@${TARGET_IP}" "mkdir -p ${REMOTE_DIR}"
+# Sent over ssh stdin, because scp may fail against Dropbear. Installed under a temp name and then
+# renamed, which works while the old one is running.
+echo "Installing the app..."
+ssh "$TARGET" "cat > /usr/bin/smarthub.new && chmod +x /usr/bin/smarthub.new && mv -f /usr/bin/smarthub.new /usr/bin/smarthub" < "$BINARY"
 
-# Stop existing service (if running)
-echo "Stopping existing service..."
-ssh "${TARGET_USER}@${TARGET_IP}" "systemctl stop smarthub 2>/dev/null || true"
+echo "Installing the dashboard..."
+ssh "$TARGET" "mkdir -p /opt/smarthub/www"
+for file in "$PROJECT_DIR"/web/*.html "$PROJECT_DIR"/web/*.js "$PROJECT_DIR"/web/*.css; do
+    ssh "$TARGET" "cat > /opt/smarthub/www/$(basename "$file")" < "$file"
+done
 
-# Copy application
-echo "Copying application..."
-scp "${BUILD_DIR}/app/${APP_NAME}" "${TARGET_USER}@${TARGET_IP}:${REMOTE_DIR}/"
+echo "Restarting..."
+ssh "$TARGET" "/etc/init.d/S90smarthub restart"
 
-# Copy assets
-if [ -d "../app/assets" ]; then
-    echo "Copying assets..."
-    scp -r ../app/assets "${TARGET_USER}@${TARGET_IP}:${REMOTE_DIR}/"
-fi
-
-# Set permissions
-ssh "${TARGET_USER}@${TARGET_IP}" "chmod +x ${REMOTE_DIR}/${APP_NAME}"
-
-# Restart service
-echo "Starting service..."
-ssh "${TARGET_USER}@${TARGET_IP}" "systemctl start smarthub 2>/dev/null || ${REMOTE_DIR}/${APP_NAME} &"
-
-echo "=== Deployment complete ==="
+echo "Done"
