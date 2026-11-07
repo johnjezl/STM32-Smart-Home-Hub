@@ -821,6 +821,13 @@ void ZigbeeCoordinator::handleIndication(const ZnpFrame& frame) {
                 case cmd::zdo::NWK_ADDR_RSP:
                     handleNwkAddrRsp(frame);
                     break;
+                case cmd::zdo::BIND_RSP:
+                    // The device's own answer. bindCluster only hears that the radio took the request.
+                    if (frame.payload().size() >= 3 && frame.getByte(2) != 0) {
+                        LOG_WARN("Device 0x%04X refused a bind: status 0x%02X",
+                                 frame.getWord(0), frame.getByte(2));
+                    }
+                    break;
                 default:
                     LOG_DEBUG("Unhandled ZDO indication: 0x%02X", frame.command());
                     break;

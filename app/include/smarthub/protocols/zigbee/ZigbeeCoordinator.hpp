@@ -179,7 +179,8 @@ public:
      */
     /**
      * Ask a device to send a cluster's reports to this coordinator. Reports go to a device's binding
-     * table, so configuring reporting alone may not make it send any.
+     * table, so configuring reporting alone may not make it send any. This returns whether the
+     * radio took the request. The device answers later, and a refusal is logged.
      */
     bool bindCluster(uint16_t nwkAddr, uint64_t ieeeAddr, uint8_t endpoint, uint16_t cluster);
 

@@ -97,6 +97,7 @@ namespace zdo {
 
     // AREQ indications
     constexpr uint8_t NWK_ADDR_RSP      = 0x80;
+    constexpr uint8_t BIND_RSP          = 0xA1;
     constexpr uint8_t IEEE_ADDR_RSP     = 0x81;
     constexpr uint8_t NODE_DESC_RSP     = 0x82;
     constexpr uint8_t SIMPLE_DESC_RSP   = 0x84;
