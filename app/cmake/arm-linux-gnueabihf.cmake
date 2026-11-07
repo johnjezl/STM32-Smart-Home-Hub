@@ -10,7 +10,13 @@ set(CMAKE_SYSTEM_PROCESSOR arm)
 
 # Buildroot sysroot (set via -DBUILDROOT_SYSROOT=...)
 if(NOT DEFINED BUILDROOT_SYSROOT)
-    set(BUILDROOT_SYSROOT "$ENV{HOME}/projects/smarthub/buildroot-src/output/staging")
+    # Where tools/setup.sh puts it, unless SMARTHUB_BUILDROOT_DIR says otherwise
+    if(DEFINED ENV{SMARTHUB_BUILDROOT_DIR})
+        set(BUILDROOT_SYSROOT "$ENV{SMARTHUB_BUILDROOT_DIR}/output/staging")
+    else()
+        get_filename_component(BUILDROOT_SYSROOT
+            "${CMAKE_CURRENT_LIST_DIR}/../../../buildroot-src/output/staging" ABSOLUTE)
+    endif()
 endif()
 
 # Toolchain prefix - Buildroot's external toolchain

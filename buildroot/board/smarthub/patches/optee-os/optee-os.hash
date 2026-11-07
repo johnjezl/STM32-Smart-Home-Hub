@@ -1,0 +1,2 @@
+# So that a tag moved upstream fails the build, rather than changing what's built
+sha256  5bd97682b8144d4c17eb4fc3e9b94770d71d8607d66af41542beffbfffd77dcf  4.0.0-stm32mp-r2.tar.gz

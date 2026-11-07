@@ -17,10 +17,11 @@ BUILDROOT_DIR="${SMARTHUB_BUILDROOT_DIR:-$(dirname "$PROJECT_DIR")/buildroot-src
 ST_EXTERNAL="${SMARTHUB_ST_EXTERNAL:-$(dirname "$PROJECT_DIR")/buildroot-external-st}"
 SMARTHUB_EXTERNAL="$PROJECT_DIR/buildroot"
 
-if [ ! -d "$BUILDROOT_DIR" ] || [ ! -d "$ST_EXTERNAL" ]; then
-    echo "Error: Buildroot or the ST tree isn't there. Run ./tools/setup.sh first." >&2
-    exit 1
-fi
+"$SCRIPT_DIR/setup.sh" --check
+
+# Absolute, as this moves into Buildroot's directory, and they're used from there
+BUILDROOT_DIR="$(realpath "$BUILDROOT_DIR")"
+ST_EXTERNAL="$(realpath "$ST_EXTERNAL")"
 
 cd "$BUILDROOT_DIR"
 
@@ -52,8 +53,8 @@ case "${1:-build}" in
     ;;
   build|"")
     echo "Building SmartHub..."
-    if [ ! -f .config ]; then
-        echo "No .config found, running defconfig first..."
+    if [ ! -f .config ] || [ "$SMARTHUB_EXTERNAL/configs/smarthub_defconfig" -nt .config ]; then
+        echo "No .config, or the defconfig has changed. Running defconfig first..."
         make smarthub_defconfig
     fi
     make -j$(nproc)

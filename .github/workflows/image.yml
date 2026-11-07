@@ -10,13 +10,24 @@ on:
 jobs:
   image:
     name: Build image from a clean clone
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 350
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           path: STM32-Smart-Home-Hub
+
+      # A build takes about as much as these runners have free
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+
+      - name: Configure apt retries
+        run: |
+          printf 'Acquire::Retries "5";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' \
+            | sudo tee /etc/apt/apt.conf.d/80-ci-network
 
       - name: Install dependencies
         run: |

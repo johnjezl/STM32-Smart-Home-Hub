@@ -131,7 +131,6 @@ SmartHub uses **Buildroot 2025.02.5** with two external trees:
 | wpa_supplicant | WiFi authentication | — |
 | dhcpcd | DHCP client | — |
 | SQLite | Local database | — |
-| OpenAMP | A7↔M4 communication | — |
 
 ### Init System
 
