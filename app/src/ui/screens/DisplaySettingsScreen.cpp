@@ -44,7 +44,6 @@ void DisplaySettingsScreen::onCreate() {
 
     createBrightnessSection();
     createTimeoutSection();
-    createThemeSection();
 
     LOG_DEBUG("DisplaySettingsScreen created");
 #endif
@@ -58,7 +57,6 @@ void DisplaySettingsScreen::onShow() {
         updateBrightnessLabel();
     }
     updateTimeoutButtons();
-    updateThemeButtons();
 #endif
     LOG_DEBUG("DisplaySettingsScreen shown");
 }
@@ -165,42 +163,6 @@ void DisplaySettingsScreen::createTimeoutSection() {
     updateTimeoutButtons();
 }
 
-void DisplaySettingsScreen::createThemeSection() {
-    lv_obj_t* section = lv_obj_create(m_content);
-    lv_obj_set_size(section, LV_PCT(100), 100);
-    m_theme.applyCardStyle(section);
-    lv_obj_clear_flag(section, LV_OBJ_FLAG_SCROLLABLE);
-
-    // Title
-    lv_obj_t* title = lv_label_create(section);
-    lv_label_set_text(title, "Theme");
-    lv_obj_set_style_text_color(title, m_theme.textPrimary(), 0);
-    lv_obj_align(title, LV_ALIGN_TOP_LEFT, 0, 0);
-
-    // Button row
-    const char* labels[] = {"Light", "Dark", "Auto"};
-    int btnWidth = 80;
-    int startX = 0;
-
-    for (int i = 0; i < 3; i++) {
-        m_themeButtons[i] = lv_btn_create(section);
-        lv_obj_set_size(m_themeButtons[i], btnWidth, 48);
-        lv_obj_align(m_themeButtons[i], LV_ALIGN_BOTTOM_LEFT, startX, -5);
-        lv_obj_set_style_radius(m_themeButtons[i], 5, 0);
-
-        lv_obj_t* label = lv_label_create(m_themeButtons[i]);
-        lv_label_set_text(label, labels[i]);
-        lv_obj_center(label);
-
-        lv_obj_set_user_data(m_themeButtons[i], reinterpret_cast<void*>(static_cast<intptr_t>(i)));
-        lv_obj_add_event_cb(m_themeButtons[i], themeButtonHandler, LV_EVENT_CLICKED, this);
-
-        startX += btnWidth + 8;
-    }
-
-    updateThemeButtons();
-}
-
 void DisplaySettingsScreen::updateBrightnessLabel() {
     if (!m_brightnessLabel) return;
 
@@ -229,26 +191,6 @@ void DisplaySettingsScreen::updateTimeoutButtons() {
     }
 }
 
-void DisplaySettingsScreen::updateThemeButtons() {
-    int currentMode = static_cast<int>(m_theme.mode());
-
-    for (int i = 0; i < 3; i++) {
-        if (!m_themeButtons[i]) continue;
-
-        bool selected = (i == currentMode);
-
-        if (selected) {
-            lv_obj_set_style_bg_color(m_themeButtons[i], m_theme.primary(), 0);
-            lv_obj_set_style_text_color(lv_obj_get_child(m_themeButtons[i], 0),
-                                        lv_color_white(), 0);
-        } else {
-            lv_obj_set_style_bg_color(m_themeButtons[i], m_theme.surfaceVariant(), 0);
-            lv_obj_set_style_text_color(lv_obj_get_child(m_themeButtons[i], 0),
-                                        m_theme.textPrimary(), 0);
-        }
-    }
-}
-
 void DisplaySettingsScreen::onBrightnessChanged(int percent) {
     m_displayManager.setBrightness(percent);
     updateBrightnessLabel();
@@ -258,12 +200,6 @@ void DisplaySettingsScreen::onTimeoutSelected(int seconds) {
     m_displayManager.setTimeoutSeconds(seconds);
     updateTimeoutButtons();
     LOG_DEBUG("Screen timeout set to %d seconds", seconds);
-}
-
-void DisplaySettingsScreen::onThemeSelected(int mode) {
-    m_theme.setMode(static_cast<ThemeMode>(mode));
-    updateThemeButtons();
-    LOG_DEBUG("Theme mode set to %d", mode);
 }
 
 void DisplaySettingsScreen::onBackClicked() {
@@ -284,15 +220,6 @@ void DisplaySettingsScreen::timeoutButtonHandler(lv_event_t* e) {
     if (self && btn) {
         intptr_t timeout = reinterpret_cast<intptr_t>(lv_obj_get_user_data(btn));
         self->onTimeoutSelected(static_cast<int>(timeout));
-    }
-}
-
-void DisplaySettingsScreen::themeButtonHandler(lv_event_t* e) {
-    DisplaySettingsScreen* self = static_cast<DisplaySettingsScreen*>(lv_event_get_user_data(e));
-    lv_obj_t* btn = lv_event_get_target(e);
-    if (self && btn) {
-        intptr_t mode = reinterpret_cast<intptr_t>(lv_obj_get_user_data(btn));
-        self->onThemeSelected(static_cast<int>(mode));
     }
 }
 

@@ -22,7 +22,7 @@ SettingsScreen::SettingsScreen(ScreenManager& screenManager,
     // cppcheck-suppress useInitializationList ; too long to read well as one
     m_categories = {
         {"network", "Network", "WiFi, IP settings", LV_SYMBOL_WIFI},
-        {"display", "Display", "Brightness, theme, timeout", LV_SYMBOL_IMAGE},
+        {"display", "Display", "Brightness, timeout", LV_SYMBOL_IMAGE},
         {"devices", "Devices", "Manage paired devices", LV_SYMBOL_SETTINGS},
         {"automations", "Automations", "Rules and triggers", LV_SYMBOL_REFRESH},
         {"security", "Security", "Password, API tokens", LV_SYMBOL_EYE_CLOSE},

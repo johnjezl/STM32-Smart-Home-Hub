@@ -1,7 +1,10 @@
 /**
  * Display Settings Screen
  *
- * Settings for display brightness, theme, and screen timeout.
+ * Settings for display brightness and screen timeout.
+ *
+ * There's no theme choice: screens take their colours when they're built, so a change would
+ * only reach screens built afterwards (#28).
  */
 #pragma once
 
@@ -29,9 +32,6 @@ class DisplayManager;
  * |  | Screen Timeout                                    1 min  | |
  * |  | [Never] [30s] [1m] [5m] [10m]                            | |
  * |  +----------------------------------------------------------+ |
- * |  | Theme                                              Dark  | |
- * |  | [Light] [Dark] [Auto]                                    | |
- * |  +----------------------------------------------------------+ |
  * +---------------------------------------------------------------+
  */
 class DisplaySettingsScreen : public Screen {
@@ -51,20 +51,16 @@ private:
     void createHeader();
     void createBrightnessSection();
     void createTimeoutSection();
-    void createThemeSection();
 
     void updateBrightnessLabel();
     void updateTimeoutButtons();
-    void updateThemeButtons();
 
     void onBrightnessChanged(int percent);
     void onTimeoutSelected(int seconds);
-    void onThemeSelected(int mode);  // 0=light, 1=dark, 2=auto
     void onBackClicked();
 
     static void brightnessSliderHandler(lv_event_t* e);
     static void timeoutButtonHandler(lv_event_t* e);
-    static void themeButtonHandler(lv_event_t* e);
     static void backButtonHandler(lv_event_t* e);
 
     lv_obj_t* m_backBtn = nullptr;
@@ -78,9 +74,6 @@ private:
     // Timeout
     lv_obj_t* m_timeoutButtons[5] = {nullptr};
     int m_timeoutValues[5] = {0, 30, 60, 300, 600};  // Never, 30s, 1m, 5m, 10m
-
-    // Theme
-    lv_obj_t* m_themeButtons[3] = {nullptr};
 #endif
 
     ThemeManager& m_theme;
