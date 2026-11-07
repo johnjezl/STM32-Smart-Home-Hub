@@ -1405,6 +1405,16 @@ TEST_F(ZigbeeHandlerFlowTest, ReportedClustersAreBoundToTheCoordinator) {
     EXPECT_EQ(bound[zcl::cluster::COLOR_CONTROL], 2);
 }
 
+TEST_F(ZigbeeHandlerFlowTest, DeviceRefusingABindIsLogged) {
+    testing::internal::CaptureStderr();
+    ZnpFrame refusal(ZnpType::AREQ, ZnpSubsystem::ZDO, cmd::zdo::BIND_RSP);
+    refusal.appendWord(LIGHT.nwkAddr);
+    refusal.appendByte(0x84);  // Not supported
+    fake.injectIndication(refusal);
+    std::this_thread::sleep_for(200ms);
+    EXPECT_NE(testing::internal::GetCapturedStderr().find("refused a bind"), std::string::npos);
+}
+
 TEST_F(ZigbeeHandlerFlowTest, RefusedBindDoesNotStopReportingSetup) {
     fake.setResponder(ZnpSubsystem::ZDO, cmd::zdo::BIND_REQ, [](const ZnpFrame&) {
         return std::optional<std::vector<uint8_t>>(std::vector<uint8_t>{0x01});
