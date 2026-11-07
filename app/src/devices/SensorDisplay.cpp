@@ -58,20 +58,24 @@ const char* alarmWord(DeviceType type) {
     }
 }
 
-// What it's for, with any other readings after it
-std::string withOtherReadings(const std::string& main, const nlohmann::json& state) {
-    std::string text = main;
-    const auto add = [&text](const std::string& reading) {
-        text += text.empty() ? reading : " / " + reading;
-    };
-    if (const auto temperature = temperatureFahrenheit(state)) add(temperatureText(temperature, 1));
-    if (const auto humidity = humidityPercent(state)) add(humidityText(humidity));
+void addReading(std::string& text, const std::string& reading) {
+    text += text.empty() ? reading : " / " + reading;
+}
+
+std::string withLight(std::string text, const nlohmann::json& state) {
     if (const auto lux = numberIn(state, "illuminance")) {
         char buf[24];
         std::snprintf(buf, sizeof(buf), "%.0f lux", *lux);
-        add(buf);
+        addReading(text, buf);
     }
     return text.empty() ? "--" : text;
+}
+
+// What it's for, with any other readings after it
+std::string withOtherReadings(std::string text, const nlohmann::json& state) {
+    if (const auto temperature = temperatureFahrenheit(state)) addReading(text, temperatureText(temperature, 1));
+    if (const auto humidity = humidityPercent(state)) addReading(text, humidityText(humidity));
+    return withLight(std::move(text), state);
 }
 
 } // namespace
@@ -107,11 +111,11 @@ std::string sensorValueText(DeviceType type, const nlohmann::json& state) {
     switch (type) {
         case DeviceType::TemperatureSensor:
         case DeviceType::MultiSensor:
-            if (!temperature && !humidity) return "--";
-            if (!humidity) return temperatureText(temperature, 1);
-            return temperatureText(temperature, 1) + " / " + humidityText(humidity);
+            if (!temperature && !humidity) return withLight("", state);
+            if (!humidity) return withLight(temperatureText(temperature, 1), state);
+            return withLight(temperatureText(temperature, 1) + " / " + humidityText(humidity), state);
         case DeviceType::HumiditySensor:
-            return humidity ? humidityText(humidity) : "--";
+            return withLight(humidity ? humidityText(humidity) : "", state);
         case DeviceType::MotionSensor: {
             const auto motion = boolIn(state, "motion");
             return withOtherReadings(!motion ? "" : (*motion ? "Motion" : "Clear"), state);

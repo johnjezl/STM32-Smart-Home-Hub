@@ -425,6 +425,7 @@ namespace zone_type {
     constexpr uint16_t STANDARD_WARNING   = 0x0225;
     constexpr uint16_t GLASS_BREAK        = 0x0226;
     constexpr uint16_t SECURITY_REPEATER  = 0x0229;
+    constexpr uint16_t INVALID            = 0xFFFF;
 }
 
 /**

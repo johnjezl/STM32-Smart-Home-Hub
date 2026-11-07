@@ -8,6 +8,7 @@
 #include <gtest/gtest.h>
 
 #include <smarthub/devices/types/DimmerDevice.hpp>
+#include <smarthub/devices/types/AlarmSensor.hpp>
 #include <smarthub/devices/types/SwitchDevice.hpp>
 #include <smarthub/devices/types/TemperatureSensor.hpp>
 #include <smarthub/automation/Automation.hpp>
@@ -292,6 +293,26 @@ TEST_F(AutomationManagerTest, DeviceStateChangeWithToValueRunsTheAction) {
     automationManager->waitForRuns();
     EXPECT_NE(light->getProperty("on"), true);
     ASSERT_TRUE(deviceManager->setDeviceState("source", "on", true));
+    automationManager->waitForRuns();
+    EXPECT_EQ(light->getProperty("on"), true);
+}
+
+TEST_F(AutomationManagerTest, LeakAlarmRunsTheAction) {
+    automationManager->initialize();
+    auto leak = std::make_shared<smarthub::AlarmSensor>("leak", "Leak", smarthub::DeviceType::WaterSensor);
+    auto light = std::make_shared<SwitchDevice>("light_001", "Light");
+    deviceManager->addDevice(leak);
+    deviceManager->addDevice(light);
+
+    Trigger trigger;
+    trigger.type = TriggerType::DeviceState;
+    trigger.deviceId = "leak";
+    trigger.property = "alarm";
+    trigger.toValue = true;
+    ASSERT_TRUE(automationManager->addAutomation(lightOnWhen(trigger)));
+
+    automationManager->waitForRuns();
+    ASSERT_TRUE(deviceManager->setDeviceState("leak", "alarm", true));
     automationManager->waitForRuns();
     EXPECT_EQ(light->getProperty("on"), true);
 }

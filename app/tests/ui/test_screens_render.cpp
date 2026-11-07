@@ -234,6 +234,33 @@ TEST_F(ScreenRenderTest, AlarmShowsOnTheDashboardSensorsAndRoom) {
     EXPECT_GE(test::countText(room, "Leak", true), 1);
 }
 
+TEST_F(ScreenRenderTest, LongAlarmStaysOnOneLineOfTheHeader) {
+    for (int i = 0; i < 6; i++) {
+        auto leak = std::make_shared<AlarmSensor>("leak" + std::to_string(i), "Sensor With A Long Name " + std::to_string(i),
+                                                  DeviceType::WaterSensor);
+        ASSERT_TRUE(deviceManager->addDevice(leak));
+        leak->setState("alarm", true);
+    }
+    auto* root = showAndRender("dashboard", std::make_unique<DashboardScreen>(
+        *screenManager, *themeManager, *deviceManager));
+
+    const std::function<lv_obj_t*(lv_obj_t*)> findTitle = [&](lv_obj_t* obj) -> lv_obj_t* {
+        if (lv_obj_check_type(obj, &lv_label_class) &&
+            std::string(lv_label_get_text(obj)).rfind(LV_SYMBOL_WARNING, 0) == 0) {
+            return obj;
+        }
+        for (uint32_t i = 0; i < lv_obj_get_child_cnt(obj); i++) {
+            if (auto* found = findTitle(lv_obj_get_child(obj, static_cast<int32_t>(i)))) return found;
+        }
+        return nullptr;
+    };
+    lv_obj_t* title = findTitle(root);
+    ASSERT_NE(title, nullptr);
+    lv_obj_update_layout(title);
+    EXPECT_EQ(lv_obj_get_height(title), lv_font_get_line_height(LV_FONT_DEFAULT));
+    EXPECT_LE(lv_obj_get_x(title) + lv_obj_get_width(title), lv_obj_get_width(lv_obj_get_parent(title)) * 3 / 4 + 20);
+}
+
 TEST_F(ScreenRenderTest, RoomDetailShowsTheSensorsOfEachRoom) {
     auto motion = std::make_shared<MotionSensor>("detail-motion", "Hall Motion");
     motion->setRoom("detail-a");

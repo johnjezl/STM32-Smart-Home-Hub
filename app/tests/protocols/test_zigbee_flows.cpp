@@ -926,6 +926,22 @@ const FakeZigbeeDevice GLASS_BREAK{
     0x810D, 0x00124B000000810DULL,
     {{1, {zcl::cluster::IAS_ZONE}}},
     "", "", zcl::zone_type::GLASS_BREAK};
+const FakeZigbeeDevice GLASS_BREAK_WITH_TEMPERATURE{
+    0x8110, 0x00124B0000008110ULL,
+    {{1, {zcl::cluster::IAS_ZONE, zcl::cluster::TEMPERATURE_MEASUREMENT}}},
+    "", "", zcl::zone_type::GLASS_BREAK};
+const FakeZigbeeDevice GENERIC_ZONE{
+    0x8111, 0x00124B0000008111ULL,
+    {{1, {zcl::cluster::IAS_ZONE}}},
+    "", "", zcl::zone_type::STANDARD_CIE};
+const FakeZigbeeDevice INVALID_ZONE{
+    0x8112, 0x00124B0000008112ULL,
+    {{1, {zcl::cluster::IAS_ZONE}}},
+    "", "", zcl::zone_type::INVALID};
+const FakeZigbeeDevice KEY_FOB{
+    0x8113, 0x00124B0000008113ULL,
+    {{1, {zcl::cluster::IAS_ZONE}}},
+    "", "", zcl::zone_type::KEY_FOB};
 const FakeZigbeeDevice LEAK_WITH_TEMPERATURE{
     0x810E, 0x00124B000000810EULL,
     {{1, {zcl::cluster::IAS_ZONE, zcl::cluster::TEMPERATURE_MEASUREMENT}}},
@@ -1053,6 +1069,34 @@ TEST_F(ZigbeeHandlerFlowTest, IasZoneThatDoesNotSayIsStillTakenForMotion) {
     auto device = pair(NO_ZONE_TYPE);
     ASSERT_NE(device, nullptr);
     EXPECT_EQ(device->type(), DeviceType::MotionSensor);
+}
+
+TEST_F(ZigbeeHandlerFlowTest, ZonesThatDoNotSayAreMotionAndReportIt) {
+    for (const FakeZigbeeDevice* zone : {&GENERIC_ZONE, &INVALID_ZONE}) {
+        fake.addDevice(*zone);
+        auto device = pair(*zone);
+        ASSERT_NE(device, nullptr);
+        EXPECT_EQ(device->type(), DeviceType::MotionSensor);
+        fake.clusterCommand(zone->nwkAddr, 1, zcl::cluster::IAS_ZONE, 0x00, {0x01, 0x00});
+        EXPECT_EQ(waitForState(idOf(*zone), "motion"), true);
+    }
+}
+
+TEST_F(ZigbeeHandlerFlowTest, ButtonIsNotAnAlarm) {
+    fake.addDevice(KEY_FOB);
+    auto device = pair(KEY_FOB);
+    ASSERT_NE(device, nullptr);
+    EXPECT_NE(device->type(), DeviceType::AlarmSensor);
+    fake.clusterCommand(KEY_FOB.nwkAddr, 1, zcl::cluster::IAS_ZONE, 0x00, {0x01, 0x00});
+    EXPECT_EQ(waitForState(idOf(KEY_FOB), "alarm"), true);
+    EXPECT_FALSE(stateOf(idOf(KEY_FOB), "motion").has_value());
+}
+
+TEST_F(ZigbeeHandlerFlowTest, AnAlarmZoneThatAlsoMeasuresIsTheAlarmFirst) {
+    fake.addDevice(GLASS_BREAK_WITH_TEMPERATURE);
+    auto device = pair(GLASS_BREAK_WITH_TEMPERATURE);
+    ASSERT_NE(device, nullptr);
+    EXPECT_EQ(device->type(), DeviceType::AlarmSensor);
 }
 
 TEST_F(ZigbeeHandlerFlowTest, SensorWithAlarmAndTemperatureIsTheAlarmFirst) {

@@ -35,8 +35,8 @@ void Header::createLayout() {
     lv_label_set_text(m_titleLabel, m_title.c_str());
     lv_obj_set_style_text_color(m_titleLabel, m_theme.textPrimary(), 0);
     lv_obj_set_style_text_font(m_titleLabel, LV_FONT_DEFAULT, 0);
-    // Clear of what's on the right, as some titles aren't short
-    lv_obj_set_width(m_titleLabel, lv_pct(70));
+    // Clear of what's on the right, and one line, as some titles aren't short
+    lv_obj_set_size(m_titleLabel, lv_pct(70), lv_font_get_line_height(LV_FONT_DEFAULT));
     lv_label_set_long_mode(m_titleLabel, LV_LABEL_LONG_DOT);
     lv_obj_align(m_titleLabel, LV_ALIGN_LEFT_MID, ThemeManager::SPACING_MD, 0);
 

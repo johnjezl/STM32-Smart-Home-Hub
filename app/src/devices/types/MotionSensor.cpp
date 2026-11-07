@@ -32,11 +32,8 @@ MotionSensor::MotionSensor(const std::string& id,
     MotionSensor::setConfig(nlohmann::json::object());
 
     // Initialize state
-    // Motion stays unset until the first report: false would read as a real "Clear"
+    // Motion and light stay unset until the first report: false or 0 would read as real
     setStateInternal("last_motion_time", 0);
-    if (hasIlluminance) {
-        setStateInternal("illuminance", 0);
-    }
     if (hasBattery) {
         setStateInternal("battery", 100);
     }

@@ -44,6 +44,11 @@
         .map(device => `${activeAlarmText(device)}: ${device.name}`)
         .join(', ');
 
+    function withLight(parts, state) {
+        if (isNumber(state?.illuminance)) parts.push(`${fixed(state.illuminance, 0)} lux`);
+        return parts.length > 0 ? parts.join(' / ') : '--';
+    }
+
     // What it's for, with any other readings after it
     function withOtherReadings(main, state) {
         const parts = main ? [main] : [];
@@ -51,8 +56,7 @@
         const humidity = humidityPercent(state);
         if (temperature !== undefined) parts.push(temperatureText(temperature, 1));
         if (humidity !== undefined) parts.push(humidityText(humidity));
-        if (isNumber(state?.illuminance)) parts.push(`${fixed(state.illuminance, 0)} lux`);
-        return parts.length > 0 ? parts.join(' / ') : '--';
+        return withLight(parts, state);
     }
 
     /** One sensor's current value, as { text, colorClass } */
@@ -64,17 +68,17 @@
         switch (sensor.type) {
             case 'temperature_sensor':
             case 'multi_sensor':
-                if (temperature === undefined && humidity === undefined) return { text: '--', colorClass: '' };
+                if (temperature === undefined && humidity === undefined) return { text: withLight([], state), colorClass: '' };
                 return {
-                    text: humidity === undefined
-                        ? temperatureText(temperature, 1)
-                        : `${temperatureText(temperature, 1)} / ${humidityText(humidity)}`,
+                    text: withLight(humidity === undefined
+                        ? [temperatureText(temperature, 1)]
+                        : [temperatureText(temperature, 1), humidityText(humidity)], state),
                     colorClass: 'temperature'
                 };
             case 'humidity_sensor':
                 return humidity === undefined
-                    ? { text: '--', colorClass: '' }
-                    : { text: humidityText(humidity), colorClass: 'humidity' };
+                    ? { text: withLight([], state), colorClass: '' }
+                    : { text: withLight([humidityText(humidity)], state), colorClass: 'humidity' };
             case 'motion_sensor':
                 if (typeof state?.motion !== 'boolean') return { text: withOtherReadings('', state), colorClass: '' };
                 return { text: withOtherReadings(state.motion ? 'Motion' : 'Clear', state), colorClass: 'motion' };

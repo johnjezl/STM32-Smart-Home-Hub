@@ -329,7 +329,8 @@ body:not(.is-admin) .admin-only {
 }
 
 .room-card.alarm-active {
-    border-color: var(--error);
+    border: 2px solid var(--error);
+    box-shadow: 0 0 8px rgba(239, 68, 68, 0.3);
 }
 
 .room-card.motion-active {
@@ -557,7 +558,8 @@ body:not(.is-admin) .admin-only {
 }
 
 .sensor-value.alarm,
-.sensor-value-large.alarm {
+.sensor-value-large.alarm,
+.room-sensor-value.alarm {
     color: var(--error);
 }
 

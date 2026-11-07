@@ -1039,7 +1039,10 @@ ZigbeeHandler::ZoneAlarm ZigbeeHandler::zoneAlarmFor(DeviceType type, std::optio
         return ZoneAlarm::Open;
     }
     // A leak or smoke alarm isn't motion, and mustn't set off what motion sets off
-    if (type == DeviceType::MotionSensor && (!zoneType || *zoneType == zcl::zone_type::MOTION_SENSOR)) {
+    // A zone that doesn't say what it is may well be a motion sensor
+    if (type == DeviceType::MotionSensor &&
+        (!zoneType || *zoneType == zcl::zone_type::MOTION_SENSOR || *zoneType == zcl::zone_type::STANDARD_CIE ||
+         *zoneType == zcl::zone_type::INVALID)) {
         return ZoneAlarm::Motion;
     }
     return ZoneAlarm::Other;
@@ -1504,6 +1507,10 @@ DeviceType ZigbeeHandler::resolveDeviceType(const ZigbeeDeviceInfo& info) {
     if (info.zoneType == zcl::zone_type::CO_SENSOR) {
         return DeviceType::CoSensor;
     }
+    if (info.zoneType == zcl::zone_type::GLASS_BREAK || info.zoneType == zcl::zone_type::VIBRATION_MOVEMENT ||
+        info.zoneType == zcl::zone_type::PERSONAL_EMERGENCY) {
+        return DeviceType::AlarmSensor;
+    }
 
     // The device database knows better than the clusters, if it has an answer
     auto dbEntry = m_deviceDb.lookup(info.manufacturer, info.model);
@@ -1647,8 +1654,7 @@ DeviceType ZigbeeHandler::inferDeviceType(const ZigbeeDeviceInfo& info) {
         // Prioritize temperature sensor for sensors with temp/humidity clusters
         return DeviceType::TemperatureSensor;
     } else if (hasIasZone) {
-        // Saying it's some other kind of zone means it isn't motion. Saying nothing, it may well be.
-        return info.zoneType ? DeviceType::AlarmSensor : DeviceType::MotionSensor;
+        return DeviceType::MotionSensor;
     } else if (hasOnOff) {
         return DeviceType::Switch;
     }

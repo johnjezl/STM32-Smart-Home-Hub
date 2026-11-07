@@ -308,7 +308,7 @@ void AddAutomationScreen::createDeviceStateTrigger() {
     m_triggerPropertyDropdown = lv_dropdown_create(m_triggerConfigContainer);
     lv_obj_set_size(m_triggerPropertyDropdown, 200, 40);
     lv_obj_align(m_triggerPropertyDropdown, LV_ALIGN_TOP_LEFT, 370, 22);
-    lv_dropdown_set_options(m_triggerPropertyDropdown, "on\nbrightness\nmotion\ntemperature");
+    lv_dropdown_set_options(m_triggerPropertyDropdown, "on\nbrightness\nmotion\ntemperature\nalarm");
     styleDropdown(m_triggerPropertyDropdown);
 
     lv_obj_t* valueLabel = lv_label_create(m_triggerConfigContainer);
@@ -420,7 +420,7 @@ void AddAutomationScreen::createSensorThresholdTrigger() {
     m_triggerPropertyDropdown = lv_dropdown_create(m_triggerConfigContainer);
     lv_obj_set_size(m_triggerPropertyDropdown, 300, 40);
     lv_obj_align(m_triggerPropertyDropdown, LV_ALIGN_TOP_LEFT, 0, 92);
-    lv_dropdown_set_options(m_triggerPropertyDropdown, "temperature\nhumidity");
+    lv_dropdown_set_options(m_triggerPropertyDropdown, "temperature\nhumidity\nilluminance");
     styleDropdown(m_triggerPropertyDropdown);
 }
 
