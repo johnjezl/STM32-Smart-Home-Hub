@@ -11,12 +11,12 @@ case "$1" in
     if [ -f "/lib/firmware/$M4_FIRMWARE" ]; then
         echo "Loading M4 firmware: $M4_FIRMWARE"
         # What makes /dev/ttyRPMSG0. Nothing else loads it, and it can't hurt to load it first.
-        modprobe rpmsg_tty 2>/dev/null
+        modprobe rpmsg_tty || echo "No rpmsg_tty, so no /dev/ttyRPMSG0 for the app to use"
         echo "$M4_FIRMWARE" > $RPROC_PATH/firmware
         echo start > $RPROC_PATH/state
         if [ $? -eq 0 ]; then
             echo "M4 firmware started"
-            # It announces itself in its own time, and the app only opens the device once
+            # It announces itself in its own time, and the app starts sooner if it's there
             i=0
             while [ ! -e /dev/ttyRPMSG0 ] && [ $i -lt 5 ]; do
                 sleep 1

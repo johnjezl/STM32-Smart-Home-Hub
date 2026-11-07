@@ -34,8 +34,7 @@ public:
 
     /**
      * Open the device and ping the M4. False if the device can't be opened, or the M4 doesn't
-     * answer within pingTimeoutMs. In the second case the device stays open, and poll() keeps
-     * pinging, in case it starts later.
+     * answer within pingTimeoutMs. Either way poll() keeps trying, in case it starts later.
      */
     bool initialize(int pingTimeoutMs = 250);
 
@@ -45,18 +44,19 @@ public:
     void shutdown();
 
     /**
-     * Check if the device is open. See m4Responded for whether anything is answering.
+     * Check if the device is open. See m4Responded for whether anything is answering. It closes
+     * if the M4 stops, as Linux takes the device away, and poll() opens it again when it's back.
      */
     bool isConnected() const { return m_connected; }
 
     /**
-     * Whether the M4 has answered a ping since this was initialized. It doesn't go false again if
-     * the M4 stops later.
+     * Whether the M4 has answered a ping since the device was last opened. It doesn't go false
+     * if the M4 hangs without Linux noticing.
      */
     bool m4Responded() const { return m_m4Responded; }
 
     /**
-     * Poll for messages (call from main loop)
+     * Poll for messages, and for the device if it isn't open (call from main loop)
      */
     void poll();
 
@@ -97,7 +97,14 @@ public:
      */
     void setMessageCallback(MessageCallback callback) { m_callback = std::move(callback); }
 
+    /**
+     * How long poll() waits between pings or tries at opening the device
+     */
+    void setRetryInterval(std::chrono::milliseconds interval) { m_retryInterval = interval; }
+
 private:
+    bool openDevice();
+    void closeDevice();
     void handleReceived(const uint8_t* data, size_t size);
     void handleMessage(const protocol::DecodedMessage& message);
 
@@ -106,6 +113,8 @@ private:
     int m_fd = -1;
     bool m_connected = false;
     bool m_m4Responded = false;
+    bool m_wanted = false;  // Between initialize and shutdown, when poll should get the device back
+    std::chrono::milliseconds m_retryInterval{5000};
     uint16_t m_nextSeq = 0;
     std::vector<uint8_t> m_received;  // What has arrived of a message not complete yet
     std::chrono::steady_clock::time_point m_lastReceived{};

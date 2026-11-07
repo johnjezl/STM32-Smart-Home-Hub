@@ -169,9 +169,17 @@ public:
         cfmakeraw(&tio);
         tcsetattr(m_master, TCSANOW, &tio);
     }
-    ~FakeM4() { close(m_master); }
+    ~FakeM4() { hangUp(); }
 
     const std::string& path() const { return m_path; }
+
+    /** What Linux does to the device when the M4 stops */
+    void hangUp() {
+        if (m_master >= 0) {
+            close(m_master);
+            m_master = -1;
+        }
+    }
 
     void send(const std::vector<uint8_t>& bytes) {
         ASSERT_EQ(write(m_master, bytes.data(), bytes.size()), static_cast<ssize_t>(bytes.size()));
@@ -345,6 +353,59 @@ TEST_F(RpmsgContractTest, RetryingInitializeWaitsForItsOwnAnswer) {
 
     EXPECT_FALSE(client.initialize(30)) << "nothing answered this time";
     EXPECT_FALSE(client.m4Responded());
+}
+
+TEST_F(RpmsgContractTest, DeviceComesBackAfterTheM4Restarts) {
+    const fs::path link = fs::temp_directory_path() / ("rpmsg_test_" + std::to_string(getpid()));
+    fs::remove(link);
+    fs::create_symlink(m4.path(), link);
+
+    smarthub::RpmsgClient client(*eventBus, link.string());
+    client.setRetryInterval(std::chrono::milliseconds(10));
+    connect(client);
+
+    m4.hangUp();
+    fs::remove(link);
+    for (int i = 0; i < 100 && client.isConnected(); i++) {
+        client.poll();
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    EXPECT_FALSE(client.isConnected());
+    EXPECT_FALSE(client.m4Responded());
+    client.poll();  // With the device gone, this keeps trying and doesn't crash
+
+    FakeM4 restarted;
+    fs::create_symlink(restarted.path(), link);
+    for (int i = 0; i < 100 && !client.isConnected(); i++) {
+        client.poll();
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    ASSERT_TRUE(client.isConnected());
+    const auto sent = restarted.received();  // The sequence number has moved on from the vector's
+    ASSERT_EQ(sent.size(), smarthub::protocol::vectors::PING.size()) << "it should ping as soon as it's back";
+    EXPECT_EQ(sent[0], smarthub::protocol::vectors::PING[0]);
+    restarted.send(smarthub::protocol::vectors::PONG);
+    for (int i = 0; i < 100 && !client.m4Responded(); i++) {
+        client.poll();
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    EXPECT_TRUE(client.m4Responded());
+    fs::remove(link);
+}
+
+TEST_F(RpmsgContractTest, ShutdownStopsItComingBack) {
+    const fs::path link = fs::temp_directory_path() / ("rpmsg_test_" + std::to_string(getpid()));
+    fs::remove(link);
+    fs::create_symlink(m4.path(), link);
+    smarthub::RpmsgClient client(*eventBus, link.string());
+    client.setRetryInterval(std::chrono::milliseconds(1));
+    connect(client);
+
+    client.shutdown();
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    client.poll();
+    EXPECT_FALSE(client.isConnected());
+    fs::remove(link);
 }
 
 TEST_F(RpmsgContractTest, SensorEventSaysWhatItMeasures) {

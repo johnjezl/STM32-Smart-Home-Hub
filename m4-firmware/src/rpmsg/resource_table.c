@@ -150,6 +150,14 @@ struct resource_table resource_table = {
 };
 
 /**
+ * The virtio status Linux has set for the RPMsg device
+ */
+uint8_t rsc_vdev_status(void) {
+    /* Linux writes this, in the copy of the table that's loaded here */
+    return *(volatile uint8_t*)&resource_table.rpmsg_vdev.status;
+}
+
+/**
  * Export resource table pointer for OpenAMP library
  */
 void* get_resource_table(int rsc_id, int* len) {
