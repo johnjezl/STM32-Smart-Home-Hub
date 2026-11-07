@@ -71,7 +71,9 @@ export SMARTHUB_ROOT_PASSWORD_HASH='$6$...'
 
 Without them the image works, but nobody can log in, and the build warns about it. A rebuild only picks these up if the image is built again, as they're applied when it's put together.
 
-The app and M4 firmware are part of the image, from this repository, so they start at boot with no further setup. To rebuild them after a change, run `./tools/build.sh smarthub-app-rebuild all`.
+The app and M4 firmware are part of the image, from this repository, so they start at boot with no further setup. To rebuild them after a change, run `./tools/build.sh smarthub-app-rebuild smarthub-m4-rebuild all`.
+
+On the board, `/etc/init.d/S90smarthub` starts and stops the app, and restarts it if it crashes. Its log is in syslog, at `/var/log/messages`.
 
 ### Directory Structure
 

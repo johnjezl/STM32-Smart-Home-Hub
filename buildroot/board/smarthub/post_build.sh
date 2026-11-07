@@ -35,12 +35,13 @@ fi
 # without them the image still works, but has no login. See "Logging In" in docs/building.md.
 mkdir -p "${TARGET_DIR}/root/.ssh"
 chmod 700 "${TARGET_DIR}/root/.ssh"
-if [ -n "${SMARTHUB_AUTHORIZED_KEYS:-}" ]; then
-    cp "${SMARTHUB_AUTHORIZED_KEYS}" "${TARGET_DIR}/root/.ssh/authorized_keys"
-fi
-if [ -f "${TARGET_DIR}/root/.ssh/authorized_keys" ]; then
+# Decided on every build, as the target directory keeps what an earlier build put there
+KEYS="${SMARTHUB_AUTHORIZED_KEYS:-$(dirname "$0")/overlay/root/.ssh/authorized_keys}"
+if [ -f "$KEYS" ]; then
+    cp "$KEYS" "${TARGET_DIR}/root/.ssh/authorized_keys"
     chmod 600 "${TARGET_DIR}/root/.ssh/authorized_keys"
 else
+    rm -f "${TARGET_DIR}/root/.ssh/authorized_keys"
     echo "WARNING: no SSH key in this image, so it can't be logged into over the network"
 fi
 # The defconfig's empty password would let anyone in at the console

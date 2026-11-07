@@ -1,0 +1,46 @@
+#!/bin/sh
+#
+# Keeps the SmartHub app running, and its log in syslog, which limits its size. A hub with no app
+# has no screen, dashboard or automations until someone notices, so a crash restarts it.
+#
+# Stopped with TERM, which S90smarthub sends. A second TERM makes the app give up on a clean exit.
+#
+
+DAEMON="${SMARTHUB_DAEMON:-/usr/bin/smarthub}"
+CONFIG="${SMARTHUB_CONFIG:-/etc/smarthub/config.yaml}"
+LOG_FIFO="${SMARTHUB_LOG_FIFO:-/var/run/smarthub.log.fifo}"
+RESTART_DELAY=5
+
+stopping=0
+child=""
+
+forward() {
+    stopping=1
+    [ -n "$child" ] && kill -TERM "$child" 2>/dev/null
+}
+trap forward TERM INT
+
+rm -f "$LOG_FIFO"
+mkfifo "$LOG_FIFO"
+logger -t smarthub < "$LOG_FIFO" &
+exec 3> "$LOG_FIFO"  # Held open, so the logger carries on across restarts
+
+while [ "$stopping" -eq 0 ]; do
+    "$DAEMON" -c "$CONFIG" >&3 2>&3 &
+    child=$!
+
+    # wait returns early when a signal arrives, so keep at it until the app has really gone
+    while kill -0 "$child" 2>/dev/null; do
+        wait "$child"
+        status=$?
+    done
+    child=""
+
+    if [ "$stopping" -eq 0 ]; then
+        echo "smarthub exited with status $status, restarting in $RESTART_DELAY seconds" >&3
+        sleep "$RESTART_DELAY"
+    fi
+done
+
+exec 3>&-
+rm -f "$LOG_FIFO"

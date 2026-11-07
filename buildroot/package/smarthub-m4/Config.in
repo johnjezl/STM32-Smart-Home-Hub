@@ -1,7 +1,6 @@
 config BR2_PACKAGE_SMARTHUB_M4
 	bool "smarthub-m4"
 	depends on BR2_PACKAGE_HOST_ARM_GNU_TOOLCHAIN_SUPPORTS
-	select BR2_PACKAGE_HOST_ARM_GNU_TOOLCHAIN
 	help
 	  The SmartHub Cortex-M4 firmware, built from this repository.
 	  S80remoteproc starts it at boot.
