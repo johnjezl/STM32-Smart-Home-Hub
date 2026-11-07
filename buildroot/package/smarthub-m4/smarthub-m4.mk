@@ -9,7 +9,7 @@ SMARTHUB_M4_SITE = $(BR2_EXTERNAL_SMARTHUB_PATH)/..
 SMARTHUB_M4_SITE_METHOD = local
 SMARTHUB_M4_OVERRIDE_SRCDIR_RSYNC_EXCLUSIONS = \
 	--exclude='build*/' --exclude='node_modules/' --exclude='*.pdf'
-SMARTHUB_M4_DEPENDENCIES = host-arm-gnu-toolchain host-cmake
+SMARTHUB_M4_DEPENDENCIES = host-arm-gnu-toolchain $(BR2_CMAKE_HOST_DEPENDENCY)
 
 # Not a cmake-package, which would use the toolchain for the A7. This one has its own.
 define SMARTHUB_M4_BUILD_CMDS

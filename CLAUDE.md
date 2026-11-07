@@ -78,7 +78,9 @@ ssh root@192.168.4.102 "cat > /usr/bin/smarthub.new && chmod +x /usr/bin/smarthu
   ssh root@192.168.4.102 "killall smarthub; for i in 1 2 3 4 5 6 7 8 9 10; do pidof smarthub > /dev/null || break; sleep 1; done; nohup smarthub > /var/log/smarthub.log 2>&1 < /dev/null &"
 ```
 
-`smarthub` on the board's PATH is `/usr/bin/smarthub`, so install there. The board also has older copies in `/opt/smarthub/bin` and `/root`, and `tools/deploy.sh` installs to `/opt/smarthub`, which this command doesn't run.
+`smarthub` on the board's PATH is `/usr/bin/smarthub`, so install there. The board also has older copies in `/opt/smarthub/bin` and `/root`. `tools/deploy.sh` does all this, and the dashboard too.
+
+An image built from this repository has `/etc/init.d/S90smarthub`, which starts the app and restarts it if it crashes. On one of those, use `/etc/init.d/S90smarthub restart` rather than the `killall` above, or the init script loses track of it.
 
 If the board is unresponsive, use the `power_cycle` MCP tool with `sbc_name: "stm32mp157f-dk2"` before deploying.
 

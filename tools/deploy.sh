@@ -29,7 +29,14 @@ for file in "$PROJECT_DIR"/web/*.html "$PROJECT_DIR"/web/*.js "$PROJECT_DIR"/web
     ssh "$TARGET" "cat > /opt/smarthub/www/$(basename "$file")" < "$file"
 done
 
+# An older image doesn't have the init script
 echo "Restarting..."
-ssh "$TARGET" "/etc/init.d/S90smarthub restart"
+ssh "$TARGET" 'if [ -x /etc/init.d/S90smarthub ]; then
+    /etc/init.d/S90smarthub restart
+else
+    killall smarthub
+    for i in 1 2 3 4 5 6 7 8 9 10; do pidof smarthub > /dev/null || break; sleep 1; done
+    nohup smarthub > /var/log/smarthub.log 2>&1 < /dev/null &
+fi'
 
 echo "Done"

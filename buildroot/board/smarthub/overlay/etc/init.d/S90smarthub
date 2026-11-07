@@ -1,30 +1,64 @@
 #!/bin/sh
 #
-# Start the SmartHub application
+# Start the SmartHub application, which logs to syslog
 #
 
-DAEMON="/usr/bin/smarthub"
-CONFIG="/etc/smarthub/config.yaml"
-PIDFILE="/var/run/smarthub.pid"
-LOGFILE="/var/log/smarthub.log"
+SUPERVISOR="${SMARTHUB_SUPERVISOR:-/usr/libexec/smarthub-supervise}"
+PIDFILE="${SMARTHUB_PIDFILE:-/var/run/smarthub.pid}"
+
+running() {
+    [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null
+}
+
+wait_for_exit() {
+    i=0
+    while running && [ "$i" -lt "$1" ]; do
+        sleep 1
+        i=$((i + 1))
+    done
+    ! running
+}
 
 start() {
     printf "Starting smarthub: "
-    # Through sh, for the log, which also makes the pid file the shell's. So exec.
-    start-stop-daemon -S -b -m -p "$PIDFILE" -x /bin/sh -- \
-        -c "exec $DAEMON -c $CONFIG >> $LOGFILE 2>&1"
-    [ $? -eq 0 ] && echo "OK" || echo "FAIL"
+    if running; then
+        echo "already running"
+        return 0
+    fi
+    start-stop-daemon -S -b -m -p "$PIDFILE" -x "$SUPERVISOR"
+    sleep 1
+    if running; then
+        echo "OK"
+    else
+        echo "FAIL"
+        return 1
+    fi
 }
 
 stop() {
     printf "Stopping smarthub: "
-    start-stop-daemon -K -p "$PIDFILE" -o -q
-    # It saves its state on the way out, so give it time
-    i=0
-    while [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null && [ $i -lt 15 ]; do
-        sleep 1
-        i=$((i + 1))
-    done
+    if ! running; then
+        rm -f "$PIDFILE"
+        echo "not running"
+        return 0
+    fi
+
+    # It saves its state on the way out, so give it time. A second TERM makes it give up on that,
+    # 5 seconds after the first at the soonest.
+    kill -TERM "$(cat "$PIDFILE")"
+    wait_for_exit 15 || {
+        kill -TERM "$(cat "$PIDFILE")"
+        wait_for_exit 8
+    } || {
+        pkill -KILL -P "$(cat "$PIDFILE")"
+        kill -KILL "$(cat "$PIDFILE")"
+        wait_for_exit 3
+    }
+
+    if running; then
+        echo "FAIL"
+        return 1
+    fi
     rm -f "$PIDFILE"
     echo "OK"
 }
@@ -32,6 +66,6 @@ stop() {
 case "$1" in
     start) start ;;
     stop) stop ;;
-    restart) stop; start ;;
+    restart) stop && start ;;
     *) echo "Usage: $0 {start|stop|restart}"; exit 1 ;;
 esac
