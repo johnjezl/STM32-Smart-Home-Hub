@@ -8,7 +8,9 @@
 #include <gtest/gtest.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <algorithm>
 #include <chrono>
+#include <cstdlib>
 #include <condition_variable>
 #include <filesystem>
 #include <fstream>
@@ -485,10 +487,76 @@ TEST_F(FakeWpaCliTest, ConnectDoesNotBlockTheCallerAndShutdownStopsIt) {
     EXPECT_LT(std::chrono::steady_clock::now() - start, std::chrono::milliseconds(2500));
 }
 
-class NetworkManagerTest : public ::testing::Test {
+// Against the real wpa_supplicant, on a board. It adds a network that's never enabled or saved,
+// and removes it, so the board's own connection is left alone. Set SMARTHUB_REAL_WPA=1 to run it.
+TEST(RealWpaSupplicantTest, HostileNamesRoundTrip) {
+    const char* enabled = std::getenv("SMARTHUB_REAL_WPA");
+    if (!enabled || std::string(enabled) != "1") {
+        GTEST_SKIP() << "Set SMARTHUB_REAL_WPA=1 to run against the real wpa_supplicant";
+    }
+
+    NetworkManager manager;
+    ASSERT_TRUE(manager.initialize());
+    ASSERT_TRUE(manager.isWifiAvailable());
+
+    std::string iface;
+    for (const auto& entry : std::filesystem::directory_iterator("/sys/class/net")) {
+        const std::string name = entry.path().filename().string();
+        if (name.rfind("wlan", 0) == 0 && (iface.empty() || name < iface)) iface = name;
+    }
+    auto wpa = [&](std::vector<std::string> arguments) {
+        arguments.insert(arguments.begin(), {"wpa_cli", "-i", iface});
+        std::string output = smarthub::core::runProcess(arguments).output;
+        while (!output.empty() && (output.back() == '\n' || output.back() == '\r')) output.pop_back();
+        return output;
+    };
+
+    const std::string ssid = "';touch pw;'\"$(x)\\\tcaf\xc3\xa9";
+    const std::string password = "pa ss\"`touch pw`'word";
+    const std::string id = wpa({"add_network"});
+    ASSERT_FALSE(id.empty());
+    ASSERT_TRUE(std::all_of(id.begin(), id.end(), ::isdigit)) << id;
+
+    EXPECT_EQ(wpa({"set_network", id, "ssid", NetworkManager::ssidToHex(ssid)}), "OK");
+    EXPECT_EQ(wpa({"set_network", id, "key_mgmt", "WPA-PSK"}), "OK");
+    EXPECT_EQ(wpa({"set_network", id, "psk", *NetworkManager::pskArgument(password)}), "OK");
+
+    const auto saved = manager.getSavedNetworks();
+    EXPECT_NE(std::find(saved.begin(), saved.end(), ssid), saved.end());
+
+    EXPECT_EQ(wpa({"remove_network", id}), "OK");
+    const auto after = manager.getSavedNetworks();
+    EXPECT_EQ(std::find(after.begin(), after.end(), ssid), after.end());
+    EXPECT_FALSE(std::filesystem::exists("pw"));
+
+    // A real scan finds the network the board is connected to, marked as connected
+    std::mutex mutex;
+    std::condition_variable done;
+    std::optional<std::vector<WifiNetwork>> found;
+    manager.startScan([&](const std::vector<WifiNetwork>& networks) {
+        std::lock_guard<std::mutex> lock(mutex);
+        found = networks;
+        done.notify_all();
+    });
+    std::unique_lock<std::mutex> lock(mutex);
+    ASSERT_TRUE(done.wait_for(lock, std::chrono::seconds(20), [&] { return found.has_value(); }));
+    const auto status = manager.getStatus();
+    if (status.state == ConnectionState::Connected) {
+        const auto current = std::find_if(found->begin(), found->end(),
+                                          [&](const WifiNetwork& n) { return n.ssid == status.ssid; });
+        ASSERT_NE(current, found->end()) << status.ssid;
+        EXPECT_TRUE(current->connected);
+        EXPECT_LT(current->signalStrength, 0);
+        EXPECT_GT(current->frequency, 2000);
+    }
+}
+
+// On a fake wpa_cli: the real one would act on the machine's WiFi, and these call disconnect
+class NetworkManagerTest : public FakeWpaCliTest {
 protected:
     void SetUp() override {
-        networkManager = std::make_unique<NetworkManager>();
+        FakeWpaCliTest::SetUp();
+        networkManager = std::make_unique<NetworkManager>(options);
     }
 
     void TearDown() override {
@@ -496,6 +564,7 @@ protected:
             networkManager->shutdown();
         }
         networkManager.reset();
+        FakeWpaCliTest::TearDown();
     }
 
     std::unique_ptr<NetworkManager> networkManager;
@@ -653,6 +722,7 @@ TEST_F(NetworkManagerTest, DisconnectSafe) {
     ASSERT_NO_THROW({
         networkManager->disconnect();
     });
+    EXPECT_TRUE(called({"-i", "wlan0", "disconnect"}));
 }
 
 // ============================================================================
