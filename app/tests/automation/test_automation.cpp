@@ -817,8 +817,12 @@ TEST_F(AutomationManagerTest, ConcurrentDeviceChangesAndAutomations) {
     }
     automationManager->waitForRuns();
 
-    // On a busy machine none may have run in that time, so what counts is that it still works
-    ASSERT_TRUE(automationManager->setEnabled("runs_action", true));
+    // Whether any ran in that time depends on the machine, and all that toggling can set off the
+    // guard against automations firing too often. What counts is that it all still works after.
+    ASSERT_TRUE(automationManager->deleteAutomation("runs_action"));
+    Automation fresh = lightOnWhen(trigger);
+    fresh.id = "after_stress";
+    ASSERT_TRUE(automationManager->addAutomation(fresh));
     ASSERT_TRUE(deviceManager->setDeviceState("light_001", "on", false));
     const bool sourceOn = source->getProperty("on") == true;
     ASSERT_TRUE(deviceManager->setDeviceState("source", "on", !sourceOn));
