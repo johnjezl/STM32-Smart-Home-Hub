@@ -1096,8 +1096,10 @@ void ZigbeeHandler::requestZoneStatus(uint64_t ieeeAddr) {
     if (endpoint && info) {
         // The answer arrives like any report, whenever it does, so one that's asleep can still
         // answer when it wakes, and it can't overwrite a notification that came after it
-        m_coordinator->requestAttributes(info->networkAddress, *endpoint, zcl::cluster::IAS_ZONE,
-                                         {zcl::attr::ias_zone::ZONE_STATUS});
+        if (!m_coordinator->requestAttributes(info->networkAddress, *endpoint, zcl::cluster::IAS_ZONE,
+                                               {zcl::attr::ias_zone::ZONE_STATUS})) {
+            LOG_WARN("Couldn't ask zone 0x%04X for its state, so it may be out of date", info->networkAddress);
+        }
     }
 }
 
