@@ -253,7 +253,6 @@ bool ZigbeeHandler::initialize() {
         });
 
     m_enrollThread = std::thread(&ZigbeeHandler::enrollWorker, this);
-    m_zoneReadThread = std::thread(&ZigbeeHandler::zoneReadWorker, this);
 
     // Initialize coordinator
     if (!m_coordinator->initialize()) {
@@ -391,6 +390,9 @@ void ZigbeeHandler::onNetworkAddressFound(uint16_t nwkAddr, uint64_t ieeeAddr, b
     if (changed || !endpointKnown) {
         startPairing(nwkAddr, ieeeAddr);
     }
+
+    // The address is good now. An alarm only says when it changes, so what was saved may be out of date.
+    queueZoneRead(ieeeAddr);
 }
 
 ProtocolState ZigbeeHandler::state() const {
@@ -688,15 +690,6 @@ void ZigbeeHandler::restoreDevice(const IDevice& device) {
     } else if (!m_coordinator->getDevice(*ieeeAddr)) {
         lookUpNetworkAddress(*ieeeAddr);
     }
-
-    // An alarm only says when it changes, so what was saved may be out of date
-    if (clusterEndpoint(*ieeeAddr, zcl::cluster::IAS_ZONE)) {
-        {
-            std::lock_guard<std::mutex> lock(m_enrollMutex);
-            m_zoneReadQueue.push_back(*ieeeAddr);
-        }
-        m_zoneReadCv.notify_all();
-    }
 }
 
 void ZigbeeHandler::forgetDevice(const std::string& deviceId) {
@@ -742,6 +735,7 @@ void ZigbeeHandler::onDeviceAnnounced(uint16_t nwkAddr, uint64_t ieeeAddr) {
     if (savedId) {
         notifyState(*savedId, "networkAddress", static_cast<int>(nwkAddr));  // It may have moved
         notifyAvailability(*savedId, DeviceAvailability::Online);  // It may have left before this
+        queueZoneRead(ieeeAddr);  // It's awake now, and may have been off for a while
     }
 
     // Publish event to notify UI that a device was detected
@@ -830,12 +824,8 @@ void ZigbeeHandler::stopPairing() {
         m_stopEnrolling = true;
     }
     m_enrollCv.notify_all();
-    m_zoneReadCv.notify_all();
     if (m_enrollThread.joinable()) {
         m_enrollThread.join();
-    }
-    if (m_zoneReadThread.joinable()) {
-        m_zoneReadThread.join();
     }
 }
 
@@ -1067,9 +1057,19 @@ void ZigbeeHandler::enrollWorker() {
     constexpr uint8_t kZoneId = 1;
     std::unique_lock<std::mutex> lock(m_enrollMutex);
     for (;;) {
-        m_enrollCv.wait(lock, [this] { return m_stopEnrolling || !m_enrollQueue.empty(); });
+        m_enrollCv.wait(lock, [this] {
+            return m_stopEnrolling || !m_enrollQueue.empty() || !m_zoneReadQueue.empty();
+        });
         if (m_stopEnrolling) {
             return;
+        }
+        if (m_enrollQueue.empty()) {
+            const uint64_t ieeeAddr = m_zoneReadQueue.front();
+            m_zoneReadQueue.pop_front();
+            lock.unlock();
+            requestZoneStatus(ieeeAddr);
+            lock.lock();
+            continue;
         }
         const auto [nwkAddr, endpoint] = m_enrollQueue.front();
         m_enrollQueue.pop_front();
@@ -1079,40 +1079,25 @@ void ZigbeeHandler::enrollWorker() {
     }
 }
 
-void ZigbeeHandler::zoneReadWorker() {
-    std::unique_lock<std::mutex> lock(m_enrollMutex);
-    for (;;) {
-        m_zoneReadCv.wait(lock, [this] { return m_stopEnrolling || !m_zoneReadQueue.empty(); });
-        if (m_stopEnrolling) {
-            return;
-        }
-        const uint64_t ieeeAddr = m_zoneReadQueue.front();
-        m_zoneReadQueue.pop_front();
-        lock.unlock();
-        readZoneStatus(ieeeAddr);
-        lock.lock();
+void ZigbeeHandler::queueZoneRead(uint64_t ieeeAddr) {
+    if (!savedDeviceId(ieeeAddr) || !clusterEndpoint(ieeeAddr, zcl::cluster::IAS_ZONE)) {
+        return;
     }
+    {
+        std::lock_guard<std::mutex> lock(m_enrollMutex);
+        m_zoneReadQueue.push_back(ieeeAddr);
+    }
+    m_enrollCv.notify_all();
 }
 
-void ZigbeeHandler::readZoneStatus(uint64_t ieeeAddr) {
+void ZigbeeHandler::requestZoneStatus(uint64_t ieeeAddr) {
     const auto endpoint = clusterEndpoint(ieeeAddr, zcl::cluster::IAS_ZONE);
     const auto info = m_coordinator->getDevice(ieeeAddr);
-    const auto deviceId = savedDeviceId(ieeeAddr);
-    if (!endpoint || !info || !deviceId) {
-        return;
-    }
-
-    const auto attributes = m_coordinator->readAttributes(info->networkAddress, *endpoint, zcl::cluster::IAS_ZONE,
-                                                          {zcl::attr::ias_zone::ZONE_STATUS}, m_pairingReadTimeoutMs);
-    if (!attributes) {
-        // Normal for a battery device, which sleeps. What it has saved stays, until it next says.
-        LOG_DEBUG("Zone %s didn't answer", deviceId->c_str());
-        return;
-    }
-    for (const ZclAttributeValue& attr : *attributes) {
-        if (attr.attributeId == zcl::attr::ias_zone::ZONE_STATUS) {
-            notifyZoneStatus(*deviceId, ieeeAddr, attr.asUint16());
-        }
+    if (endpoint && info) {
+        // The answer arrives like any report, whenever it does, so one that's asleep can still
+        // answer when it wakes, and it can't overwrite a notification that came after it
+        m_coordinator->requestAttributes(info->networkAddress, *endpoint, zcl::cluster::IAS_ZONE,
+                                         {zcl::attr::ias_zone::ZONE_STATUS});
     }
 }
 
@@ -1204,6 +1189,7 @@ void ZigbeeHandler::finishPairing(uint64_t ieeeAddr) {
             notifyState(*savedId, "endpoint", static_cast<int>(*savedEndpoint));
             notifyState(*savedId, "clusterEndpoints", merged);
         }
+        queueZoneRead(ieeeAddr);  // Saved by an older build, it may only now be known to have a zone
         return;
     }
 

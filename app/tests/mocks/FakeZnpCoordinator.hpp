@@ -182,6 +182,11 @@ public:
         injectIndication(incomingMessage(nwkAddr, endpoint, cluster, zcl));
     }
 
+    /** AF_INCOMING_MSG with these ZCL bytes, as for an answer that comes late. */
+    void sendZcl(uint16_t nwkAddr, uint8_t endpoint, uint16_t cluster, const std::vector<uint8_t>& zcl) {
+        injectIndication(incomingMessage(nwkAddr, endpoint, cluster, zcl));
+    }
+
     /** AF_INCOMING_MSG carrying a cluster-specific ZCL command. */
     void clusterCommand(uint16_t nwkAddr, uint8_t endpoint, uint16_t cluster,
                         uint8_t command, const std::vector<uint8_t>& payload) {

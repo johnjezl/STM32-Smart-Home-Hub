@@ -373,17 +373,7 @@ std::optional<ZclAttributeValue> ZigbeeCoordinator::readAttribute(
 std::optional<std::vector<ZclAttributeValue>> ZigbeeCoordinator::readAttributes(
         uint16_t nwkAddr, uint8_t endpoint, uint16_t cluster,
         const std::vector<uint16_t>& attributes, int timeoutMs) {
-    // Build ZCL Read Attributes frame
     const uint8_t seq = nextTransactionSeq();
-    std::vector<uint8_t> zclFrame;
-    zclFrame.push_back(0x00);                    // Frame control: global, client-to-server
-    zclFrame.push_back(seq);
-    zclFrame.push_back(zcl::global_cmd::READ_ATTRIBUTES);
-    for (uint16_t attrId : attributes) {
-        zclFrame.push_back(attrId & 0xFF);
-        zclFrame.push_back((attrId >> 8) & 0xFF);
-    }
-
     const std::pair<uint16_t, uint8_t> key{nwkAddr, seq};
     {
         std::lock_guard<std::mutex> lock(m_readMutex);
@@ -393,19 +383,7 @@ std::optional<std::vector<ZclAttributeValue>> ZigbeeCoordinator::readAttributes(
         m_pendingReads[key];  // Before sending, as the answer can arrive before request() returns
     }
 
-    // Send via AF
-    ZnpFrame req(ZnpType::SREQ, ZnpSubsystem::AF, cmd::af::DATA_REQUEST);
-    req.appendWord(nwkAddr);
-    req.appendByte(endpoint);
-    req.appendByte(1);
-    req.appendWord(cluster);
-    req.appendByte(seq);
-    req.appendByte(0x30);
-    req.appendByte(15);
-    req.appendByte(static_cast<uint8_t>(zclFrame.size()));
-    req.appendBytes(zclFrame);
-
-    auto rsp = m_transport->request(req);
+    auto rsp = m_transport->request(readAttributesFrame(nwkAddr, endpoint, cluster, seq, attributes));
 
     std::unique_lock<std::mutex> lock(m_readMutex);
     if (rsp && rsp->getByte(0) == 0) {
@@ -471,13 +449,51 @@ void ZigbeeCoordinator::handleReadAttributesRsp(uint16_t srcAddr, uint8_t transS
     {
         std::lock_guard<std::mutex> lock(m_readMutex);
         auto pending = m_pendingReads.find({srcAddr, transSeq});
-        if (pending == m_pendingReads.end()) {
-            return;  // Nobody's waiting any more
+        if (pending != m_pendingReads.end()) {
+            pending->second.values = std::move(values);
+            pending->second.answered = true;
+            m_readCv.notify_all();
+            return;
         }
-        pending->second.values = std::move(values);
-        pending->second.answered = true;
     }
-    m_readCv.notify_all();
+
+    // Nobody's waiting, whether nobody ever was or the wait ended. It's still what the device says.
+    std::lock_guard<std::mutex> lock(m_callbackMutex);
+    if (m_attrReportCb) {
+        for (const ZclAttributeValue& attr : values) {
+            m_attrReportCb(srcAddr, attr);
+        }
+    }
+}
+
+bool ZigbeeCoordinator::requestAttributes(uint16_t nwkAddr, uint8_t endpoint, uint16_t cluster,
+                                          const std::vector<uint16_t>& attributes) {
+    auto rsp = m_transport->request(readAttributesFrame(nwkAddr, endpoint, cluster, nextTransactionSeq(), attributes));
+    return rsp && rsp->getByte(0) == 0;
+}
+
+ZnpFrame ZigbeeCoordinator::readAttributesFrame(uint16_t nwkAddr, uint8_t endpoint, uint16_t cluster, uint8_t seq,
+                                                const std::vector<uint16_t>& attributes) {
+    std::vector<uint8_t> zclFrame;
+    zclFrame.push_back(0x00);                    // Frame control: global, client-to-server
+    zclFrame.push_back(seq);
+    zclFrame.push_back(zcl::global_cmd::READ_ATTRIBUTES);
+    for (uint16_t attrId : attributes) {
+        zclFrame.push_back(attrId & 0xFF);
+        zclFrame.push_back((attrId >> 8) & 0xFF);
+    }
+
+    ZnpFrame req(ZnpType::SREQ, ZnpSubsystem::AF, cmd::af::DATA_REQUEST);
+    req.appendWord(nwkAddr);
+    req.appendByte(endpoint);
+    req.appendByte(1);
+    req.appendWord(cluster);
+    req.appendByte(seq);
+    req.appendByte(0x30);
+    req.appendByte(15);
+    req.appendByte(static_cast<uint8_t>(zclFrame.size()));
+    req.appendBytes(zclFrame);
+    return req;
 }
 
 void ZigbeeCoordinator::setDeviceDetails(uint64_t ieeeAddr, const std::string& manufacturer,

@@ -208,6 +208,13 @@ public:
                                                   const std::vector<uint16_t>& attributes,
                                                   int timeoutMs);
 
+    /**
+     * Ask for attributes without waiting for them. The answer, whenever it comes, arrives at the
+     * attribute report callback. Waits for the radio to take the request, like readAttributes.
+     */
+    bool requestAttributes(uint16_t nwkAddr, uint8_t endpoint, uint16_t cluster,
+                           const std::vector<uint16_t>& attributes);
+
     /** End any readAttributes waits now, and fail later ones. For shutting down. */
     void cancelReads();
 
@@ -311,6 +318,9 @@ public:
     uint8_t channel() const { return m_channel; }
 
 private:
+    ZnpFrame readAttributesFrame(uint16_t nwkAddr, uint8_t endpoint, uint16_t cluster, uint8_t seq,
+                                 const std::vector<uint16_t>& attributes);
+
     // ZNP indication handlers
     void handleIndication(const ZnpFrame& frame);
     void handleStateChange(const ZnpFrame& frame);

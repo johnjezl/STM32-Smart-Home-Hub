@@ -92,6 +92,7 @@ struct AirFrame {
     uint8_t endpoint;
     uint16_t cluster;
     uint8_t zclFrameControl;
+    uint8_t zclSeq;
     uint8_t zclCommand;
     std::vector<uint8_t> zclPayload;
 
@@ -100,6 +101,7 @@ struct AirFrame {
         , endpoint(frame.getByte(2))
         , cluster(frame.getWord(4))
         , zclFrameControl(frame.getByte(10))
+        , zclSeq(frame.getByte(11))
         , zclCommand(frame.getByte(12))
         , zclPayload(frame.getBytes(13, frame.getByte(9) - 3)) {}
 };
@@ -252,6 +254,28 @@ protected:
     nlohmann::json waitForState(const std::string& id, const std::string& property) {
         eventually([&] { return stateOf(id, property).has_value(); });
         return stateOf(id, property).value_or(nlohmann::json());
+    }
+
+    /** As if the hub had restarted, with these saved. Its radio knows nothing of them yet. */
+    void restart(const std::vector<DevicePtr>& saved) {
+        handler.reset();
+        handler = makeHandler(fake);
+        ASSERT_TRUE(handler->initialize());
+        fake.clearSentFrames();
+        for (const auto& device : saved) {
+            handler->restoreDevice(*device);
+        }
+    }
+
+    int zoneReadsSent(uint16_t nwkAddr) {
+        int count = 0;
+        for (const AirFrame& frame : airFrames(fake)) {
+            if (frame.nwkAddr == nwkAddr && frame.cluster == zcl::cluster::IAS_ZONE &&
+                frame.zclCommand == zcl::global_cmd::READ_ATTRIBUTES) {
+                count++;
+            }
+        }
+        return count;
     }
 
     nlohmann::json handlerConfig = nlohmann::json::object();
@@ -1203,93 +1227,151 @@ TEST_F(ZigbeeHandlerFlowTest, IlluminanceSensorSayingItHasNoReadingIsIgnored) {
 
 TEST_F(ZigbeeHandlerFlowTest, RestartReadsAnAlarmThatStartedWhileItWasDown) {
     fake.addDevice(ALARMED_LEAK);
-    auto paired = pair(ALARMED_LEAK);
-    ASSERT_NE(paired, nullptr);
-    paired->setState("alarm", false);  // As saved, before it started
-    handler->forgetDevice(paired->id());
+    auto saved = pair(ALARMED_LEAK);
+    ASSERT_NE(saved, nullptr);
+    saved->setState("alarm", false);  // As saved, before it started
 
-    handler->restoreDevice(*paired);
+    restart({saved});
 
-    EXPECT_EQ(waitForState(idOf(ALARMED_LEAK), "alarm"), true);
+    eventually([&] {
+        handler->poll();
+        return stateOf(idOf(ALARMED_LEAK), "alarm").has_value();
+    });
+    EXPECT_EQ(stateOf(idOf(ALARMED_LEAK), "alarm"), nlohmann::json(true));
 }
 
 TEST_F(ZigbeeHandlerFlowTest, RestartReadsAnAlarmThatClearedWhileItWasDown) {
     fake.addDevice(CLEAR_LEAK);
-    auto paired = pair(CLEAR_LEAK);
-    ASSERT_NE(paired, nullptr);
-    paired->setState("alarm", true);
-    handler->forgetDevice(paired->id());
+    auto saved = pair(CLEAR_LEAK);
+    ASSERT_NE(saved, nullptr);
+    saved->setState("alarm", true);
 
-    handler->restoreDevice(*paired);
+    restart({saved});
 
+    eventually([&] {
+        handler->poll();
+        return stateOf(idOf(CLEAR_LEAK), "alarm").has_value();
+    });
+    EXPECT_EQ(stateOf(idOf(CLEAR_LEAK), "alarm"), nlohmann::json(false));
+}
+
+TEST_F(ZigbeeHandlerFlowTest, RestartDoesNotReadUntilTheAddressIsChecked) {
+    fake.addDevice(CLEAR_LEAK);
+    auto saved = pair(CLEAR_LEAK);
+    ASSERT_NE(saved, nullptr);
+
+    restart({saved});
+    std::this_thread::sleep_for(50ms);
+    EXPECT_EQ(zoneReadsSent(CLEAR_LEAK.nwkAddr), 0);
+
+    eventually([&] {
+        handler->poll();
+        return zoneReadsSent(CLEAR_LEAK.nwkAddr) == 1;
+    });
+}
+
+TEST_F(ZigbeeHandlerFlowTest, ZoneThatMovedIsReadWhereItIsNow) {
+    constexpr uint16_t kOldAddress = 0x7777;
+    fake.addDevice(ALARMED_LEAK);
+    auto saved = pair(ALARMED_LEAK);
+    ASSERT_NE(saved, nullptr);
+    saved->setState("networkAddress", static_cast<int>(kOldAddress));
+
+    restart({saved});
+
+    eventually([&] {
+        handler->poll();
+        return stateOf(idOf(ALARMED_LEAK), "alarm").has_value();
+    });
+    EXPECT_EQ(stateOf(idOf(ALARMED_LEAK), "alarm"), nlohmann::json(true));
+    EXPECT_EQ(zoneReadsSent(kOldAddress), 0) << "whatever's at the old address could answer for it";
+}
+
+TEST_F(ZigbeeHandlerFlowTest, OnlyZonesAreRead) {
+    fake.addDevice(CLEAR_LEAK);
+    auto light = pair(LIGHT);
+    auto leak = pair(CLEAR_LEAK);
+    ASSERT_NE(light, nullptr);
+    ASSERT_NE(leak, nullptr);
+
+    restart({light, leak});
+    eventually([&] {
+        handler->poll();
+        return zoneReadsSent(CLEAR_LEAK.nwkAddr) == 1;
+    });
+
+    EXPECT_EQ(zoneReadsSent(LIGHT.nwkAddr), 0);
+}
+
+TEST_F(ZigbeeHandlerFlowTest, AddingAPairedZoneDoesNotAskAgain) {
+    fake.addDevice(CLEAR_LEAK);
+    auto device = pair(CLEAR_LEAK);
+    ASSERT_NE(device, nullptr);
+    fake.clearSentFrames();
+
+    handler->restoreDevice(*device);  // What adding it does
+    handler->poll();
+    std::this_thread::sleep_for(50ms);
+
+    EXPECT_EQ(zoneReadsSent(CLEAR_LEAK.nwkAddr), 0);
+}
+
+TEST_F(ZigbeeHandlerFlowTest, ZoneIsReadWhenItAnnounces) {
+    fake.addDevice(CLEAR_LEAK);
+    auto saved = pair(CLEAR_LEAK);
+    ASSERT_NE(saved, nullptr);
+    handler->restoreDevice(*saved);
+    fake.clearSentFrames();
+
+    fake.announceDevice(CLEAR_LEAK);
+
+    eventually([&] { return zoneReadsSent(CLEAR_LEAK.nwkAddr) >= 1; });
     EXPECT_EQ(waitForState(idOf(CLEAR_LEAK), "alarm"), false);
 }
 
-TEST_F(ZigbeeHandlerFlowTest, RestartOnlyReadsDevicesWithAZone) {
-    auto paired = pair(LIGHT);
-    ASSERT_NE(paired, nullptr);
-    handler->forgetDevice(paired->id());
-    fake.clearSentFrames();
-
-    handler->restoreDevice(*paired);
-    std::this_thread::sleep_for(50ms);
-
-    for (const AirFrame& frame : airFrames(fake)) {
-        EXPECT_NE(frame.cluster, zcl::cluster::IAS_ZONE);
-    }
-}
-
-TEST_F(ZigbeeHandlerFlowTest, SleepingZoneKeepsWhatWasSavedAndOthersAreStillRead) {
-    handlerConfig["pairingReadTimeoutMs"] = 200;
-    handler->shutdown();
-    handler = makeHandler(fake);
-    ASSERT_TRUE(handler->initialize());
+TEST_F(ZigbeeHandlerFlowTest, ASleepingZoneIsHeardWhenItAnswersLater) {
     fake.addDevice(ALARMED_LEAK);
-    fake.addDevice(LEAK);
-    auto sleeping = pair(LEAK);
-    auto awake = pair(ALARMED_LEAK);
-    ASSERT_NE(sleeping, nullptr);
-    ASSERT_NE(awake, nullptr);
-    handler->forgetDevice(sleeping->id());
-    handler->forgetDevice(awake->id());
-
-    FakeZigbeeDevice asleep = LEAK;
-    asleep.ignoresReads = true;
-    fake.addDevice(asleep);
-    handler->restoreDevice(*sleeping);
-    handler->restoreDevice(*awake);
-
-    EXPECT_EQ(waitForState(idOf(ALARMED_LEAK), "alarm"), true);
-    EXPECT_FALSE(stateOf(idOf(LEAK), "alarm").has_value());
-}
-
-TEST_F(ZigbeeHandlerFlowTest, ShutdownDoesNotWaitForASleepingZone) {
-    handlerConfig["pairingReadTimeoutMs"] = 60000;
-    handler->shutdown();
-    handler = makeHandler(fake);
-    ASSERT_TRUE(handler->initialize());
-    fake.addDevice(LEAK);
-    auto sleeping = pair(LEAK);
-    ASSERT_NE(sleeping, nullptr);
-    handler->forgetDevice(sleeping->id());
-    FakeZigbeeDevice asleep = LEAK;
+    auto saved = pair(ALARMED_LEAK);
+    ASSERT_NE(saved, nullptr);
+    FakeZigbeeDevice asleep = ALARMED_LEAK;
     asleep.ignoresReads = true;
     fake.addDevice(asleep);
     fake.clearSentFrames();
 
-    handler->restoreDevice(*sleeping);
+    restart({saved});
+    uint8_t seq = 0;
     eventually([&] {
+        handler->poll();
         for (const AirFrame& frame : airFrames(fake)) {
             if (frame.cluster == zcl::cluster::IAS_ZONE && frame.zclCommand == zcl::global_cmd::READ_ATTRIBUTES) {
+                seq = frame.zclSeq;
                 return true;
             }
         }
         return false;
     });
+    EXPECT_FALSE(stateOf(idOf(ALARMED_LEAK), "alarm").has_value()) << "what was saved stays until then";
 
-    const auto start = std::chrono::steady_clock::now();
-    handler->shutdown();
-    EXPECT_LT(std::chrono::steady_clock::now() - start, 5s);
+    // It wakes, and answers. A real one's parent holds the request for it.
+    fake.sendZcl(ALARMED_LEAK.nwkAddr, 1, zcl::cluster::IAS_ZONE,
+                 {0x18, seq, zcl::global_cmd::READ_ATTRIBUTES_RSP, 0x02, 0x00, zcl::status::SUCCESS,
+                  zcl::datatype::BITMAP16, 0x01, 0x00});
+
+    EXPECT_EQ(waitForState(idOf(ALARMED_LEAK), "alarm"), true);
+}
+
+TEST_F(ZigbeeHandlerFlowTest, ALateAnswerForSomeoneElseIsStillAttributedToWhoSentIt) {
+    fake.addDevice(ALARMED_LEAK);
+    fake.addDevice(CLEAR_LEAK);
+    ASSERT_NE(pair(ALARMED_LEAK), nullptr);
+    ASSERT_NE(pair(CLEAR_LEAK), nullptr);
+
+    fake.sendZcl(CLEAR_LEAK.nwkAddr, 1, zcl::cluster::IAS_ZONE,
+                 {0x18, 0x55, zcl::global_cmd::READ_ATTRIBUTES_RSP, 0x02, 0x00, zcl::status::SUCCESS,
+                  zcl::datatype::BITMAP16, 0x00, 0x00});
+
+    EXPECT_EQ(waitForState(idOf(CLEAR_LEAK), "alarm"), false);
+    EXPECT_FALSE(stateOf(idOf(ALARMED_LEAK), "alarm").has_value());
 }
 
 TEST_F(ZigbeeHandlerFlowTest, PairingKnowsWhetherADoorIsOpenAlready) {
