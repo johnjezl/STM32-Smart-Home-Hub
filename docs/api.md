@@ -411,7 +411,7 @@ Returns details for a specific device.
   "id": "light1",
   "name": "Living Room Light",
   "type": "dimmer",
-  "room": "Living Room",
+  "room": "living_room",
   "protocol": "zigbee",
   "online": true,
   "state": {
@@ -440,7 +440,7 @@ Create a new device.
   "type": "dimmer",
   "name": "Office Light",
   "protocol": "local",
-  "room": "Office",
+  "room": "office",
   "config": {}
 }
 ```
@@ -450,16 +450,18 @@ Create a new device.
 | type | string | Yes | Device type (switch, dimmer, color_light, etc.) |
 | name | string | Yes | Device display name |
 | protocol | string | No | Protocol (local, zigbee, mqtt, http). Default: local |
-| room | string | No | Room to assign device to |
+| room | string | No | The room's id, or its name. Stored as the id, so renaming the room keeps the device |
 | config | object | No | Protocol-specific configuration |
 
-**Response (200 OK):**
+**Response (201 Created):**
 ```json
 {
   "success": true,
   "id": "device-abc123"
 }
 ```
+
+**Response (400 Bad Request):** a field is missing, or `room` names no room. A name shared by several rooms is refused too: give the id.
 
 ---
 
@@ -499,7 +501,7 @@ Properties vary by device type:
 
 ### PUT /api/devices/{id}/settings
 
-Update device settings (name, room assignment).
+Update device settings (name, room assignment). `room` works as for `POST /api/devices`, and `""` takes the device out of its room. A refused request changes nothing.
 
 **Parameters:**
 - `id` (path) - Device identifier
@@ -508,7 +510,7 @@ Update device settings (name, room assignment).
 ```json
 {
   "name": "New Device Name",
-  "room": "Bedroom"
+  "room": "bedroom"
 }
 ```
 
@@ -633,9 +635,11 @@ Confirm and add a discovered Zigbee device.
 ```json
 {
   "name": "Kitchen Light",
-  "room": "Kitchen"
+  "room": "kitchen"
 }
 ```
+
+`room` works as for `POST /api/devices`.
 
 **Response (200 OK):**
 ```json

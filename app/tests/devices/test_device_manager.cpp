@@ -991,6 +991,11 @@ TEST(DeviceManagerRooms, ARoomGivenByNameIsStoredById) {
         EXPECT_EQ(manager.roomIdFor("Den"), "den");
         EXPECT_EQ(manager.roomIdFor(""), "");
         EXPECT_FALSE(manager.roomIdFor("Attic"));
+
+        // A name two rooms have is a guess, so it's refused
+        ASSERT_TRUE(manager.addRoom("den-2", "Den"));
+        EXPECT_FALSE(manager.roomIdFor("Den"));
+        EXPECT_EQ(manager.roomIdFor("den-2"), "den-2");
         manager.shutdown();
     }
     std::remove(path.c_str());

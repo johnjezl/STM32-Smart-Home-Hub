@@ -336,12 +336,17 @@ std::optional<std::string> DeviceManager::roomIdFor(const std::string& idOrName)
     if (roomExists(idOrName)) {
         return idOrName;
     }
+    // Names don't have to be unique, and guessing between rooms would put the device in the wrong one
+    std::optional<std::string> found;
     for (const auto& [id, name] : getAllRooms()) {
         if (name == idOrName) {
-            return id;
+            if (found) {
+                return std::nullopt;
+            }
+            found = id;
         }
     }
-    return std::nullopt;
+    return found;
 }
 
 std::vector<DevicePtr> DeviceManager::getDevicesByType(DeviceType type) const {
@@ -1087,9 +1092,11 @@ void DeviceManager::migrateRoomNames() {
         }
         // A value that names no room is left alone: if the rooms couldn't be read, clearing
         // would lose every device's room
+        // Nor one that several rooms have, which would be a guess
         const auto named = std::find_if(rooms.begin(), rooms.end(),
                                         [&](const auto& r) { return r.second == room; });
-        if (named == rooms.end()) {
+        if (named == rooms.end() ||
+            std::count_if(rooms.begin(), rooms.end(), [&](const auto& r) { return r.second == room; }) > 1) {
             continue;
         }
         const std::string roomId = named->first;

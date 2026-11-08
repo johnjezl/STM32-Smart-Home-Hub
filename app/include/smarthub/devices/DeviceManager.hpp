@@ -110,7 +110,7 @@ public:
 
     /**
      * The id of the room this names, by its id or its name. An empty string for no room, and
-     * nothing if it names no room. Devices store the id, so renaming a room keeps its devices.
+     * nothing if it names no room, or a name several rooms have. Devices store the id, so renaming a room keeps its devices.
      */
     std::optional<std::string> roomIdFor(const std::string& idOrName) const;
 

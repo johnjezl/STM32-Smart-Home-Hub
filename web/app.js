@@ -535,7 +535,8 @@ class SmartHubApp {
     // A device's room, by name, for showing
     roomNameOf(roomId) {
         if (!roomId) return 'No room';
-        return this.rooms.find(r => r.id === roomId)?.name || 'No room';
+        // A room that's gone, which shouldn't be mistaken for having none
+        return this.rooms.find(r => r.id === roomId)?.name || 'Unknown room';
     }
 
     // Keeps an open room detail current as readings arrive, and closes it if the room was deleted
