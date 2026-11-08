@@ -1383,3 +1383,7 @@ body:not(.is-admin) .admin-only {
         align-items: stretch;
     }
 }
+
+.account-section .btn {
+    width: auto;
+}
