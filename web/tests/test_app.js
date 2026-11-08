@@ -568,6 +568,64 @@ TestRunner.describe('Brightness Control', () => {
     });
 });
 
+// The dashboard itself, with a stand-in page and timers. Node only, as it reads app.js.
+if (typeof window === 'undefined' && typeof require !== 'undefined') {
+    TestRunner.describe('Zigbee Pairing', () => {
+        const loadApp = () => {
+            const fs = require('fs');
+            const path = require('path');
+            const vm = require('vm');
+
+            const timers = new Map();
+            let nextTimer = 1;
+            const element = () => ({ classList: { add() {}, remove() {} } });
+            const context = {
+                console,
+                document: { getElementById: element, addEventListener() {} },
+                setTimeout: (fn, ms) => { timers.set(nextTimer, { fn, ms }); return nextTimer++; },
+                clearTimeout: (id) => { timers.delete(id); },
+                setInterval: () => nextTimer++,
+                clearInterval: () => {},
+            };
+            const source = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+            const SmartHubApp = vm.runInNewContext(`${source}\n;SmartHubApp`, context);
+
+            // Not constructed, as the constructor sets up the whole page
+            const app = Object.create(SmartHubApp.prototype);
+            app.requests = [];
+            app.api = async (url, options = {}) => {
+                app.requests.push(`${options.method || 'GET'} ${url}`);
+                return { ok: true, json: async () => ({}) };
+            };
+            app.showToast = () => {};
+            return { app, timers };
+        };
+
+        TestRunner.it('should not let an old auto-stop end a new pairing', async () => {
+            const { app, timers } = loadApp();
+            await app.startZigbeePairing();
+            await app.stopZigbeePairing();
+            await app.startZigbeePairing();
+
+            // Only the second pairing's auto-stop is left
+            const autoStops = [...timers.values()].filter(t => t.ms === 60000);
+            TestRunner.assertEqual(autoStops.length, 1, 'Auto-stop timers:');
+            TestRunner.assertTrue(app.pairingActive);
+        });
+
+        TestRunner.it('should stop pairing after a minute', async () => {
+            const { app, timers } = loadApp();
+            await app.startZigbeePairing();
+            const autoStop = [...timers.values()].find(t => t.ms === 60000);
+            TestRunner.assertDefined(autoStop);
+
+            await autoStop.fn();
+            TestRunner.assertFalse(app.pairingActive);
+            TestRunner.assertEqual(app.requests.filter(r => r === 'DELETE /api/zigbee/permit-join').length, 1);
+        });
+    });
+}
+
 // Run tests if in browser or Node.js
 if (typeof window !== 'undefined') {
     window.addEventListener('DOMContentLoaded', () => {

@@ -114,6 +114,17 @@ std::vector<AirFrame> airFrames(const FakeZnpCoordinator& fake) {
     return out;
 }
 
+// Just the commands sent, without the reads and reporting setup that pairing sends meanwhile
+std::vector<AirFrame> commandFrames(const FakeZnpCoordinator& fake) {
+    std::vector<AirFrame> out;
+    for (const auto& frame : airFrames(fake)) {
+        if (frame.zclFrameControl & zcl::frame_ctrl::CLUSTER_SPECIFIC) {
+            out.push_back(frame);
+        }
+    }
+    return out;
+}
+
 std::unique_ptr<ZigbeeCoordinator> coordinatorFor(FakeZnpCoordinator& fake) {
     return std::make_unique<ZigbeeCoordinator>(
         std::make_unique<ZnpTransport>(fake.createSerialPort(), "fake"));
@@ -521,7 +532,7 @@ TEST_F(ZigbeeHandlerFlowTest, CommandsGoToTheEndpointWithTheCluster) {
 
     ASSERT_TRUE(handler->sendCommand(idOf(MULTI_ENDPOINT_LIGHT), "on", {{"on", true}}));
 
-    auto frames = airFrames(fake);
+    auto frames = commandFrames(fake);
     ASSERT_EQ(frames.size(), 1u);
     EXPECT_EQ(frames[0].endpoint, 11);
 }
@@ -539,7 +550,7 @@ TEST_F(ZigbeeHandlerFlowTest, EndpointIsChosenByDeviceType) {
     }
     fake.clearSentFrames();
     ASSERT_TRUE(handler->sendCommand(idOf(LIGHT_WITH_SENSOR), "on", {{"on", true}}));
-    auto frames = airFrames(fake);
+    auto frames = commandFrames(fake);
     ASSERT_EQ(frames.size(), 1u);
     EXPECT_EQ(frames[0].endpoint, 2);
 }
@@ -634,9 +645,30 @@ TEST_F(ZigbeeHandlerFlowTest, RejoiningAtANewAddressRestartsPairing) {
     ASSERT_TRUE(eventually([&] { return discoveredCount() == 1; }, 10s));
     fake.clearSentFrames();
     ASSERT_TRUE(handler->sendCommand(idOf(moved), "on", {{"on", true}}));
-    auto frames = airFrames(fake);
+    auto frames = commandFrames(fake);
     ASSERT_EQ(frames.size(), 1u);
     EXPECT_EQ(frames[0].nwkAddr, 0xBEEF);
+}
+
+TEST_F(ZigbeeHandlerFlowTest, AnnouncingAgainUsesTheFreshEndpointList) {
+    // It announces with one endpoint, then again with a light on a second, as after a firmware
+    // update. Pairing has to use the second answer, not the list it already has.
+    FakeZigbeeDevice before{MULTI_ENDPOINT_LIGHT.nwkAddr, MULTI_ENDPOINT_LIGHT.ieeeAddr,
+                            {{1, {zcl::cluster::BASIC}}}};
+    fake.addDevice(before);
+    fake.holdDescriptor(before.nwkAddr, 1);
+    fake.announceDevice(before);
+    ASSERT_TRUE(fake.waitForSent(ZnpSubsystem::ZDO, cmd::zdo::SIMPLE_DESC_REQ, 1));
+
+    // Its first answer is held back, so the old list's only endpoint is still being asked about
+    fake.addDevice(MULTI_ENDPOINT_LIGHT);
+    fake.announceDevice(MULTI_ENDPOINT_LIGHT);
+    ASSERT_TRUE(fake.waitForSent(ZnpSubsystem::ZDO, cmd::zdo::ACTIVE_EP_REQ, 2));
+    fake.releaseDescriptors();
+
+    ASSERT_TRUE(eventually([&] { return discoveredCount() == 1; }, 10s));
+    std::lock_guard<std::mutex> lock(mutex);
+    EXPECT_EQ(discovered[0]->type(), DeviceType::Dimmer);
 }
 
 TEST_F(ZigbeeHandlerFlowTest, RejoiningKeepsAnotherDevicesClaimOnTheOldAddress) {
@@ -747,7 +779,7 @@ TEST_F(ZigbeeHandlerFlowTest, RestoredDeviceCanBeCommandedBeforeItReports) {
 
     ASSERT_TRUE(handler->sendCommand(idOf(MULTI_ENDPOINT_LIGHT), "on", {{"on", true}}));
 
-    auto frames = airFrames(fake);
+    auto frames = commandFrames(fake);
     ASSERT_EQ(frames.size(), 1u);
     EXPECT_EQ(frames[0].endpoint, 11);
     EXPECT_EQ(frames[0].nwkAddr, MULTI_ENDPOINT_LIGHT.nwkAddr);
@@ -759,7 +791,7 @@ TEST_F(ZigbeeHandlerFlowTest, RestoredDeviceSavedByAnOlderBuildUsesTheDefaultEnd
 
     ASSERT_TRUE(handler->sendCommand(idOf(LIGHT), "on", {{"on", true}}));
 
-    auto frames = airFrames(fake);
+    auto frames = commandFrames(fake);
     ASSERT_EQ(frames.size(), 1u);
     EXPECT_EQ(frames[0].endpoint, 1);
 }
@@ -789,7 +821,7 @@ TEST_F(ZigbeeHandlerFlowTest, DeviceAddedByHandFindsItsNetworkAddress) {
 
     fake.clearSentFrames();
     ASSERT_TRUE(handler->sendCommand("my-lamp", "on", {{"on", true}}));
-    auto frames = airFrames(fake);
+    auto frames = commandFrames(fake);
     ASSERT_EQ(frames.size(), 1u);
     EXPECT_EQ(frames[0].nwkAddr, LIGHT.nwkAddr);
 }
@@ -831,7 +863,7 @@ TEST_F(ZigbeeHandlerFlowTest, SavedAddressIsCheckedAndFollowedIfOutOfDate) {
     EXPECT_EQ(waitForState(idOf(LIGHT), "networkAddress"), LIGHT.nwkAddr);
     fake.clearSentFrames();
     ASSERT_TRUE(handler->sendCommand(idOf(LIGHT), "on", {{"on", true}}));
-    auto frames = airFrames(fake);
+    auto frames = commandFrames(fake);
     ASSERT_EQ(frames.size(), 1u);
     EXPECT_EQ(frames[0].nwkAddr, LIGHT.nwkAddr);
 }
@@ -862,7 +894,7 @@ TEST_F(ZigbeeHandlerFlowTest, SavedDeviceWithAnAddressNowUsedElsewhereGetsNoComm
     EXPECT_EQ(waitForState(idOf(LIGHT), "networkAddress"), LIGHT.nwkAddr);
     fake.clearSentFrames();
     ASSERT_TRUE(handler->sendCommand(idOf(LIGHT), "on", {{"on", true}}));
-    auto frames = airFrames(fake);
+    auto frames = commandFrames(fake);
     ASSERT_GE(frames.size(), 1u);
     EXPECT_EQ(frames.back().nwkAddr, LIGHT.nwkAddr);
 }
@@ -948,7 +980,7 @@ TEST_F(ZigbeeHandlerFlowTest, RestoredDeviceAnnouncingIsNotANewDevice) {
 
     fake.clearSentFrames();
     ASSERT_TRUE(handler->sendCommand(idOf(MULTI_ENDPOINT_LIGHT), "on", {{"on", true}}));
-    auto frames = airFrames(fake);
+    auto frames = commandFrames(fake);
     ASSERT_EQ(frames.size(), 1u);
     EXPECT_EQ(frames[0].endpoint, 11);
 }
@@ -975,7 +1007,7 @@ TEST_F(ZigbeeHandlerFlowTest, RestoredDeviceThatMovedIsFollowed) {
     EXPECT_EQ(waitForState(idOf(LIGHT), "networkAddress"), 0x4242);
     fake.clearSentFrames();
     ASSERT_TRUE(handler->sendCommand(idOf(LIGHT), "on", {{"on", true}}));
-    auto frames = airFrames(fake);
+    auto frames = commandFrames(fake);
     ASSERT_EQ(frames.size(), 1u);
     EXPECT_EQ(frames[0].nwkAddr, 0x4242);
 }
@@ -1876,7 +1908,7 @@ TEST_F(ZigbeeHandlerFlowTest, EachCommandGoesToTheEndpointWithItsCluster) {
     const auto endpointOf = [&](const char* command, const nlohmann::json& params) {
         fake.clearSentFrames();
         EXPECT_TRUE(handler->sendCommand(id, command, params)) << command;
-        auto frames = airFrames(fake);
+        auto frames = commandFrames(fake);
         EXPECT_EQ(frames.size(), 1u) << command;
         return frames.empty() ? 0 : frames[0].endpoint;
     };
@@ -1972,7 +2004,7 @@ TEST_F(ZigbeeHandlerFlowTest, EndpointsSurviveARestart) {
 
     fake.clearSentFrames();
     ASSERT_TRUE(handler->sendCommand(idOf(SPLIT_LIGHT), "colorTemp", {{"colorTemp", 300}}));
-    auto frames = airFrames(fake);
+    auto frames = commandFrames(fake);
     ASSERT_EQ(frames.size(), 1u);
     EXPECT_EQ(frames[0].endpoint, 2);
 }
@@ -1981,7 +2013,7 @@ TEST_F(ZigbeeHandlerFlowTest, DeviceSavedWithoutClusterEndpointsUsesItsEndpoint)
     handler->restoreDevice(*savedDevice(MULTI_ENDPOINT_LIGHT, 11));
     fake.clearSentFrames();
     ASSERT_TRUE(handler->sendCommand(idOf(MULTI_ENDPOINT_LIGHT), "brightness", {{"brightness", 10}}));
-    auto frames = airFrames(fake);
+    auto frames = commandFrames(fake);
     ASSERT_EQ(frames.size(), 1u);
     EXPECT_EQ(frames[0].endpoint, 11);
 }
@@ -1993,7 +2025,7 @@ TEST_F(ZigbeeHandlerFlowTest, BadSavedClusterEndpointsAreIgnored) {
     handler->restoreDevice(*saved);
     fake.clearSentFrames();
     ASSERT_TRUE(handler->sendCommand(idOf(LIGHT), "on", {{"on", true}}));
-    auto frames = airFrames(fake);
+    auto frames = commandFrames(fake);
     ASSERT_EQ(frames.size(), 1u);
     EXPECT_EQ(frames[0].endpoint, 1);
 }
@@ -2009,7 +2041,7 @@ TEST_F(ZigbeeHandlerFlowTest, EndpointThatDoesTheWorkComesBeforeAnEarlierOneWith
 
     ASSERT_TRUE(handler->sendCommand(idOf(light), "on", {{"on", true}}));
 
-    auto frames = airFrames(fake);
+    auto frames = commandFrames(fake);
     ASSERT_EQ(frames.size(), 1u);
     EXPECT_EQ(frames[0].endpoint, 11);
 
@@ -2063,7 +2095,7 @@ TEST_F(ZigbeeHandlerFlowTest, RepairingWithAnEndpointSilentKeepsWhatItKnew) {
 
     fake.clearSentFrames();
     ASSERT_TRUE(handler->sendCommand(idOf(SPLIT_LIGHT), "colorTemp", {{"colorTemp", 300}}));
-    auto frames = airFrames(fake);
+    auto frames = commandFrames(fake);
     ASSERT_GE(frames.size(), 1u);
     EXPECT_EQ(frames.back().endpoint, 2);
     fake.releaseDescriptors();
@@ -2081,7 +2113,7 @@ TEST_F(ZigbeeHandlerFlowTest, RepairingWithEveryEndpointAnsweringReplacesWhatItK
 
     fake.clearSentFrames();
     ASSERT_TRUE(handler->sendCommand(idOf(TWO_GANG), "on", {{"on", true}}));
-    auto frames = airFrames(fake);
+    auto frames = commandFrames(fake);
     ASSERT_GE(frames.size(), 1u);
     EXPECT_EQ(frames.back().endpoint, 1);
 }
@@ -2112,7 +2144,7 @@ TEST_F(ZigbeeHandlerFlowTest, RepairingWithAGangSilentKeepsTheGangs) {
 
     fake.clearSentFrames();
     ASSERT_TRUE(handler->sendCommand(idOf(TWO_GANG), "on", {{"on", true}}));
-    auto frames = airFrames(fake);
+    auto frames = commandFrames(fake);
     ASSERT_GE(frames.size(), 1u);
     EXPECT_EQ(frames.back().endpoint, 1) << "still the first gang";
     fake.releaseDescriptors();
@@ -2135,7 +2167,7 @@ TEST_F(ZigbeeHandlerFlowTest, TwoGangSwitchIsOneDeviceUsingTheFirstGang) {
     fake.clearSentFrames();
 
     ASSERT_TRUE(handler->sendCommand(idOf(TWO_GANG), "on", {{"on", true}}));
-    auto frames = airFrames(fake);
+    auto frames = commandFrames(fake);
     ASSERT_EQ(frames.size(), 1u);
     EXPECT_EQ(frames[0].endpoint, 1);
 
@@ -2393,7 +2425,7 @@ protected:
 TEST_F(ZigbeeCommandTest, OnReachesTheRadio) {
     ASSERT_TRUE(handler->sendCommand(idOf(LIGHT), "on", {{"on", true}}));
 
-    auto frames = airFrames(fake);
+    auto frames = commandFrames(fake);
     ASSERT_EQ(frames.size(), 1u);
     EXPECT_EQ(frames[0].nwkAddr, LIGHT.nwkAddr);
     EXPECT_EQ(frames[0].endpoint, 1);
@@ -2405,7 +2437,7 @@ TEST_F(ZigbeeCommandTest, OnReachesTheRadio) {
 TEST_F(ZigbeeCommandTest, OffReachesTheRadio) {
     ASSERT_TRUE(handler->sendCommand(idOf(LIGHT), "off", {{"on", false}}));
 
-    auto frames = airFrames(fake);
+    auto frames = commandFrames(fake);
     ASSERT_EQ(frames.size(), 1u);
     EXPECT_EQ(frames[0].zclCommand, zcl::cmd::onoff::OFF);
 }
@@ -2413,7 +2445,7 @@ TEST_F(ZigbeeCommandTest, OffReachesTheRadio) {
 TEST_F(ZigbeeCommandTest, CommandUsesTheDevicesOwnEndpoint) {
     ASSERT_TRUE(handler->sendCommand(idOf(PLUG), "on", {{"on", true}}));
 
-    auto frames = airFrames(fake);
+    auto frames = commandFrames(fake);
     ASSERT_EQ(frames.size(), 1u);
     EXPECT_EQ(frames[0].nwkAddr, PLUG.nwkAddr);
     EXPECT_EQ(frames[0].endpoint, 3);
@@ -2422,7 +2454,7 @@ TEST_F(ZigbeeCommandTest, CommandUsesTheDevicesOwnEndpoint) {
 TEST_F(ZigbeeCommandTest, BrightnessSendsMoveToLevel) {
     ASSERT_TRUE(handler->sendCommand(idOf(LIGHT), "brightness", {{"brightness", 50}}));
 
-    auto frames = airFrames(fake);
+    auto frames = commandFrames(fake);
     ASSERT_EQ(frames.size(), 1u);
     EXPECT_EQ(frames[0].cluster, zcl::cluster::LEVEL_CONTROL);
     EXPECT_EQ(frames[0].zclCommand, zcl::cmd::level::MOVE_TO_LEVEL_ONOFF);

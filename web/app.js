@@ -1204,8 +1204,11 @@ class SmartHubApp {
                 // Start polling for discovered devices
                 this.pairingPollInterval = setInterval(() => this.pollPendingDevices(), 2000);
 
-                // Auto-stop after 60 seconds
-                setTimeout(() => {
+                // Auto-stop after 60 seconds. Kept, so stopping can cancel it: otherwise it
+                // would end a pairing started again within the minute.
+                clearTimeout(this.pairingStopTimer);
+                this.pairingStopTimer = setTimeout(() => {
+                    this.pairingStopTimer = null;
                     if (this.pairingActive) {
                         this.stopZigbeePairing();
                     }
@@ -1219,6 +1222,10 @@ class SmartHubApp {
     }
 
     async stopZigbeePairing() {
+        if (this.pairingStopTimer) {
+            clearTimeout(this.pairingStopTimer);
+            this.pairingStopTimer = null;
+        }
         if (this.pairingPollInterval) {
             clearInterval(this.pairingPollInterval);
             this.pairingPollInterval = null;

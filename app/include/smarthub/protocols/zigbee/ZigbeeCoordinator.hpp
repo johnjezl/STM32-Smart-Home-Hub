@@ -36,6 +36,7 @@ struct ZigbeeDeviceInfo {
     std::optional<uint16_t> zoneType;   // IAS Zone Type, for a device with that cluster
     std::optional<uint16_t> zoneStatus; // IAS Zone Status when pairing read it
     std::vector<uint8_t> endpoints;
+    int endpointReports = 0;          // Active Endpoints answers, so a fresh one can be told apart
     int failedDescriptors = 0;        // Simple descriptor requests the device has refused
     uint64_t lastSeen = 0;            // Unix timestamp
     bool available = false;
@@ -74,6 +75,8 @@ using DeviceLeftCallback = std::function<void(uint64_t ieeeAddress)>;
 // A lookup found this device's address. changed is false if that's what was already known.
 using NetworkAddressCallback = std::function<void(uint16_t nwkAddr, uint64_t ieeeAddr, bool changed)>;
 using DeviceAnnouncedCallback = std::function<void(uint16_t nwkAddr, uint64_t ieeeAddr)>;
+/** A device's endpoints or descriptors changed, or it was dropped. Called without the device lock. */
+using DeviceInfoChangedCallback = std::function<void(uint64_t ieeeAddr)>;
 using AttributeReportCallback = std::function<void(uint16_t nwkAddr,
                                                     const ZclAttributeValue& attr)>;
 using CommandReceivedCallback = std::function<void(uint16_t nwkAddr, uint8_t endpoint,
@@ -308,6 +311,7 @@ public:
     void setDeviceAnnouncedCallback(DeviceAnnouncedCallback cb);
     void setAttributeReportCallback(AttributeReportCallback cb);
     void setCommandReceivedCallback(CommandReceivedCallback cb);
+    void setDeviceInfoChangedCallback(DeviceInfoChangedCallback cb);
 
     // ========================================================================
     // Network Info
@@ -330,6 +334,7 @@ private:
     void handleDeviceLeave(const ZnpFrame& frame);
     void handleIncomingMessage(const ZnpFrame& frame);
     void handleTcDeviceInd(const ZnpFrame& frame);
+    void notifyDeviceInfoChanged(uint64_t ieeeAddr);
     void handleActiveEpRsp(const ZnpFrame& frame);
     void handleSimpleDescRsp(const ZnpFrame& frame);
     void handleNwkAddrRsp(const ZnpFrame& frame);
@@ -381,6 +386,7 @@ private:
     DeviceAnnouncedCallback m_deviceAnnouncedCb;
     AttributeReportCallback m_attrReportCb;
     CommandReceivedCallback m_cmdReceivedCb;
+    DeviceInfoChangedCallback m_deviceInfoChangedCb;
     std::mutex m_callbackMutex;
 };
 
