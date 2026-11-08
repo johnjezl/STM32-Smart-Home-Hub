@@ -246,6 +246,9 @@ bool ZigbeeHandler::initialize() {
             onAttributeReport(nwkAddr, attr);
         });
 
+    // Pairing waits on these, rather than checking every so often
+    m_coordinator->setDeviceInfoChangedCallback([this](uint64_t) { notifyPairingChange(); });
+
     m_coordinator->setCommandReceivedCallback(
         [this](uint16_t nwkAddr, uint8_t endpoint, uint16_t cluster,
                uint8_t command, const std::vector<uint8_t>& payload) {
@@ -368,6 +371,8 @@ void ZigbeeHandler::lookUpNetworkAddress(uint64_t ieeeAddr) {
 }
 
 void ZigbeeHandler::onNetworkAddressFound(uint16_t nwkAddr, uint64_t ieeeAddr, bool changed) {
+    notifyPairingChange();
+
     const auto savedId = savedDeviceId(ieeeAddr);
     if (!savedId) {
         return;
@@ -728,6 +733,8 @@ bool ZigbeeHandler::loadDeviceDatabase(const std::string& path) {
 // ============================================================================
 
 void ZigbeeHandler::onDeviceAnnounced(uint16_t nwkAddr, uint64_t ieeeAddr) {
+    // It may have taken the address of a device being paired, which the coordinator then drops
+    notifyPairingChange();
     LOG_INFO("Zigbee device announced: nwk=0x%04X, ieee=0x%016" PRIX64, nwkAddr, ieeeAddr);
 
     // Devices announce when they power up, so this one may be nothing new
@@ -834,17 +841,28 @@ bool ZigbeeHandler::pairingStopped() {
     return m_stopPairing;
 }
 
+void ZigbeeHandler::notifyPairingChange() {
+    {
+        std::lock_guard<std::mutex> lock(m_pairingMutex);
+        ++m_pairingChanges;
+    }
+    m_pairingCv.notify_all();
+}
+
 ZigbeeHandler::PairingWait ZigbeeHandler::waitForPairing(uint64_t ieeeAddr, uint64_t attempt,
                                                          int timeoutMs,
                                                          const std::function<bool()>& ready) {
-    constexpr int POLL_MS = 100;
-
-    for (int elapsedMs = 0;; elapsedMs += POLL_MS) {
+    // Checks again only when the coordinator says something changed, rather than every so often
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
+    for (;;) {
+        uint64_t seen;
+        {
+            std::lock_guard<std::mutex> lock(m_pairingMutex);
+            seen = m_pairingChanges;
+        }
+        // Not under the lock, as it asks the coordinator, whose callbacks take this lock
         if (ready()) {
             return PairingWait::Ready;
-        }
-        if (elapsedMs >= timeoutMs) {
-            return PairingWait::TimedOut;
         }
 
         std::unique_lock<std::mutex> lock(m_pairingMutex);
@@ -853,11 +871,17 @@ ZigbeeHandler::PairingWait ZigbeeHandler::waitForPairing(uint64_t ieeeAddr, uint
             return m_stopPairing || task == m_pairingTasks.end() ||
                    task->second.attempt != attempt;
         };
-        m_pairingCv.wait_for(lock, std::chrono::milliseconds(POLL_MS), interrupted);
+        const bool woken = m_pairingCv.wait_until(lock, deadline, [&] {
+            return interrupted() || m_pairingChanges != seen;
+        });
         if (interrupted()) {
             auto task = m_pairingTasks.find(ieeeAddr);
             bool restarted = !m_stopPairing && task != m_pairingTasks.end();
             return restarted ? PairingWait::Restarted : PairingWait::Stopped;
+        }
+        if (!woken) {
+            lock.unlock();
+            return ready() ? PairingWait::Ready : PairingWait::TimedOut;
         }
     }
 }
@@ -879,14 +903,18 @@ uint64_t ZigbeeHandler::pairDevice(uint64_t ieeeAddr) {
             attempt = task->second.attempt;
         }
 
-        // Which endpoints does it have?
+        // Which endpoints does it have? Wait for the answer to this request, rather than taking
+        // the list from an earlier one, as a device that announced again may have changed, say
+        // after a firmware update.
+        const auto known = m_coordinator->getDevice(ieeeAddr);
+        const int reportsBefore = known ? known->endpointReports : 0;
         m_coordinator->requestDeviceInfo(nwkAddr);
         std::vector<uint8_t> endpoints;
         PairingWait result = waitForPairing(ieeeAddr, attempt, m_pairingTimeoutMs, [&] {
             auto info = m_coordinator->getDevice(ieeeAddr);
             if (!info) return true;  // It left
             endpoints = info->endpoints;
-            return !endpoints.empty();
+            return info->endpointReports > reportsBefore && !endpoints.empty();
         });
         if (result == PairingWait::Stopped) return attempt;
         if (result == PairingWait::Restarted) continue;
@@ -1324,6 +1352,8 @@ void ZigbeeHandler::finishPairing(uint64_t ieeeAddr) {
 }
 
 void ZigbeeHandler::onDeviceLeft(uint64_t ieeeAddr) {
+    notifyPairingChange();
+
     LOG_INFO("Zigbee device left: ieee=0x%016" PRIX64, ieeeAddr);
 
     std::string deviceId;

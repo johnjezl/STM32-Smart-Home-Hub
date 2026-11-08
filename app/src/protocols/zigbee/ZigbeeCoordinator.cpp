@@ -786,6 +786,18 @@ void ZigbeeCoordinator::setDeviceJoinedCallback(DeviceJoinedCallback cb) {
     m_deviceJoinedCb = std::move(cb);
 }
 
+void ZigbeeCoordinator::setDeviceInfoChangedCallback(DeviceInfoChangedCallback cb) {
+    std::lock_guard<std::mutex> lock(m_callbackMutex);
+    m_deviceInfoChangedCb = std::move(cb);
+}
+
+void ZigbeeCoordinator::notifyDeviceInfoChanged(uint64_t ieeeAddr) {
+    std::lock_guard<std::mutex> lock(m_callbackMutex);
+    if (m_deviceInfoChangedCb) {
+        m_deviceInfoChangedCb(ieeeAddr);
+    }
+}
+
 void ZigbeeCoordinator::setDeviceLeftCallback(DeviceLeftCallback cb) {
     std::lock_guard<std::mutex> lock(m_callbackMutex);
     m_deviceLeftCb = std::move(cb);
@@ -1032,6 +1044,7 @@ void ZigbeeCoordinator::handleActiveEpRsp(const ZnpFrame& frame) {
     }
 
     // Update device with endpoints
+    std::optional<uint64_t> updated;
     {
         std::lock_guard<std::mutex> lock(m_deviceMutex);
         auto it = m_nwkToIeee.find(nwkAddr);
@@ -1039,8 +1052,13 @@ void ZigbeeCoordinator::handleActiveEpRsp(const ZnpFrame& frame) {
             auto devIt = m_devices.find(it->second);
             if (devIt != m_devices.end()) {
                 devIt->second.endpoints = endpoints;
+                devIt->second.endpointReports++;
+                updated = it->second;
             }
         }
+    }
+    if (updated) {
+        notifyDeviceInfoChanged(*updated);
     }
 }
 
@@ -1059,13 +1077,20 @@ void ZigbeeCoordinator::handleSimpleDescRsp(const ZnpFrame& frame) {
     if (status != 0) {
         LOG_WARN("Simple descriptor request failed for 0x%04X: status=%d", nwkAddr, status);
 
-        std::lock_guard<std::mutex> lock(m_deviceMutex);
-        auto it = m_nwkToIeee.find(nwkAddr);
-        if (it != m_nwkToIeee.end()) {
-            auto devIt = m_devices.find(it->second);
-            if (devIt != m_devices.end()) {
-                devIt->second.failedDescriptors++;
+        std::optional<uint64_t> refused;
+        {
+            std::lock_guard<std::mutex> lock(m_deviceMutex);
+            auto it = m_nwkToIeee.find(nwkAddr);
+            if (it != m_nwkToIeee.end()) {
+                auto devIt = m_devices.find(it->second);
+                if (devIt != m_devices.end()) {
+                    devIt->second.failedDescriptors++;
+                    refused = it->second;
+                }
             }
+        }
+        if (refused) {
+            notifyDeviceInfoChanged(*refused);
         }
         return;
     }
@@ -1109,6 +1134,7 @@ void ZigbeeCoordinator::handleSimpleDescRsp(const ZnpFrame& frame) {
     }
 
     // Update device with cluster info
+    std::optional<uint64_t> described;
     {
         std::lock_guard<std::mutex> lock(m_deviceMutex);
         auto it = m_nwkToIeee.find(nwkAddr);
@@ -1117,10 +1143,14 @@ void ZigbeeCoordinator::handleSimpleDescRsp(const ZnpFrame& frame) {
             if (devIt != m_devices.end()) {
                 devIt->second.inClusters[endpoint] = inClusters;
                 devIt->second.outClusters[endpoint] = outClusters;
+                described = it->second;
                 LOG_INFO("Updated device %016" PRIX64 " with clusters for endpoint %d",
                          it->second, endpoint);
             }
         }
+    }
+    if (described) {
+        notifyDeviceInfoChanged(*described);
     }
 }
 

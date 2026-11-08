@@ -121,6 +121,9 @@ private:
     void reportPairingFailure(uint64_t ieeeAddr, const std::string& message);
     bool pairingStopped();
 
+    // Wakes pairing waits: something they may be waiting for has changed
+    void notifyPairingChange();
+
     enum class PairingWait { Ready, TimedOut, Restarted, Stopped };
     PairingWait waitForPairing(uint64_t ieeeAddr, uint64_t attempt, int timeoutMs,
                                const std::function<bool()>& ready);
@@ -182,6 +185,7 @@ private:
     std::map<uint64_t, PairingTask> m_pairingTasks;
     std::mutex m_pairingMutex;
     std::condition_variable m_pairingCv;
+    uint64_t m_pairingChanges = 0;  // Goes up when a device's details change, waking pairing waits
     bool m_stopPairing = false;
     int m_pairingTimeoutMs = 30000;
     int m_pairingEndpointTimeoutMs = 5000;
