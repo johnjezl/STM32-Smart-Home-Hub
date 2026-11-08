@@ -12,6 +12,7 @@
 #include <smarthub/devices/types/MotionSensor.hpp>
 #include <smarthub/devices/types/ContactSensor.hpp>
 #include <smarthub/devices/types/AlarmSensor.hpp>
+#include <smarthub/devices/DeviceTypeRegistry.hpp>
 #include <cinttypes>
 #include <cstdint>
 #include <cctype>
@@ -323,6 +324,8 @@ void ZigbeeHandler::shutdown() {
         m_deviceEndpoints.clear();
         m_clusterEndpoints.clear();
         m_savedDevices.clear();
+        m_gangIds.clear();
+        m_gangAddresses.clear();
         m_addressChecks.clear();
         m_lastAddressLookup.clear();
         m_zoneAlarms.clear();
@@ -464,8 +467,17 @@ bool ZigbeeHandler::sendCommand(const std::string& deviceAddress,
         return false;
     }
 
-    // Look up IEEE address from device ID
+    // Look up IEEE address from device ID. A gang is an endpoint of a device.
+    std::optional<uint8_t> gangEndpoint;
     auto ieeeOpt = deviceIdToIeee(deviceAddress);
+    if (!ieeeOpt) {
+        std::lock_guard<std::mutex> lock(m_deviceMutex);
+        auto gang = m_gangAddresses.find(deviceAddress);
+        if (gang != m_gangAddresses.end()) {
+            ieeeOpt = gang->second.first;
+            gangEndpoint = gang->second.second;
+        }
+    }
     if (!ieeeOpt) {
         fail("Unknown device address: " + deviceAddress);
         return false;
@@ -486,12 +498,15 @@ bool ZigbeeHandler::sendCommand(const std::string& deviceAddress,
 
     // Route command based on type
     const uint16_t nwkAddr = deviceInfo->networkAddress;
+    const auto endpoint = [&](uint16_t cluster) {
+        return gangEndpoint ? *gangEndpoint : endpointFor(ieeeAddr, cluster);
+    };
     if (command == "on" || command == "off" || command == "toggle") {
-        return handleOnOffCommand(nwkAddr, endpointFor(ieeeAddr, zcl::cluster::ON_OFF), command);
+        return handleOnOffCommand(nwkAddr, endpoint(zcl::cluster::ON_OFF), command);
     } else if (command == "brightness" || command == "level") {
-        return handleBrightnessCommand(nwkAddr, endpointFor(ieeeAddr, zcl::cluster::LEVEL_CONTROL), params);
+        return handleBrightnessCommand(nwkAddr, endpoint(zcl::cluster::LEVEL_CONTROL), params);
     } else if (command == "color" || command == "colorTemp" || command == "hue" || command == "saturation") {
-        return handleColorCommand(nwkAddr, endpointFor(ieeeAddr, zcl::cluster::COLOR_CONTROL), params);
+        return handleColorCommand(nwkAddr, endpoint(zcl::cluster::COLOR_CONTROL), params);
     }
 
     fail("Unknown command: " + command);
@@ -537,8 +552,15 @@ void ZigbeeHandler::notifyAvailability(const std::string& deviceId,
         std::lock_guard<std::mutex> lock(m_callbackMutex);
         callback = m_availabilityCb;
     }
-    if (callback) {
-        callback(deviceId, availability);
+    if (!callback) {
+        return;
+    }
+    callback(deviceId, availability);
+    // Its gangs are the same device on the network
+    if (const auto ieeeAddr = deviceIdToIeee(deviceId)) {
+        for (const auto& gang : gangIdsOf(*ieeeAddr)) {
+            callback(gang, availability);
+        }
     }
 }
 
@@ -580,10 +602,11 @@ uint8_t ZigbeeHandler::endpointFor(uint64_t ieeeAddr, uint16_t cluster) const {
 }
 
 bool ZigbeeHandler::isOtherGang(uint64_t ieeeAddr, uint16_t cluster, uint8_t endpoint) const {
-    // Only what switches something. Two temperature endpoints aren't gangs, and a sensor may well
-    // send from the second. An endpoint only sending this cluster, like a button, isn't listed.
+    // Only what switches something, or raises an alarm. Two temperature endpoints aren't gangs,
+    // and a sensor may well send from the second. An endpoint only sending this cluster, like a
+    // button, isn't listed.
     if (cluster != zcl::cluster::ON_OFF && cluster != zcl::cluster::LEVEL_CONTROL &&
-        cluster != zcl::cluster::COLOR_CONTROL) {
+        cluster != zcl::cluster::COLOR_CONTROL && cluster != zcl::cluster::IAS_ZONE) {
         return false;
     }
     std::lock_guard<std::mutex> lock(m_deviceMutex);
@@ -614,13 +637,113 @@ void ZigbeeHandler::dismissLocked(uint64_t ieeeAddr) {
 }
 
 void ZigbeeHandler::clearPendingDevice() {
-    std::lock_guard<std::mutex> lock(m_deviceMutex);
-    if (m_pendingDevice) {
-        if (const auto ieeeAddr = parseIeeeAddress(m_pendingDevice->id())) {
-            dismissLocked(*ieeeAddr);
+    DevicePtr added;
+    uint64_t addedAddress = 0;
+    std::vector<uint8_t> gangs;
+    {
+        std::lock_guard<std::mutex> lock(m_deviceMutex);
+        if (m_pendingDevice) {
+            if (const auto ieeeAddr = parseIeeeAddress(m_pendingDevice->id())) {
+                if (m_savedDevices.count(*ieeeAddr) > 0) {
+                    // The wizard added it, so its other gangs come too
+                    added = m_pendingDevice;
+                    addedAddress = *ieeeAddr;
+                    gangs = gangEndpointsLocked(*ieeeAddr);
+                } else {
+                    dismissLocked(*ieeeAddr);
+                }
+            }
+        }
+        m_pendingDevice.reset();
+    }
+    if (added && !gangs.empty()) {
+        addGangs(added, addedAddress, gangs);
+    }
+}
+
+std::string ZigbeeHandler::gangId(const std::string& primaryId, uint8_t endpoint) {
+    return primaryId + "_" + std::to_string(endpoint);
+}
+
+std::vector<uint8_t> ZigbeeHandler::gangEndpointsLocked(uint64_t ieeeAddr) const {
+    std::vector<uint8_t> gangs;
+    auto device = m_clusterEndpoints.find(ieeeAddr);
+    if (device == m_clusterEndpoints.end()) {
+        return gangs;
+    }
+    // Several of what switches, or of alarm zones. The first is the device itself.
+    for (uint16_t cluster : {zcl::cluster::ON_OFF, zcl::cluster::IAS_ZONE}) {
+        auto found = device->second.find(cluster);
+        if (found == device->second.end()) {
+            continue;
+        }
+        for (size_t i = 1; i < found->second.size(); ++i) {
+            if (std::find(gangs.begin(), gangs.end(), found->second[i]) == gangs.end()) {
+                gangs.push_back(found->second[i]);
+            }
         }
     }
-    m_pendingDevice.reset();
+    return gangs;
+}
+
+std::optional<std::string> ZigbeeHandler::gangIdFor(uint64_t ieeeAddr, uint8_t endpoint) const {
+    std::lock_guard<std::mutex> lock(m_deviceMutex);
+    auto found = m_gangIds.find({ieeeAddr, endpoint});
+    if (found == m_gangIds.end()) {
+        return std::nullopt;
+    }
+    return found->second;
+}
+
+std::vector<std::string> ZigbeeHandler::gangIdsOf(uint64_t ieeeAddr) const {
+    std::lock_guard<std::mutex> lock(m_deviceMutex);
+    std::vector<std::string> ids;
+    for (auto it = m_gangIds.lower_bound({ieeeAddr, 0}); it != m_gangIds.end() && it->first.first == ieeeAddr;
+         ++it) {
+        ids.push_back(it->second);
+    }
+    return ids;
+}
+
+void ZigbeeHandler::addGangs(const DevicePtr& primary, uint64_t ieeeAddr,
+                             const std::vector<uint8_t>& endpoints) {
+    DeviceDiscoveredCallback callback;
+    {
+        std::lock_guard<std::mutex> lock(m_callbackMutex);
+        callback = m_discoveredCb;
+    }
+    if (!callback) {
+        return;
+    }
+
+    std::ostringstream address;
+    address << "0x" << std::hex << std::setfill('0') << std::setw(16) << ieeeAddr;
+    for (size_t i = 0; i < endpoints.size(); ++i) {
+        const uint8_t endpoint = endpoints[i];
+        const std::string id = gangId(primary->id(), endpoint);
+        if (gangIdFor(ieeeAddr, endpoint)) {
+            continue;  // Already kept
+        }
+        auto gang = DeviceTypeRegistry::instance().createFromTypeName(
+            primary->typeString(), id, primary->name() + " " + std::to_string(i + 2), "zigbee",
+            address.str(), primary->getConfig());
+        if (!gang) {
+            LOG_WARN("Couldn't make a device for endpoint %d of %s", endpoint, primary->id().c_str());
+            continue;
+        }
+        gang->setRoom(primary->room());
+        gang->setState("gangEndpoint", static_cast<int>(endpoint));
+        gang->setState("endpoint", static_cast<int>(endpoint));
+        for (const char* copied : {"zoneType", "networkAddress"}) {
+            const auto value = primary->getProperty(copied);
+            if (!value.is_null()) {
+                gang->setState(copied, value);
+            }
+        }
+        LOG_INFO("Adding endpoint %d of %s as %s", endpoint, primary->id().c_str(), id.c_str());
+        // The device manager adds it, which restores it here
+        callback(gang);
+    }
 }
 
 bool ZigbeeHandler::isConnected() const {
@@ -663,6 +786,23 @@ std::vector<std::string> ZigbeeHandler::getKnownDeviceAddresses() const {
 
 void ZigbeeHandler::restoreDevice(const IDevice& device) {
     const nlohmann::json state = device.getState();
+
+    // Another gang of a device the hub keeps: just which device and endpoint it is
+    if (state.contains("gangEndpoint") && state["gangEndpoint"].is_number_integer()) {
+        const int endpoint = state["gangEndpoint"].get<int>();
+        auto gangAddress = parseIeeeAddress(device.protocolAddress());
+        if (!gangAddress && state.contains("ieeeAddress") && state["ieeeAddress"].is_string()) {
+            gangAddress = parseIeeeAddress(state["ieeeAddress"].get<std::string>());
+        }
+        if (!gangAddress || endpoint < 1 || endpoint > 240) {
+            LOG_WARN("Zigbee gang %s has no usable address", device.id().c_str());
+            return;
+        }
+        std::lock_guard<std::mutex> lock(m_deviceMutex);
+        m_gangIds[{*gangAddress, static_cast<uint8_t>(endpoint)}] = device.id();
+        m_gangAddresses[device.id()] = {*gangAddress, static_cast<uint8_t>(endpoint)};
+        return;
+    }
 
     // Typed in by hand, or set when it paired, or part of the id when it paired on an older build
     std::optional<uint64_t> ieeeAddr = parseIeeeAddress(device.protocolAddress());
@@ -724,6 +864,12 @@ void ZigbeeHandler::restoreDevice(const IDevice& device) {
 
 void ZigbeeHandler::forgetDevice(const std::string& deviceId) {
     std::lock_guard<std::mutex> lock(m_deviceMutex);
+    auto gang = m_gangAddresses.find(deviceId);
+    if (gang != m_gangAddresses.end()) {
+        m_gangIds.erase(gang->second);
+        m_gangAddresses.erase(gang);
+        return;
+    }
     auto it = m_deviceIdToIeee.find(deviceId);
     if (it == m_deviceIdToIeee.end()) {
         return;
@@ -1470,10 +1616,15 @@ void ZigbeeHandler::onAttributeReport(uint16_t nwkAddr, const ZclAttributeValue&
         return;
     }
 
-    // On a device with several of something, like a two-gang switch, only the first is this device
+    // On a device with several of something, like a two-gang switch, the others are their own
+    // devices, if they were added
     if (isOtherGang(deviceInfo->ieeeAddress, attr.clusterId, attr.endpoint)) {
-        LOG_DEBUG("Ignoring report from endpoint %d of %s", attr.endpoint, deviceId.c_str());
-        return;
+        const auto gang = gangIdFor(deviceInfo->ieeeAddress, attr.endpoint);
+        if (!gang) {
+            LOG_DEBUG("Ignoring report from endpoint %d of %s", attr.endpoint, deviceId.c_str());
+            return;
+        }
+        deviceId = *gang;
     }
 
     // Convert attribute to state update - call callback for each property
@@ -1597,8 +1748,12 @@ void ZigbeeHandler::onCommandReceived(uint16_t nwkAddr, uint8_t endpoint,
     }
 
     if (isOtherGang(deviceInfo->ieeeAddress, cluster, endpoint)) {
-        LOG_DEBUG("Ignoring command from endpoint %d of %s", endpoint, deviceId.c_str());
-        return;
+        const auto gang = gangIdFor(deviceInfo->ieeeAddress, endpoint);
+        if (!gang) {
+            LOG_DEBUG("Ignoring command from endpoint %d of %s", endpoint, deviceId.c_str());
+            return;
+        }
+        deviceId = *gang;
     }
 
     // Handle specific cluster commands
@@ -1810,15 +1965,30 @@ void ZigbeeHandler::setupReporting(uint64_t ieeeAddr, uint16_t nwkAddr, DeviceTy
     const auto report = [&](uint16_t cluster, uint16_t attribute, uint8_t dataType, uint16_t minInterval,
                             const std::vector<uint8_t>& change) {
         if (pairingStopped()) return;  // Each request can block on an unresponsive radio
-        const auto endpoint = clusterEndpoint(ieeeAddr, cluster);
-        if (endpoint) {  // It might not have them all
+        // Every gang of what switches, as each can be a device of its own
+        std::vector<uint8_t> endpoints;
+        {
+            std::lock_guard<std::mutex> lock(m_deviceMutex);
+            auto device = m_clusterEndpoints.find(ieeeAddr);
+            if (device != m_clusterEndpoints.end()) {
+                auto found = device->second.find(cluster);
+                if (found != device->second.end() && !found->second.empty()) {
+                    endpoints = cluster == zcl::cluster::ON_OFF || cluster == zcl::cluster::LEVEL_CONTROL ||
+                                        cluster == zcl::cluster::COLOR_CONTROL
+                                    ? found->second
+                                    : std::vector<uint8_t>{found->second.front()};
+                }
+            }
+        }
+        for (uint8_t endpoint : endpoints) {  // It might not have them all
             // A failure isn't fatal: some devices report to the coordinator anyway
-            if (!m_coordinator->bindCluster(nwkAddr, ieeeAddr, *endpoint, cluster)) {
+            if (!m_coordinator->bindCluster(nwkAddr, ieeeAddr, endpoint, cluster)) {
                 LOG_WARN("Couldn't bind cluster 0x%04X of 0x%04X", cluster, nwkAddr);
             }
             if (pairingStopped()) return;
-            m_coordinator->configureReporting(nwkAddr, *endpoint, cluster, attribute, dataType,
+            m_coordinator->configureReporting(nwkAddr, endpoint, cluster, attribute, dataType,
                                               minInterval, 300, change);
+            if (pairingStopped()) return;
         }
     };
 

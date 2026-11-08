@@ -200,6 +200,8 @@ Each must be from 100 to 600000; invalid values are ignored with a warning. An e
 
 **Only the Add Device wizard adds devices** (on the LCD or in the dashboard). A device the hub doesn't keep that announces outside a wizard isn't added: with the network closed, it's one that was removed, or whose wizard was cancelled or failed, or one from before the database was wiped. Add it in a wizard. A device that joined for a wizard but wasn't added, because the wizard was cancelled or ended or its pairing failed, is asked to leave the network, so it stops sending reports nobody wants. One announcing outside a wizard isn't asked to leave, as that would take every device off the network if the hub's devices couldn't be loaded.
 
+**Several of the same on one device**, such as a two-gang switch or a sensor with alarm zones on two endpoints, become a hub device for each. The first is the device the wizard adds. The others are added with it, named after it with a number (`Hall switch 2`), in the same room, with ids made from its id and the endpoint (`zigbee_00124b0000008402_2`). Each is switched, reports and raises alarms on its own endpoint, so one gang or zone can't change what another shows. Removing one leaves the others. Only switching and alarm zones count: a device with two temperature endpoints is still one device.
+
 ---
 
 ## ZCL Clusters

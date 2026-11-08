@@ -378,7 +378,10 @@ protected:
         auto created = std::make_unique<ZigbeeHandler>(
             eventBus, handlerConfig, [&radio] { return coordinatorFor(radio); });
 
-        created->setDeviceDiscoveredCallback([this](DevicePtr device) {
+        // Only a device's other gangs arrive this way now (#64). The device manager adds them,
+        // which restores them in the handler.
+        created->setDeviceDiscoveredCallback([this, handler = created.get()](DevicePtr device) {
+            handler->restoreDevice(*device);
             std::lock_guard<std::mutex> lock(mutex);
             discovered.push_back(device);
         });
@@ -421,8 +424,13 @@ protected:
         DevicePtr added;
         if (autoAccept) {
             if (eventually([&] { return discoveredCount() > before; }, 10s)) {
+                // Itself, not one of its gangs, which come after it
                 std::lock_guard<std::mutex> lock(mutex);
-                added = discovered.back();
+                for (const auto& found : discovered) {
+                    if (found->id() == idOf(device)) {
+                        added = found;
+                    }
+                }
             }
         } else if (eventually([&] { return pendingCount() > pendingBefore; }, 10s)) {
             added = handler->getPendingDevice();
@@ -1385,6 +1393,33 @@ TEST_F(ZigbeeHandlerFlowTest, AlarmFromAnotherKindOfZoneIsNotMotion) {
     EXPECT_FALSE(stateOf(idOf(LEAK), "motion").has_value());
 }
 
+TEST_F(ZigbeeHandlerFlowTest, EachZoneKeepsItsOwnAlarm) {
+    // Zones on two endpoints: one's Clear mustn't overwrite the other's alarm (#64)
+    const FakeZigbeeDevice twoZones{0x8190, 0x00124B0000008190ULL,
+                                    {{1, {zcl::cluster::IAS_ZONE}}, {2, {zcl::cluster::IAS_ZONE}}},
+                                    "", "", zcl::zone_type::WATER_SENSOR};
+    fake.addDevice(twoZones);
+    ASSERT_NE(pair(twoZones), nullptr);
+    const std::string secondId = idOf(twoZones) + "_2";
+    ASSERT_TRUE(eventually([&] {
+        std::lock_guard<std::mutex> lock(mutex);
+        return std::any_of(discovered.begin(), discovered.end(),
+                           [&](const DevicePtr& device) { return device->id() == secondId; });
+    }));
+
+    fake.clusterCommand(twoZones.nwkAddr, 2, zcl::cluster::IAS_ZONE, 0x00, {0x01, 0x00});
+    fake.clusterCommand(twoZones.nwkAddr, 1, zcl::cluster::IAS_ZONE, 0x00, {0x00, 0x00});
+
+    EXPECT_EQ(waitForState(secondId, "alarm"), true);
+    EXPECT_EQ(waitForState(idOf(twoZones), "alarm"), false);
+    std::lock_guard<std::mutex> lock(mutex);
+    for (const auto& change : states) {
+        if (change.deviceId == secondId && change.property == "alarm") {
+            EXPECT_EQ(change.value, true) << "the first zone's Clear reached the second";
+        }
+    }
+}
+
 TEST_F(ZigbeeHandlerFlowTest, AlarmFromAnotherKindOfZoneIsNotMotionAfterARestart) {
     fake.addDevice(LEAK);
     auto paired = pair(LEAK);
@@ -2339,6 +2374,94 @@ TEST_F(ZigbeeHandlerFlowTest, TwoGangSwitchIsOneDeviceUsingTheFirstGang) {
             EXPECT_EQ(change.value, false) << "from the second gang";
         }
     }
+}
+
+TEST_F(ZigbeeHandlerFlowTest, EachGangOfASwitchIsADeviceOfItsOwn) {
+    fake.addDevice(TWO_GANG);
+    auto first = pair(TWO_GANG);
+    ASSERT_NE(first, nullptr);
+    const std::string secondId = idOf(TWO_GANG) + "_2";
+    DevicePtr second;
+    ASSERT_TRUE(eventually([&] {
+        std::lock_guard<std::mutex> lock(mutex);
+        for (const auto& device : discovered) {
+            if (device->id() == secondId) second = device;
+        }
+        return second != nullptr;
+    }));
+    EXPECT_EQ(second->name(), first->name() + " 2");
+    EXPECT_EQ(second->type(), first->type());
+
+    // Each is switched on its own endpoint
+    fake.clearSentFrames();
+    ASSERT_TRUE(handler->sendCommand(secondId, "on", {{"on", true}}));
+    ASSERT_TRUE(handler->sendCommand(idOf(TWO_GANG), "off", {{"on", false}}));
+    auto frames = commandFrames(fake);
+    ASSERT_EQ(frames.size(), 2u);
+    EXPECT_EQ(frames[0].endpoint, 2);
+    EXPECT_EQ(frames[1].endpoint, 1);
+
+    // And shows its own state
+    fake.reportAttribute(TWO_GANG.nwkAddr, 2, zcl::cluster::ON_OFF, zcl::attr::onoff::ON_OFF,
+                         zcl::datatype::BOOLEAN, {0x01});
+    fake.reportAttribute(TWO_GANG.nwkAddr, 1, zcl::cluster::ON_OFF, zcl::attr::onoff::ON_OFF,
+                         zcl::datatype::BOOLEAN, {0x00});
+    EXPECT_EQ(waitForState(secondId, "on"), true);
+    EXPECT_EQ(waitForState(idOf(TWO_GANG), "on"), false);
+    std::lock_guard<std::mutex> lock(mutex);
+    for (const auto& change : states) {
+        if (change.deviceId == idOf(TWO_GANG) && change.property == "on") {
+            EXPECT_EQ(change.value, false) << "the second gang's report reached the first";
+        }
+    }
+}
+
+TEST_F(ZigbeeHandlerFlowTest, EachGangReports) {
+    fake.addDevice(TWO_GANG);
+    fake.clearSentFrames();
+    ASSERT_NE(pair(TWO_GANG), nullptr);
+
+    std::set<uint8_t> configured;
+    for (const auto& frame : airFrames(fake)) {
+        if (frame.cluster == zcl::cluster::ON_OFF && frame.zclCommand == zcl::global_cmd::CONFIGURE_REPORTING) {
+            configured.insert(frame.endpoint);
+        }
+    }
+    EXPECT_EQ(configured, (std::set<uint8_t>{1, 2}));
+}
+
+TEST_F(ZigbeeHandlerFlowTest, GangsWorkAfterARestart) {
+    fake.addDevice(TWO_GANG);
+    auto first = pair(TWO_GANG);
+    ASSERT_NE(first, nullptr);
+    DevicePtr second;
+    ASSERT_TRUE(eventually([&] {
+        std::lock_guard<std::mutex> lock(mutex);
+        for (const auto& device : discovered) {
+            if (device->id() == idOf(TWO_GANG) + "_2") second = device;
+        }
+        return second != nullptr;
+    }));
+
+    restart({first, second});
+    ASSERT_TRUE(handler->sendCommand(second->id(), "on", {{"on", true}}));
+    auto frames = commandFrames(fake);
+    ASSERT_EQ(frames.size(), 1u);
+    EXPECT_EQ(frames[0].endpoint, 2);
+}
+
+TEST_F(ZigbeeHandlerFlowTest, ARemovedGangStaysOut) {
+    fake.addDevice(TWO_GANG);
+    ASSERT_NE(pair(TWO_GANG), nullptr);
+    const std::string secondId = idOf(TWO_GANG) + "_2";
+    ASSERT_TRUE(eventually([&] { return handler->sendCommand(secondId, "on", {{"on", true}}); }));
+
+    handler->forgetDevice(secondId);
+    EXPECT_FALSE(handler->sendCommand(secondId, "on", {{"on", true}}));
+    fake.reportAttribute(TWO_GANG.nwkAddr, 2, zcl::cluster::ON_OFF, zcl::attr::onoff::ON_OFF,
+                         zcl::datatype::BOOLEAN, {0x01});
+    std::this_thread::sleep_for(300ms);
+    EXPECT_FALSE(stateOf(idOf(TWO_GANG), "on").value_or(false) == true) << "nor reaches the first";
 }
 
 TEST_F(ZigbeeHandlerFlowTest, UnknownDeviceGetsNoReporting) {

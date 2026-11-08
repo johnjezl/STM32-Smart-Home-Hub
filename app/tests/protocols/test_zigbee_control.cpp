@@ -235,6 +235,28 @@ TEST_F(ZigbeeControlTest, DevicesCantBeSentCommandsTheyDontSupport) {
     EXPECT_TRUE(state(MOTION_ID, "on").is_null());
 }
 
+TEST_F(ZigbeeControlTest, EachGangOfASwitchIsAddedAndControlled) {
+    const FakeZigbeeDevice twoGang{0x8402, 0x00124B0000008402ULL,
+                                   {{1, {zcl::cluster::ON_OFF}}, {2, {zcl::cluster::ON_OFF}}}};
+    fake.addDevice(twoGang);
+    ASSERT_TRUE(manager->loadProtocol("zigbee", nlohmann::json::object()));
+    addThroughWizard(twoGang);
+
+    // The wizard added the first gang, and the second came with it (#64)
+    const std::string firstId = "zigbee_00124b0000008402";
+    const std::string secondId = firstId + "_2";
+    ASSERT_TRUE(eventually([&] { return manager->getDevice(secondId) != nullptr; }));
+    EXPECT_EQ(manager->deviceCount(), 2u);
+    fake.clearSentFrames();
+
+    ASSERT_TRUE(manager->setDeviceState(secondId, "on", true));
+    auto frames = airFrames();
+    ASSERT_EQ(frames.size(), 1u);
+    EXPECT_EQ(frames[0].endpoint, 2);
+    EXPECT_EQ(state(secondId, "on"), true);
+    EXPECT_TRUE(state(firstId, "on").is_null() || state(firstId, "on") == false);
+}
+
 TEST_F(ZigbeeControlTest, InvalidColorTemperatureIsRejected) {
     loadAndPair();
 

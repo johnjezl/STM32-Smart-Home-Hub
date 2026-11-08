@@ -219,9 +219,21 @@ private:
     std::optional<uint8_t> clusterEndpoint(uint64_t ieeeAddr, uint16_t cluster) const;
     uint8_t endpointFor(uint64_t ieeeAddr, uint16_t cluster) const;
     bool isOtherGang(uint64_t ieeeAddr, uint16_t cluster, uint8_t endpoint) const;
+
+    // Gangs: the second and later of several switches or alarm zones on one device, like a
+    // two-gang switch. Each is a hub device of its own, with an id made from the first's (#64).
+    static std::string gangId(const std::string& primaryId, uint8_t endpoint);
+    std::vector<uint8_t> gangEndpointsLocked(uint64_t ieeeAddr) const;  // Caller holds m_deviceMutex
+    std::optional<std::string> gangIdFor(uint64_t ieeeAddr, uint8_t endpoint) const;
+    std::vector<std::string> gangIdsOf(uint64_t ieeeAddr) const;
+    // Offers a device of its own for each of these endpoints of a device the wizard added
+    void addGangs(const DevicePtr& primary, uint64_t ieeeAddr, const std::vector<uint8_t>& endpoints);
     // Devices the hub keeps, IEEE to device id. Announcing again doesn't make one of these new, and
     // this outlives a leave, because the hub still has the device when it rejoins.
     std::map<uint64_t, std::string> m_savedDevices;
+    // Gang devices the hub keeps, by device and endpoint, and back
+    std::map<std::pair<uint64_t, uint8_t>, std::string> m_gangIds;
+    std::map<std::string, std::pair<uint64_t, uint8_t>> m_gangAddresses;
     enum class ZoneAlarm { Other, Motion, Open };  // What an IAS zone's alarm means
     std::map<uint64_t, ZoneAlarm> m_zoneAlarms;
     static ZoneAlarm zoneAlarmFor(DeviceType type, std::optional<uint16_t> zoneType);
