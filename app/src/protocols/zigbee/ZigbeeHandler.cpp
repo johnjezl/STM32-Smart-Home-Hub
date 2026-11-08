@@ -637,28 +637,18 @@ void ZigbeeHandler::dismissLocked(uint64_t ieeeAddr) {
 }
 
 void ZigbeeHandler::clearPendingDevice() {
-    DevicePtr added;
-    uint64_t addedAddress = 0;
-    std::vector<uint8_t> gangs;
-    {
-        std::lock_guard<std::mutex> lock(m_deviceMutex);
-        if (m_pendingDevice) {
-            if (const auto ieeeAddr = parseIeeeAddress(m_pendingDevice->id())) {
-                if (m_savedDevices.count(*ieeeAddr) > 0) {
-                    // The wizard added it, so its other gangs come too
-                    added = m_pendingDevice;
-                    addedAddress = *ieeeAddr;
-                    gangs = gangEndpointsLocked(*ieeeAddr);
-                } else {
-                    dismissLocked(*ieeeAddr);
-                }
-            }
+    std::lock_guard<std::mutex> lock(m_deviceMutex);
+    if (m_pendingDevice) {
+        if (const auto ieeeAddr = parseIeeeAddress(m_pendingDevice->id())) {
+            dismissLocked(*ieeeAddr);  // Unless it was added
         }
-        m_pendingDevice.reset();
     }
-    if (added && !gangs.empty()) {
-        addGangs(added, addedAddress, gangs);
-    }
+    m_pendingDevice.reset();
+}
+
+bool ZigbeeHandler::isGangCluster(uint16_t cluster) {
+    return cluster == zcl::cluster::ON_OFF || cluster == zcl::cluster::LEVEL_CONTROL ||
+           cluster == zcl::cluster::COLOR_CONTROL || cluster == zcl::cluster::IAS_ZONE;
 }
 
 std::string ZigbeeHandler::gangId(const std::string& primaryId, uint8_t endpoint) {
@@ -705,7 +695,7 @@ std::vector<std::string> ZigbeeHandler::gangIdsOf(uint64_t ieeeAddr) const {
     return ids;
 }
 
-void ZigbeeHandler::addGangs(const DevicePtr& primary, uint64_t ieeeAddr,
+void ZigbeeHandler::addGangs(const IDevice& primary, uint64_t ieeeAddr,
                              const std::vector<uint8_t>& endpoints) {
     DeviceDiscoveredCallback callback;
     {
@@ -720,27 +710,27 @@ void ZigbeeHandler::addGangs(const DevicePtr& primary, uint64_t ieeeAddr,
     address << "0x" << std::hex << std::setfill('0') << std::setw(16) << ieeeAddr;
     for (size_t i = 0; i < endpoints.size(); ++i) {
         const uint8_t endpoint = endpoints[i];
-        const std::string id = gangId(primary->id(), endpoint);
+        const std::string id = gangId(primary.id(), endpoint);
         if (gangIdFor(ieeeAddr, endpoint)) {
             continue;  // Already kept
         }
         auto gang = DeviceTypeRegistry::instance().createFromTypeName(
-            primary->typeString(), id, primary->name() + " " + std::to_string(i + 2), "zigbee",
-            address.str(), primary->getConfig());
+            primary.typeString(), id, primary.name() + " " + std::to_string(i + 2), "zigbee",
+            address.str(), primary.getConfig());
         if (!gang) {
-            LOG_WARN("Couldn't make a device for endpoint %d of %s", endpoint, primary->id().c_str());
+            LOG_WARN("Couldn't make a device for endpoint %d of %s", endpoint, primary.id().c_str());
             continue;
         }
-        gang->setRoom(primary->room());
+        gang->setRoom(primary.room());
         gang->setState("gangEndpoint", static_cast<int>(endpoint));
         gang->setState("endpoint", static_cast<int>(endpoint));
+        const nlohmann::json primaryState = primary.getState();
         for (const char* copied : {"zoneType", "networkAddress"}) {
-            const auto value = primary->getProperty(copied);
-            if (!value.is_null()) {
-                gang->setState(copied, value);
+            if (primaryState.contains(copied)) {
+                gang->setState(copied, primaryState[copied]);
             }
         }
-        LOG_INFO("Adding endpoint %d of %s as %s", endpoint, primary->id().c_str(), id.c_str());
+        LOG_INFO("Adding endpoint %d of %s as %s", endpoint, primary.id().c_str(), id.c_str());
         // The device manager adds it, which restores it here
         callback(gang);
     }
@@ -810,6 +800,13 @@ void ZigbeeHandler::restoreDevice(const IDevice& device) {
         ieeeAddr = parseIeeeAddress(state["ieeeAddress"].get<std::string>());
     }
     if (!ieeeAddr) {
+        // Where the dashboard's Add Device wizard puts it
+        const nlohmann::json config = device.getConfig();
+        if (config.contains("ieeeAddress") && config["ieeeAddress"].is_string()) {
+            ieeeAddr = parseIeeeAddress(config["ieeeAddress"].get<std::string>());
+        }
+    }
+    if (!ieeeAddr) {
         ieeeAddr = parseIeeeAddress(device.id());
     }
     if (!ieeeAddr) {
@@ -817,6 +814,7 @@ void ZigbeeHandler::restoreDevice(const IDevice& device) {
         return;
     }
 
+    std::vector<uint8_t> gangs;
     {
         std::lock_guard<std::mutex> lock(m_deviceMutex);
         auto owner = m_savedDevices.find(*ieeeAddr);
@@ -828,6 +826,10 @@ void ZigbeeHandler::restoreDevice(const IDevice& device) {
         m_ieeeToDeviceId[*ieeeAddr] = device.id();
         m_deviceIdToIeee[device.id()] = *ieeeAddr;
         m_savedDevices[*ieeeAddr] = device.id();
+        // The wizard's device being added: its other gangs come with it, named after it
+        if (m_pendingDevice && m_pendingDevice->id() == ieeeToDeviceId(*ieeeAddr)) {
+            gangs = gangEndpointsLocked(*ieeeAddr);
+        }
         std::optional<uint16_t> zoneType;
         if (state.contains("zoneType") && state["zoneType"].is_number_integer()) {
             zoneType = static_cast<uint16_t>(state["zoneType"].get<int>());
@@ -846,6 +848,10 @@ void ZigbeeHandler::restoreDevice(const IDevice& device) {
 
     std::shared_lock<std::shared_mutex> coordinatorLock(m_coordinatorMutex);
     if (!m_coordinator) {
+        coordinatorLock.unlock();
+        if (!gangs.empty()) {
+            addGangs(device, *ieeeAddr, gangs);
+        }
         return;
     }
 
@@ -859,6 +865,11 @@ void ZigbeeHandler::restoreDevice(const IDevice& device) {
         m_addressChecks.push_back(*ieeeAddr);
     } else if (!m_coordinator->getDevice(*ieeeAddr)) {
         lookUpNetworkAddress(*ieeeAddr);
+    }
+    coordinatorLock.unlock();
+
+    if (!gangs.empty()) {
+        addGangs(device, *ieeeAddr, gangs);
     }
 }
 
@@ -1612,19 +1623,19 @@ void ZigbeeHandler::onAttributeReport(uint16_t nwkAddr, const ZclAttributeValue&
         }
     }
 
-    if (deviceId.empty()) {
-        return;
-    }
-
     // On a device with several of something, like a two-gang switch, the others are their own
-    // devices, if they were added
-    if (isOtherGang(deviceInfo->ieeeAddress, attr.clusterId, attr.endpoint)) {
-        const auto gang = gangIdFor(deviceInfo->ieeeAddress, attr.endpoint);
-        if (!gang) {
+    // devices, whether or not the first is still kept
+    if (isGangCluster(attr.clusterId)) {
+        if (const auto gang = gangIdFor(deviceInfo->ieeeAddress, attr.endpoint)) {
+            deviceId = *gang;
+        } else if (isOtherGang(deviceInfo->ieeeAddress, attr.clusterId, attr.endpoint)) {
             LOG_DEBUG("Ignoring report from endpoint %d of %s", attr.endpoint, deviceId.c_str());
             return;
         }
-        deviceId = *gang;
+    }
+
+    if (deviceId.empty()) {
+        return;
     }
 
     // Convert attribute to state update - call callback for each property
@@ -1743,17 +1754,17 @@ void ZigbeeHandler::onCommandReceived(uint16_t nwkAddr, uint8_t endpoint,
         }
     }
 
-    if (deviceId.empty()) {
-        return;
-    }
-
-    if (isOtherGang(deviceInfo->ieeeAddress, cluster, endpoint)) {
-        const auto gang = gangIdFor(deviceInfo->ieeeAddress, endpoint);
-        if (!gang) {
+    if (isGangCluster(cluster)) {
+        if (const auto gang = gangIdFor(deviceInfo->ieeeAddress, endpoint)) {
+            deviceId = *gang;
+        } else if (isOtherGang(deviceInfo->ieeeAddress, cluster, endpoint)) {
             LOG_DEBUG("Ignoring command from endpoint %d of %s", endpoint, deviceId.c_str());
             return;
         }
-        deviceId = *gang;
+    }
+
+    if (deviceId.empty()) {
+        return;
     }
 
     // Handle specific cluster commands

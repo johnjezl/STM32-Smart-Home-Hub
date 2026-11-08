@@ -2464,6 +2464,66 @@ TEST_F(ZigbeeHandlerFlowTest, ARemovedGangStaysOut) {
     EXPECT_FALSE(stateOf(idOf(TWO_GANG), "on").value_or(false) == true) << "nor reaches the first";
 }
 
+TEST_F(ZigbeeHandlerFlowTest, GangsTakeTheNameAndRoomTheDeviceWasGiven) {
+    fake.addDevice(TWO_GANG);
+    beginWizardTest();
+    handler->startDiscovery();
+    fake.announceDevice(TWO_GANG);
+    ASSERT_TRUE(eventually([&] { return pendingCount() == 1; }));
+    DevicePtr held = handler->getPendingDevice();
+    handler->stopDiscovery();
+    held->setName("Hall");
+    held->setRoom("hall");
+    accept(held);
+
+    DevicePtr second;
+    ASSERT_TRUE(eventually([&] {
+        std::lock_guard<std::mutex> lock(mutex);
+        for (const auto& device : discovered) {
+            if (device->id() == held->id() + "_2") second = device;
+        }
+        return second != nullptr;
+    }));
+    EXPECT_EQ(second->name(), "Hall 2");
+    EXPECT_EQ(second->room(), "hall");
+}
+
+TEST_F(ZigbeeHandlerFlowTest, ADeviceAddedTheDashboardsWayGetsItsGangs) {
+    // The dashboard adds a device of its own, with the address only in its config
+    fake.addDevice(TWO_GANG);
+    beginWizardTest();
+    handler->startDiscovery();
+    fake.announceDevice(TWO_GANG);
+    ASSERT_TRUE(eventually([&] { return pendingCount() == 1; }));
+    handler->stopDiscovery();
+
+    auto added = std::make_shared<SwitchDevice>("device-hall", "Hall");
+    added->setRoom("hall");
+    nlohmann::json config;
+    config["ieeeAddress"] = "0x00124B0000008402";
+    added->setConfig(config);
+    handler->restoreDevice(*added);  // The device manager does this when it adds it
+    handler->clearPendingDevice();   // The dashboard does this when its dialog closes
+
+    EXPECT_TRUE(handler->sendCommand("device-hall", "on", {{"on", true}}));
+    ASSERT_TRUE(eventually([&] { return handler->sendCommand("device-hall_2", "on", {{"on", true}}); }));
+    std::this_thread::sleep_for(500ms);
+    EXPECT_TRUE(fake.sentFrames(ZnpSubsystem::ZDO, cmd::zdo::MGMT_LEAVE_REQ).empty()) << "it was added";
+}
+
+TEST_F(ZigbeeHandlerFlowTest, AGangKeepsWorkingWhenTheFirstIsRemoved) {
+    fake.addDevice(TWO_GANG);
+    ASSERT_NE(pair(TWO_GANG), nullptr);
+    const std::string secondId = idOf(TWO_GANG) + "_2";
+    ASSERT_TRUE(eventually([&] { return handler->sendCommand(secondId, "on", {{"on", true}}); }));
+
+    handler->forgetDevice(idOf(TWO_GANG));
+    fake.reportAttribute(TWO_GANG.nwkAddr, 2, zcl::cluster::ON_OFF, zcl::attr::onoff::ON_OFF,
+                         zcl::datatype::BOOLEAN, {0x01});
+    EXPECT_EQ(waitForState(secondId, "on"), true);
+    EXPECT_TRUE(handler->sendCommand(secondId, "off", {{"on", false}}));
+}
+
 TEST_F(ZigbeeHandlerFlowTest, UnknownDeviceGetsNoReporting) {
     auto device = pair(BASIC_ONLY);
     ASSERT_NE(device, nullptr);
