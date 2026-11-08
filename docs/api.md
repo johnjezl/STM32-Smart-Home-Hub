@@ -5,10 +5,10 @@ The SmartHub web server provides a RESTful API for device management, room organ
 ## Base URL
 
 ```
-http://<smarthub-ip>:<port>/api
+https://<smarthub-ip>/api
 ```
 
-Default port is 8443 (configurable via `web.port` in config.yaml).
+The hub serves HTTPS on port 443 by default (`web.port` in the configuration). With no certificate configured it creates a self-signed one at first boot, so tools need to trust it, or skip the check with `curl -k` on your own network.
 
 ## Authentication
 
@@ -872,39 +872,40 @@ By default, each IP address can make 600 requests a minute, and 10 failed logins
 ### curl
 
 ```bash
+# -k accepts the self-signed certificate the hub makes at first boot
 # Log in and save the session cookie
-curl -c cookies.txt -X POST \
+curl -k -c cookies.txt -X POST \
   -H "Content-Type: application/json" \
   -d '{"username":"admin","password":"Your-Password-1"}' \
-  http://smarthub.local:8443/api/auth/login
+  https://smarthub.local/api/auth/login
 
 # Get all devices
-curl -b cookies.txt http://smarthub.local:8443/api/devices
+curl -k -b cookies.txt https://smarthub.local/api/devices
 
 # Get system status
-curl http://smarthub.local:8443/api/system/status
+curl -k https://smarthub.local/api/system/status
 
 # Create a room
-curl -b cookies.txt -X POST \
+curl -k -b cookies.txt -X POST \
   -H "Content-Type: application/json" \
   -d '{"name":"Living Room"}' \
-  http://smarthub.local:8443/api/rooms
+  https://smarthub.local/api/rooms
 
 # Turn on a light
-curl -b cookies.txt -X PUT \
+curl -k -b cookies.txt -X PUT \
   -H "Content-Type: application/json" \
   -d '{"on":true,"brightness":100}' \
-  http://smarthub.local:8443/api/devices/light1
+  https://smarthub.local/api/devices/light1
 
 # Create an automation
-curl -b cookies.txt -X POST \
+curl -k -b cookies.txt -X POST \
   -H "Content-Type: application/json" \
   -d '{
     "name": "Night Mode",
     "trigger": {"type": "time", "hour": 22, "minute": 0},
     "actions": [{"deviceId": "light1", "property": "on", "value": false}]
   }' \
-  http://smarthub.local:8443/api/automations
+  https://smarthub.local/api/automations
 ```
 
 ### JavaScript (Web Dashboard)
@@ -936,20 +937,4 @@ await fetch('/api/automations/auto-1/enable', {
 
 ## WebSocket API
 
-Real-time updates are available via WebSocket at `/ws`:
-
-```javascript
-const ws = new WebSocket('ws://smarthub.local:8443/ws');
-
-ws.onmessage = (event) => {
-  const msg = JSON.parse(event.data);
-  // msg.type: 'device.state', 'sensor.data', 'automation.triggered', etc.
-};
-```
-
-Message types:
-- `device.state` - Device state changed
-- `device.added` - New device added
-- `device.removed` - Device removed
-- `sensor.data` - Sensor reading updated
-- `automation.triggered` - Automation was executed
+There's no WebSocket API yet: `/ws` isn't served. The dashboard polls the REST API every 5 seconds for changes.

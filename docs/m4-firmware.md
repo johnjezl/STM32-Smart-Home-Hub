@@ -81,12 +81,14 @@ Offset    Size    Contents
 
 ### Message Format
 
-All messages use this header:
+Both cores build against one definition, `shared/include/smarthub_protocol/rpmsg_protocol.hpp`, which is the reference. Both are little-endian, and the structs are packed. Every message starts with this 8-byte header:
 ```cpp
 struct MsgHeader {
-    MsgType type;    // 1 byte: message type
-    uint8_t len;     // 1 byte: payload length
-    uint16_t seq;    // 2 bytes: sequence number
+    uint8_t type;       // MsgType
+    uint8_t flags;
+    uint16_t seq;       // Sequence number
+    uint16_t len;       // Payload length
+    uint16_t reserved;
 };
 ```
 
@@ -103,20 +105,27 @@ struct MsgHeader {
 | Status | 0xA0 | M4→A7 | Status response |
 | GpioSet | 0x30 | A7→M4 | Set GPIO output |
 | GpioGet | 0x31 | A7→M4 | Read GPIO state |
-| GpioState | 0xB0 | M4→A7 | GPIO state response |
+| GpioState | 0xB1 | M4→A7 | GPIO state response |
+| SensorUpdate | 0xC0 | M4→A7 | Sensor reading, sent unasked |
+| GpioChange | 0xC1 | M4→A7 | GPIO change, sent unasked |
+| Error | 0xE0 | M4→A7 | Error report |
 
 ### Sensor Data Payload
 
 ```cpp
-struct SensorPayload {
-    uint8_t sensorId;      // Sensor identifier
-    uint8_t sensorType;    // 1=Temperature, 2=Humidity
-    int16_t valueX100;     // Value multiplied by 100
-    uint32_t timestamp;    // Milliseconds since boot
+struct SensorDataPayload {   // 16 bytes
+    uint8_t sensorId;
+    uint8_t sensorType;      // SensorType: 1=Temperature, 2=Humidity, ...
+    uint16_t reserved;
+    int32_t value;           // Fixed point: value / scale
+    int32_t scale;           // For example, 100 for two decimal places
+    uint32_t timestamp;      // Milliseconds since boot
 };
 ```
 
-Example: Temperature of 23.45°C is encoded as `valueX100 = 2345`.
+Example: a temperature of 23.45°C is `value = 2345`, `scale = 100`.
+
+Other payloads: `StatusPayload` (12 bytes: uptime, sensor count, error count, poll interval, free memory), `GPIOPayload` (4 bytes: port, pin, state, mode) and `IntervalPayload` (2 bytes: interval in ms).
 
 ## Drivers
 
@@ -260,17 +269,18 @@ int n = read(fd, response, sizeof(response));
 
 ### Sensor Data Test
 
-The M4 automatically sends sensor data every `SENSOR_POLL_MS` (default 1000ms):
+The M4 sends each reading unasked as a `SensorUpdate` (0xC0), every `SensorManager::DEFAULT_POLL_INTERVAL` (1000 ms) unless set otherwise:
 
 ```cpp
 // On A7 Linux application
 while (true) {
     uint8_t buf[64];
     int n = read(fd, buf, sizeof(buf));
-    if (n > 0 && buf[0] == 0x90) {
-        // Parse SensorPayload from buf+4
-        int16_t temp = (buf[6] << 8) | buf[7];
-        printf("Temperature: %.2f°C\n", temp / 100.0f);
+    if (n >= 24 && (buf[0] == 0x90 || buf[0] == 0xC0)) {
+        // The payload follows the 8-byte header. Both cores are little-endian.
+        smarthub::protocol::SensorDataPayload reading;
+        memcpy(&reading, buf + 8, sizeof(reading));
+        printf("Reading: %.2f\n", static_cast<double>(reading.value) / reading.scale);
     }
 }
 ```

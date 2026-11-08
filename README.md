@@ -17,17 +17,19 @@ A custom smart home hub built on the STM32MP157F-DK2 development board featuring
 
 ## Project Status
 
+Open work is tracked in [GitHub issues](https://github.com/johnjezl/STM32-Smart-Home-Hub/issues), which are more current than the phase documents in `docs/`.
+
 | Phase | Name | Status |
 |-------|------|--------|
 | 0 | Development Environment Setup | ✅ Complete |
 | 1 | Buildroot Base System | ✅ Complete |
 | 2 | Core Application Framework | ✅ Complete |
 | 3 | Device Integration Framework | ✅ Complete |
-| 4 | Zigbee Integration | ✅ Complete |
-| 5 | WiFi Device Integration | ✅ Complete |
-| 6 | M4 Bare-Metal Firmware | ✅ Complete |
+| 4 | Zigbee Integration | 🟡 Works against a simulated coordinator; confirming with a real radio is open ([#3](https://github.com/johnjezl/STM32-Smart-Home-Hub/issues/3), [#61](https://github.com/johnjezl/STM32-Smart-Home-Hub/issues/61), [#76](https://github.com/johnjezl/STM32-Smart-Home-Hub/issues/76)) |
+| 5 | WiFi Device Integration | 🟡 Library level: the Wi-Fi and MQTT handlers aren't wired into the app yet ([#22](https://github.com/johnjezl/STM32-Smart-Home-Hub/issues/22)) |
+| 6 | M4 Bare-Metal Firmware | 🟡 Alpha: RPMsg works; sensors don't yet ([#18](https://github.com/johnjezl/STM32-Smart-Home-Hub/issues/18)) |
 | 7 | Security Hardening | ✅ Complete |
-| 8 | UI Refinement & Polish | ⏳ Planned |
+| 8 | UI Refinement & Polish | 🟡 Mostly done; layout fixes and the Display screen are open ([#29](https://github.com/johnjezl/STM32-Smart-Home-Hub/issues/29), [#80](https://github.com/johnjezl/STM32-Smart-Home-Hub/issues/80)) |
 
 ## Hardware
 

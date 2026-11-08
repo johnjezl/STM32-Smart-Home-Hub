@@ -209,7 +209,7 @@ The running hub doesn't need restarting, as it reads accounts on every request.
 
 ### Security Headers
 
-All responses include security headers:
+API responses and the dashboard's files include these headers:
 
 | Header | Value | Purpose |
 |--------|-------|---------|
@@ -217,8 +217,10 @@ All responses include security headers:
 | `X-Frame-Options` | `DENY` | Prevent clickjacking |
 | `X-XSS-Protection` | `1; mode=block` | XSS filter |
 | `Referrer-Policy` | `strict-origin-when-cross-origin` | Control referrer leakage |
-| `Cache-Control` | `no-store` | Prevent sensitive data caching |
+| `Content-Security-Policy` | `default-src 'none'; script-src 'self'; ...` | Only the hub's own scripts, styles and images run |
 | `Strict-Transport-Security` | `max-age=31536000; includeSubDomains` | Enforce HTTPS (when TLS enabled) |
+
+API responses also have `Cache-Control: no-store`, so sensitive data isn't cached. The dashboard's files can be.
 
 ### Authentication Middleware
 

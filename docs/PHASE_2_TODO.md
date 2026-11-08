@@ -1397,7 +1397,7 @@ Before proceeding to Phase 3, verify:
 | Web server responds on HTTP | ✅ | Mongoose server, 15 REST API tests |
 | REST API returns device list | ✅ | /api/devices, /api/system/status work |
 | MQTT client tested | ✅ | 13 unit tests, live broker tests available |
-| RPMsg client tested | ✅ | 15 unit tests, hardware tests available |
+| RPMsg client tested | ✅ | Unit tests. The hardware tests skip unless `/dev/ttyRPMSG0` exists, so they only run on the board |
 | Database creates schema | ✅ | SQLite with all tables/indexes |
 | Configuration loads from YAML | ✅ | yaml-cpp integration complete |
 | Logging works | ✅ | Timestamped, leveled logging |
