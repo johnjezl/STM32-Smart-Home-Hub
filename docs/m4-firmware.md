@@ -280,7 +280,9 @@ while (true) {
         // The payload follows the 8-byte header. Both cores are little-endian.
         smarthub::protocol::SensorDataPayload reading;
         memcpy(&reading, buf + 8, sizeof(reading));
-        printf("Reading: %.2f\n", static_cast<double>(reading.value) / reading.scale);
+        if (reading.scale != 0) {
+            printf("Reading: %.2f\n", static_cast<double>(reading.value) / reading.scale);
+        }
     }
 }
 ```

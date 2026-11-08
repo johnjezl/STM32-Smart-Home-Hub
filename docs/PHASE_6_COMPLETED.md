@@ -102,19 +102,28 @@ enum class MsgType : uint8_t {
     Pong = 0x81,
     SensorData = 0x90,
     Status = 0xA0,
-    GpioState = 0xB0,
+    GpioState = 0xB1,
+
+    // M4 -> A7 events, sent unasked
+    SensorUpdate = 0xC0,
+    GpioChange = 0xC1,
+    Error = 0xE0,
 };
 ```
 
 ### Sensor Data Format
 ```cpp
-struct SensorPayload {
+struct SensorDataPayload {   // 16 bytes, after an 8-byte header
     uint8_t sensorId;
-    uint8_t sensorType;    // 1=Temp, 2=Humidity
-    int16_t valueX100;     // Fixed-point * 100
+    uint8_t sensorType;      // 1=Temp, 2=Humidity
+    uint16_t reserved;
+    int32_t value;           // Fixed point: value / scale
+    int32_t scale;
     uint32_t timestamp;
 };
 ```
+
+`shared/include/smarthub_protocol/rpmsg_protocol.hpp`, which both cores build against, is the reference. See [m4-firmware.md](m4-firmware.md#rpmsg-protocol).
 
 ---
 
