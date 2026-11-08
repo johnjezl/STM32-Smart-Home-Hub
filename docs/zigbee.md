@@ -193,8 +193,10 @@ Pairing asks a joining device for its endpoints, then asks about each endpoint i
 |---------|---------|---------|
 | `pairingTimeoutMs` | 30000 | How long to wait for the device to list its endpoints |
 | `pairingEndpointTimeoutMs` | 5000 | How long to wait for each endpoint's description |
+| `leaveDelayMs` | 3000 | How long a device the wizard didn't add waits before it's asked to leave. A wizard started again in that time offers it again instead |
+| `pendingHoldMs` | 600000 | How long after discovery stops a device the wizard found is held, if the wizard never says it's done, as when the dashboard's tab is closed |
 
-Both must be from 100 to 600000; invalid values are ignored with a warning. An endpoint that refuses or doesn't answer is skipped, and the device is created from what the others reported. The Green Power endpoint (242) isn't queried. If a device announces again during pairing, pairing starts over at its current address.
+Each must be from 100 to 600000; invalid values are ignored with a warning. An endpoint that refuses or doesn't answer is skipped, and the device is created from what the others reported. The Green Power endpoint (242) isn't queried. If a device announces again during pairing, pairing starts over at its current address.
 
 **Only the Add Device wizard adds devices** (on the LCD or in the dashboard). A device the hub doesn't keep that announces outside a wizard isn't added: with the network closed, it's one that was removed, or whose wizard was cancelled or failed, or one from before the database was wiped. Add it in a wizard. A device that joined for a wizard but wasn't added, because the wizard was cancelled or ended or its pairing failed, is asked to leave the network, so it stops sending reports nobody wants. One announcing outside a wizard isn't asked to leave, as that would take every device off the network if the hub's devices couldn't be loaded.
 
