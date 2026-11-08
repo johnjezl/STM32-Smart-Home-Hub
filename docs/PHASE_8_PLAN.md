@@ -188,7 +188,7 @@ app/src/ui/widgets/
 - TimeSeriesChart widget using LVGL chart
 - Time range selector (1h, 6h, 24h, 7d)
 - Click on sensor card navigates to history
-- Mock data generation for demo (real data from database future)
+- Real readings, from the sensor history the hub records
 
 #### Tests
 - TimeSeriesChart constants and TimeRange helpers

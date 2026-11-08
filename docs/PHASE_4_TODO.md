@@ -228,7 +228,9 @@ Mock serial port enables testing without hardware:
 - Simulates open, close, read, write operations
 - Queue-based read data injection
 
-### 4.7.2 Hardware Integration Tests ✅ COMPLETE
+### 4.7.2 Hardware Integration Tests ☐ TO CONFIRM
+
+These were ticked before the November 2026 review, which found that commands from the UI and the web never reached the radio ([#3](https://github.com/johnjezl/STM32-Smart-Home-Hub/issues/3)), so they need confirming again with a radio attached. The table at the end, which has hardware testing as pending, is the current state. The same flows run in CI against a simulated coordinator (`test_zigbee_flows`).
 - ✅ Coordinator initialization with real hardware
 - ✅ Device pairing via permit join
 - ✅ Device state reading
