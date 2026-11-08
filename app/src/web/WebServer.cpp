@@ -1147,7 +1147,8 @@ WebServer::PasswordResult WebServer::runPasswordJob(const PasswordJob& job) {
         }
         if (job.kind == Kind::ChangeOwnPassword &&
             !m_userMgr->authenticate(user->username, job.password)) {
-            result.status = 401;
+            // Not 401, which means "not signed in" and would end the dashboard's session
+            result.status = 403;
             result.error = "Current password is incorrect";
             result.countsAsFailedLogin = true;
             return result;
@@ -1562,6 +1563,11 @@ void WebServer::apiSetUserPassword(struct mg_connection* c, const std::string& u
                                    struct mg_http_message* hm, const AuthInfo& auth) {
     if (!m_userMgr) {
         sendError(c, 500, "Authentication not configured");
+        return;
+    }
+    // As for your own password: a token that leaks mustn't be able to take over accounts
+    if (auth.isApiToken) {
+        sendError(c, 403, "Sign in to set passwords");
         return;
     }
     if (!isJsonRequest(hm)) {

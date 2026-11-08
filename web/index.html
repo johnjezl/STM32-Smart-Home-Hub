@@ -244,6 +244,30 @@
 
     <!-- Modal Overlay -->
     <div id="modal-overlay" class="modal-overlay hidden">
+        <!-- Set Password Modal -->
+        <div id="set-password-modal" class="modal hidden">
+            <div class="modal-header">
+                <h3>Set password for <span id="set-password-user"></span></h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="set-password-new">New password</label>
+                    <input type="password" id="set-password-new" autocomplete="new-password">
+                </div>
+                <div class="form-group">
+                    <label for="set-password-confirm">New password again</label>
+                    <input type="password" id="set-password-confirm" autocomplete="new-password">
+                </div>
+                <p class="account-note">Their sessions end and their API tokens are revoked.</p>
+                <div id="set-password-error" class="error-message"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline modal-cancel">Cancel</button>
+                <button id="set-password-save" class="btn btn-primary">Set password</button>
+            </div>
+        </div>
+
         <!-- Add Room Modal -->
         <div id="add-room-modal" class="modal hidden">
             <div class="modal-header">

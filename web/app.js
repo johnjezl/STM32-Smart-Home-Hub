@@ -94,6 +94,7 @@ class SmartHubApp {
                 this.userAction(button.dataset.userAction, button.dataset.username);
             }
         });
+        document.getElementById('set-password-save').addEventListener('click', () => this.setUserPassword());
         document.getElementById('users-list').addEventListener('change', (e) => {
             const field = e.target.closest('[data-user-field]');
             if (field) {
@@ -1871,19 +1872,46 @@ class SmartHubApp {
         }
     }
 
+    openSetPasswordModal(username) {
+        this.passwordUser = username;
+        document.getElementById('set-password-user').textContent = username;
+        document.getElementById('set-password-new').value = '';
+        document.getElementById('set-password-confirm').value = '';
+        document.getElementById('set-password-error').textContent = '';
+        this.openModal('set-password-modal');
+    }
+
+    async setUserPassword() {
+        const username = this.passwordUser;
+        const password = document.getElementById('set-password-new').value;
+        const errorEl = document.getElementById('set-password-error');
+        if (password !== document.getElementById('set-password-confirm').value) {
+            errorEl.textContent = "The passwords don't match";
+            return;
+        }
+        try {
+            const response = await this.api(`/api/users/${encodeURIComponent(username)}/password`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ password })
+            });
+            if (!response.ok) {
+                errorEl.textContent = await this.errorText(response, 'Failed to set password');
+                return;
+            }
+            this.closeAllModals();
+            this.showToast(`Password set for ${username}`, 'success');
+        } catch (error) {
+            errorEl.textContent = 'Connection error';
+        }
+    }
+
     async userAction(action, username) {
         let response;
         try {
             if (action === 'password') {
-                const password = window.prompt(`New password for ${username}. Their sessions and API tokens will end.`);
-                if (!password) {
-                    return;
-                }
-                response = await this.api(`/api/users/${encodeURIComponent(username)}/password`, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ password })
-                });
+                this.openSetPasswordModal(username);
+                return;
             } else if (action === 'remove') {
                 if (!window.confirm(`Remove ${username}? Their sessions and API tokens end too.`)) {
                     return;
@@ -1897,7 +1925,7 @@ class SmartHubApp {
             return;
         }
         if (response.ok) {
-            this.showToast(action === 'remove' ? `Removed ${username}` : `Password set for ${username}`, 'success');
+            this.showToast(`Removed ${username}`, 'success');
         } else {
             this.showToast(await this.errorText(response, 'Failed'), 'error');
         }
