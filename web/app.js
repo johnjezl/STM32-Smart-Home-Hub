@@ -859,6 +859,13 @@ class SmartHubApp {
             this.stopZigbeePairing();
         }
 
+        // Let go of a device the wizard found. Added, it's kept; otherwise the hub asks it to
+        // leave the network, as only the wizard adds devices.
+        if (this.discoveredDevice) {
+            this.discoveredDevice = null;
+            this.api('/api/zigbee/pending-devices', { method: 'DELETE' }).catch(() => {});
+        }
+
         // Reset wizard states
         this.resetDeviceWizard();
         this.resetAutomationWizard();

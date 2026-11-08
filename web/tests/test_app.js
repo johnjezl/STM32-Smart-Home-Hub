@@ -581,7 +581,7 @@ if (typeof window === 'undefined' && typeof require !== 'undefined') {
             const element = () => ({ classList: { add() {}, remove() {} } });
             const context = {
                 console,
-                document: { getElementById: element, addEventListener() {} },
+                document: { getElementById: element, addEventListener() {}, querySelectorAll: () => [] },
                 setTimeout: (fn, ms) => { timers.set(nextTimer, { fn, ms }); return nextTimer++; },
                 clearTimeout: (id) => { timers.delete(id); },
                 setInterval: () => nextTimer++,
@@ -611,6 +611,18 @@ if (typeof window === 'undefined' && typeof require !== 'undefined') {
             const autoStops = [...timers.values()].filter(t => t.ms === 60000);
             TestRunner.assertEqual(autoStops.length, 1, 'Auto-stop timers:');
             TestRunner.assertTrue(app.pairingActive);
+        });
+
+        TestRunner.it('should let go of a found device when the wizard closes', async () => {
+            const { app } = loadApp();
+            app.discoveredDevice = { ieeeAddress: '0x00124B0000001234' };
+            app.detailRoomId = null;
+            app.resetDeviceWizard = () => {};
+            app.resetAutomationWizard = () => {};
+            app.closeAllModals();
+            await Promise.resolve();
+            TestRunner.assertContains(app.requests, 'DELETE /api/zigbee/pending-devices');
+            TestRunner.assertEqual(app.discoveredDevice, null);
         });
 
         TestRunner.it('should stop pairing after a minute', async () => {

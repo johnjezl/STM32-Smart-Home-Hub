@@ -324,7 +324,6 @@ void ZigbeeHandler::shutdown() {
         m_addressChecks.clear();
         m_lastAddressLookup.clear();
         m_zoneAlarms.clear();
-        m_declinedDevices.clear();
         m_pendingDevice.reset();
     }
 
@@ -581,18 +580,25 @@ bool ZigbeeHandler::isOtherGang(uint64_t ieeeAddr, uint16_t cluster, uint8_t end
            std::find(found->second.begin(), found->second.end(), endpoint) != found->second.end();
 }
 
-void ZigbeeHandler::declineLocked(uint64_t ieeeAddr) {
-    if (m_savedDevices.count(ieeeAddr) == 0) {  // Otherwise it was added
-        m_declinedDevices.insert(ieeeAddr);
-        eraseMappingLocked(ieeeAddr);
+void ZigbeeHandler::dismissLocked(uint64_t ieeeAddr) {
+    if (m_savedDevices.count(ieeeAddr) > 0) {  // It was added after all
+        return;
     }
+    eraseMappingLocked(ieeeAddr);
+    {
+        std::lock_guard<std::mutex> lock(m_enrollMutex);
+        if (std::find(m_leaveQueue.begin(), m_leaveQueue.end(), ieeeAddr) == m_leaveQueue.end()) {
+            m_leaveQueue.push_back(ieeeAddr);
+        }
+    }
+    m_enrollCv.notify_all();
 }
 
 void ZigbeeHandler::clearPendingDevice() {
     std::lock_guard<std::mutex> lock(m_deviceMutex);
     if (m_pendingDevice) {
         if (const auto ieeeAddr = parseIeeeAddress(m_pendingDevice->id())) {
-            declineLocked(*ieeeAddr);
+            dismissLocked(*ieeeAddr);
         }
     }
     m_pendingDevice.reset();
@@ -706,7 +712,6 @@ void ZigbeeHandler::forgetDevice(const std::string& deviceId) {
     const uint64_t ieeeAddr = it->second;
     eraseMappingLocked(ieeeAddr);
     m_savedDevices.erase(ieeeAddr);
-    m_declinedDevices.erase(ieeeAddr);
     m_addressChecks.erase(std::remove(m_addressChecks.begin(), m_addressChecks.end(), ieeeAddr),
                           m_addressChecks.end());
 }
@@ -996,7 +1001,7 @@ void ZigbeeHandler::reportPairingFailure(uint64_t ieeeAddr, const std::string& m
     }
     if (forWizard) {
         std::lock_guard<std::mutex> lock(m_deviceMutex);
-        declineLocked(ieeeAddr);
+        dismissLocked(ieeeAddr);
     }
 
     if (m_discovering && !savedDeviceId(ieeeAddr)) {  // Nobody is adding a device the hub has
@@ -1098,10 +1103,25 @@ void ZigbeeHandler::enrollWorker() {
     std::unique_lock<std::mutex> lock(m_enrollMutex);
     for (;;) {
         m_enrollCv.wait(lock, [this] {
-            return m_stopEnrolling || !m_enrollQueue.empty() || !m_zoneReadQueue.empty();
+            return m_stopEnrolling || !m_enrollQueue.empty() || !m_zoneReadQueue.empty() ||
+                   !m_leaveQueue.empty();
         });
         if (m_stopEnrolling) {
             return;
+        }
+        if (m_enrollQueue.empty() && !m_leaveQueue.empty()) {
+            const uint64_t ieeeAddr = m_leaveQueue.front();
+            m_leaveQueue.pop_front();
+            lock.unlock();
+            // Unless it's been added since, as by a wizard started again
+            if (!savedDeviceId(ieeeAddr)) {
+                LOG_INFO("Asking 0x%016" PRIX64 " to leave the network, as it wasn't added", ieeeAddr);
+                if (!m_coordinator->leaveRequest(ieeeAddr)) {
+                    LOG_WARN("0x%016" PRIX64 " didn't confirm leaving", ieeeAddr);
+                }
+            }
+            lock.lock();
+            continue;
         }
         if (m_enrollQueue.empty()) {
             const uint64_t ieeeAddr = m_zoneReadQueue.front();
@@ -1257,15 +1277,20 @@ void ZigbeeHandler::finishPairing(uint64_t ieeeAddr) {
             return;
         }
 
-        if (discovering) {
-            m_declinedDevices.erase(ieeeAddr);  // Being offered again
-        } else if (forWizard) {
-            LOG_WARN("Not adding 0x%016" PRIX64 ": the wizard it joined during has ended. "
-                     "It can be offered in the next one.", ieeeAddr);
-            declineLocked(ieeeAddr);
-            return;
-        } else if (m_declinedDevices.count(ieeeAddr) > 0) {
-            LOG_INFO("Not adding 0x%016" PRIX64 ": it was declined in the wizard", ieeeAddr);
+        // Only the Add Device wizard adds devices. Outside one, the network is closed, so a device
+        // the hub doesn't keep that announces is one it removed, or whose wizard was cancelled or
+        // failed, or one from before the database was wiped. It can be added in a wizard.
+        if (!discovering) {
+            if (forWizard) {
+                LOG_WARN("Not adding 0x%016" PRIX64 ": the wizard it joined during has ended. "
+                         "It can be added in the next one.", ieeeAddr);
+                dismissLocked(ieeeAddr);
+            } else {
+                // Not asked to leave: if the hub's devices couldn't be loaded, that would take
+                // every device off the network
+                LOG_INFO("Not adding 0x%016" PRIX64 ": devices are added with the Add Device wizard",
+                         ieeeAddr);
+            }
             return;
         }
     }
@@ -1323,22 +1348,21 @@ void ZigbeeHandler::finishPairing(uint64_t ieeeAddr) {
         return;
     }
 
-    // If in discovery mode, store as pending and notify via pending callback
-    // Don't auto-add - let the UI wizard complete first
-    if (discovering) {
+    // Held for the wizard, which adds it when the person confirms
+    {
         LOG_INFO("Device discovered during pairing - storing as pending");
         {
             std::lock_guard<std::mutex> lock(m_deviceMutex);
             // Asked again now, as setting up reporting takes time and the wizard may have been
             // cancelled. Cancelling stops discovery before it clears, so this can't miss both.
             if (!m_discovering) {
-                declineLocked(ieeeAddr);
+                dismissLocked(ieeeAddr);
                 return;
             }
             // The wizard takes one at a time. The one it was holding can be offered in the next.
             if (m_pendingDevice && m_pendingDevice->id() != deviceId) {
                 if (const auto previous = parseIeeeAddress(m_pendingDevice->id())) {
-                    declineLocked(*previous);
+                    dismissLocked(*previous);
                 }
             }
             m_pendingDevice = device;
@@ -1347,16 +1371,6 @@ void ZigbeeHandler::finishPairing(uint64_t ieeeAddr) {
         // case the callback clears itself.
         std::lock_guard<std::recursive_mutex> lock(m_pendingCallbackMutex);
         const DeviceDiscoveredCallback callback = m_pendingDeviceCb;
-        if (callback) {
-            callback(device);
-        }
-    } else {
-        // Not in discovery mode - auto-add the device
-        DeviceDiscoveredCallback callback;
-        {
-            std::lock_guard<std::mutex> lock(m_callbackMutex);
-            callback = m_discoveredCb;
-        }
         if (callback) {
             callback(device);
         }

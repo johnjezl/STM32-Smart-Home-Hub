@@ -719,14 +719,15 @@ bool ZigbeeCoordinator::requestSimpleDescriptor(uint16_t nwkAddr, uint8_t endpoi
 bool ZigbeeCoordinator::leaveRequest(uint64_t ieeeAddr) {
     ZnpFrame req(ZnpType::SREQ, ZnpSubsystem::ZDO, cmd::zdo::MGMT_LEAVE_REQ);
 
-    // Find network address
-    uint16_t nwkAddr = 0xFFFF;
+    // Find network address. Without one this isn't sent, as 0xFFFF would be a broadcast.
+    uint16_t nwkAddr = 0;
     {
         std::lock_guard<std::mutex> lock(m_deviceMutex);
         auto it = m_devices.find(ieeeAddr);
-        if (it != m_devices.end()) {
-            nwkAddr = it->second.networkAddress;
+        if (it == m_devices.end()) {
+            return false;
         }
+        nwkAddr = it->second.networkAddress;
     }
 
     req.appendWord(nwkAddr);
