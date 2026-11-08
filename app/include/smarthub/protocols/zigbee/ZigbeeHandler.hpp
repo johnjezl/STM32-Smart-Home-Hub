@@ -149,7 +149,9 @@ private:
     std::optional<std::string> savedDeviceId(uint64_t ieeeAddr) const;
     static std::optional<uint64_t> parseIeeeAddress(std::string text);
     void eraseMappingLocked(uint64_t ieeeAddr);  // Caller holds m_deviceMutex
-    void declineLocked(uint64_t ieeeAddr);       // Caller holds m_deviceMutex
+    // A device that joined for a wizard but isn't being kept: forgotten, and asked to leave the
+    // network, so it doesn't stay on it sending reports nobody wants. Caller holds m_deviceMutex.
+    void dismissLocked(uint64_t ieeeAddr);
     bool fetchDeviceDetails(uint64_t ieeeAddr);  // False if pairing shouldn't go on
     void enrollIasZone(uint16_t nwkAddr, uint8_t endpoint);
     void notifyZoneStatus(const std::string& deviceId, uint64_t ieeeAddr, uint16_t status);
@@ -218,9 +220,6 @@ private:
     // Devices the hub keeps, IEEE to device id. Announcing again doesn't make one of these new, and
     // this outlives a leave, because the hub still has the device when it rejoins.
     std::map<uint64_t, std::string> m_savedDevices;
-    // Devices the Add Device wizard was cancelled on. They stay on the network, so announcing
-    // again outside a wizard mustn't add them anyway.
-    std::set<uint64_t> m_declinedDevices;
     enum class ZoneAlarm { Other, Motion, Open };  // What an IAS zone's alarm means
     std::map<uint64_t, ZoneAlarm> m_zoneAlarms;
     static ZoneAlarm zoneAlarmFor(DeviceType type, std::optional<uint16_t> zoneType);
@@ -237,6 +236,8 @@ private:
     void queueZoneRead(uint64_t ieeeAddr);
     void requestZoneStatus(uint64_t ieeeAddr);
     std::deque<uint64_t> m_zoneReadQueue;
+    // Devices to ask to leave the network. Also sent by that worker, as it waits for the radio.
+    std::deque<uint64_t> m_leaveQueue;
     bool m_stopEnrolling = false;
     std::deque<uint64_t> m_addressChecks;  // Saved addresses still to confirm
     std::chrono::steady_clock::time_point m_lastAddressCheck{};

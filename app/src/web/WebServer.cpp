@@ -771,6 +771,12 @@ void WebServer::handleHttpRequest(struct mg_connection* c, struct mg_http_messag
             apiZigbeeStopPermitJoin(c);
         } else if (uri == "/api/zigbee/pending-devices" && mg_strcmp(hm->method, mg_str("GET")) == 0) {
             apiGetPendingDevices(c);
+        } else if (uri == "/api/zigbee/pending-devices" && mg_strcmp(hm->method, mg_str("DELETE")) == 0) {
+            // The wizard closed. A device it found and didn't add is asked to leave the network.
+            if (m_zigbeeHandler) {
+                m_zigbeeHandler->clearPendingDevice();
+            }
+            sendJson(c, 200, "{\"success\":true}");
         } else if (uri == "/api/zigbee/devices" && mg_strcmp(hm->method, mg_str("POST")) == 0) {
             apiAddZigbeeDevice(c, hm);
         }

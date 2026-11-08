@@ -98,11 +98,27 @@ protected:
             { "zigbee", "1.0.0", "Zigbee protocol via CC2652P coordinator" });
     }
 
+    // As the dashboard's Add Device wizard does it, the only way to add a device (#63)
+    void addThroughWizard(const FakeZigbeeDevice& device) {
+        auto* handler = dynamic_cast<ZigbeeHandler*>(manager->getProtocol("zigbee"));
+        ASSERT_NE(handler, nullptr);
+        handler->startDiscovery();
+        fake.announceDevice(device);
+        DevicePtr pending;
+        ASSERT_TRUE(eventually([&] {
+            pending = handler->getPendingDevice();
+            return pending != nullptr;
+        }));
+        handler->stopDiscovery();
+        ASSERT_TRUE(manager->addDevice(pending));
+        handler->clearPendingDevice();
+    }
+
     void loadAndPair() {
         ASSERT_TRUE(manager->loadProtocol("zigbee", nlohmann::json::object()));
-        fake.announceDevice(LIGHT);
-        fake.announceDevice(PLUG);
-        ASSERT_TRUE(eventually([&] { return manager->deviceCount() == 2; }));
+        addThroughWizard(LIGHT);
+        addThroughWizard(PLUG);
+        ASSERT_EQ(manager->deviceCount(), 2u);
         fake.clearSentFrames();
     }
 
@@ -208,8 +224,8 @@ TEST_F(ZigbeeControlTest, BrightnessAlsoSetsWhetherTheLightIsOn) {
 
 TEST_F(ZigbeeControlTest, DevicesCantBeSentCommandsTheyDontSupport) {
     loadAndPair();
-    fake.announceDevice(MOTION);
-    ASSERT_TRUE(eventually([&] { return manager->deviceCount() == 3; }));
+    addThroughWizard(MOTION);
+    ASSERT_EQ(manager->deviceCount(), 3u);
     fake.clearSentFrames();
 
     EXPECT_FALSE(manager->setDeviceState(MOTION_ID, "on", true));
