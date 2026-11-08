@@ -134,6 +134,13 @@ public:
     bool changeRole(const std::string& username, const std::string& newRole);
 
     /**
+     * Make this an enabled administrator with this password, creating it if needed. This is the
+     * recovery from a lost administrator password, run on the board with --recover-admin.
+     * @return An empty string on success, otherwise what went wrong
+     */
+    std::string recoverAdmin(const std::string& username, const std::string& password);
+
+    /**
      * Check if an admin user exists
      * Used to determine if first-run setup is needed
      * @return true if at least one admin exists

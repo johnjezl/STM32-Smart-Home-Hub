@@ -69,6 +69,39 @@ class SmartHubApp {
             });
         });
 
+        // Account tab
+        document.getElementById('change-password-form').addEventListener('submit', (e) => {
+            e.preventDefault();
+            this.changePassword();
+        });
+        document.getElementById('create-token-form').addEventListener('submit', (e) => {
+            e.preventDefault();
+            this.createToken();
+        });
+        document.getElementById('add-user-form').addEventListener('submit', (e) => {
+            e.preventDefault();
+            this.addUser();
+        });
+        document.getElementById('tokens-list').addEventListener('click', (e) => {
+            const button = e.target.closest('[data-revoke-token]');
+            if (button) {
+                this.revokeToken(button.dataset.revokeToken);
+            }
+        });
+        document.getElementById('users-list').addEventListener('click', (e) => {
+            const button = e.target.closest('[data-user-action]');
+            if (button) {
+                this.userAction(button.dataset.userAction, button.dataset.username);
+            }
+        });
+        document.getElementById('users-list').addEventListener('change', (e) => {
+            const field = e.target.closest('[data-user-field]');
+            if (field) {
+                const value = field.type === 'checkbox' ? field.checked : field.value;
+                this.updateUser(field.dataset.username, { [field.dataset.userField]: value });
+            }
+        });
+
         // Room filter
         document.getElementById('room-filter').addEventListener('change', (e) => {
             this.filterDevices(e.target.value);
@@ -353,6 +386,7 @@ class SmartHubApp {
 
     async loadData() {
         await Promise.all([
+            this.refreshCurrentUser(),
             this.loadDevices(),
             this.loadRooms(),
             this.loadAutomations()
@@ -1625,6 +1659,251 @@ class SmartHubApp {
         return '📊';
     }
 
+    // ==================== Account ====================
+
+    // The role can change while the page is open, so it's checked with each refresh: a demoted
+    // administrator loses controls that would only be refused, and a promoted user gains theirs.
+    async refreshCurrentUser() {
+        try {
+            const response = await this.api('/api/auth/me');
+            if (!response.ok || !this.currentUser) {
+                return;
+            }
+            const user = await response.json();
+            const roleChanged = user.role !== this.currentUser.role;
+            this.currentUser = user;
+            if (roleChanged) {
+                document.body.classList.toggle('is-admin', this.isAdmin());
+                if (document.getElementById('tab-account').classList.contains('active')) {
+                    this.loadAccount();
+                }
+            }
+        } catch (error) {
+            // The next refresh tries again
+        }
+    }
+
+    async errorText(response, fallback) {
+        try {
+            const data = await response.json();
+            return data.error || fallback;
+        } catch (error) {
+            return fallback;
+        }
+    }
+
+    formatDate(seconds) {
+        return seconds ? new Date(seconds * 1000).toLocaleDateString() : 'never';
+    }
+
+    loadAccount() {
+        this.loadTokens();
+        if (this.isAdmin()) {
+            this.loadUsers();
+        }
+    }
+
+    async changePassword() {
+        const errorEl = document.getElementById('change-password-error');
+        const current = document.getElementById('current-password').value;
+        const next = document.getElementById('new-password').value;
+        errorEl.textContent = '';
+        if (next !== document.getElementById('confirm-password').value) {
+            errorEl.textContent = "The new passwords don't match";
+            return;
+        }
+        try {
+            const response = await this.api('/api/auth/password', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ currentPassword: current, newPassword: next })
+            });
+            if (response.ok) {
+                document.getElementById('change-password-form').reset();
+                this.showToast('Password changed', 'success');
+                this.loadTokens();
+            } else if (response.status !== 401 || this.currentUser) {
+                errorEl.textContent = await this.errorText(response, 'Failed to change password');
+            }
+        } catch (error) {
+            errorEl.textContent = 'Connection error';
+        }
+    }
+
+    async loadTokens() {
+        const container = document.getElementById('tokens-list');
+        try {
+            const response = await this.api('/api/tokens');
+            if (!response.ok) {
+                return;
+            }
+            const tokens = await response.json();
+            container.innerHTML = tokens.length === 0
+                ? '<p class="account-note">No API tokens.</p>'
+                : tokens.map(token => `
+                    <div class="account-row">
+                        <div class="account-row-main">
+                            <div>${this.escapeHtml(token.name)} <code>${this.escapeHtml(token.prefix)}</code></div>
+                            <div class="account-row-detail">
+                                Created ${this.escapeHtml(this.formatDate(token.createdAt))},
+                                last used ${this.escapeHtml(this.formatDate(token.lastUsed))},
+                                expires ${this.escapeHtml(this.formatDate(token.expiresAt))}
+                            </div>
+                        </div>
+                        <button class="btn btn-danger btn-sm" data-revoke-token="${this.escapeHtml(token.id)}">Revoke</button>
+                    </div>`).join('');
+        } catch (error) {
+            container.textContent = 'Failed to load API tokens';
+        }
+    }
+
+    async createToken() {
+        const name = document.getElementById('token-name').value.trim();
+        const expiryDays = parseInt(document.getElementById('token-expiry').value, 10);
+        try {
+            const response = await this.api('/api/tokens', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, expiryDays })
+            });
+            if (!response.ok) {
+                this.showToast(await this.errorText(response, 'Failed to create token'), 'error');
+                return;
+            }
+            const created = await response.json();
+            document.getElementById('create-token-form').reset();
+            document.getElementById('new-token-value').value = created.token;
+            document.getElementById('new-token').classList.remove('hidden');
+            document.getElementById('new-token-value').select();
+            this.loadTokens();
+        } catch (error) {
+            this.showToast('Connection error', 'error');
+        }
+    }
+
+    async revokeToken(id) {
+        if (!window.confirm('Revoke this token? Programs using it will stop working.')) {
+            return;
+        }
+        try {
+            const response = await this.api(`/api/tokens/${encodeURIComponent(id)}`, { method: 'DELETE' });
+            if (!response.ok) {
+                this.showToast(await this.errorText(response, 'Failed to revoke token'), 'error');
+            }
+            document.getElementById('new-token').classList.add('hidden');
+            this.loadTokens();
+        } catch (error) {
+            this.showToast('Connection error', 'error');
+        }
+    }
+
+    async loadUsers() {
+        const container = document.getElementById('users-list');
+        try {
+            const response = await this.api('/api/users');
+            if (!response.ok) {
+                return;
+            }
+            const users = await response.json();
+            container.innerHTML = users.map(user => {
+                const name = this.escapeHtml(user.username);
+                const self = user.username === this.currentUser?.username;
+                return `
+                    <div class="account-row">
+                        <div class="account-row-main">
+                            <div>${name}${self ? ' (you)' : ''}</div>
+                            <div class="account-row-detail">Last login ${this.escapeHtml(this.formatDate(user.lastLogin))}</div>
+                        </div>
+                        <select data-user-field="role" data-username="${name}" aria-label="Role">
+                            <option value="user" ${user.role === 'user' ? 'selected' : ''}>User</option>
+                            <option value="admin" ${user.role === 'admin' ? 'selected' : ''}>Administrator</option>
+                        </select>
+                        <label><input type="checkbox" data-user-field="enabled" data-username="${name}"
+                            ${user.enabled ? 'checked' : ''}> Enabled</label>
+                        <button class="btn btn-outline btn-sm" data-user-action="password" data-username="${name}">Set password</button>
+                        <button class="btn btn-danger btn-sm" data-user-action="remove" data-username="${name}">Remove</button>
+                    </div>`;
+            }).join('');
+        } catch (error) {
+            container.textContent = 'Failed to load accounts';
+        }
+    }
+
+    async addUser() {
+        const username = document.getElementById('new-user-name').value.trim();
+        const password = document.getElementById('new-user-password').value;
+        const role = document.getElementById('new-user-role').value;
+        try {
+            const response = await this.api('/api/users', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, password, role })
+            });
+            if (!response.ok) {
+                this.showToast(await this.errorText(response, 'Failed to add account'), 'error');
+                return;
+            }
+            document.getElementById('add-user-form').reset();
+            this.showToast(`Added ${username}`, 'success');
+            this.loadUsers();
+        } catch (error) {
+            this.showToast('Connection error', 'error');
+        }
+    }
+
+    async updateUser(username, changes) {
+        try {
+            const response = await this.api(`/api/users/${encodeURIComponent(username)}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(changes)
+            });
+            if (!response.ok) {
+                this.showToast(await this.errorText(response, 'Failed to update account'), 'error');
+            }
+        } catch (error) {
+            this.showToast('Connection error', 'error');
+        }
+        // Shows what the hub has, whether or not that worked, and any change to this user's role
+        await this.refreshCurrentUser();
+        if (this.isAdmin()) {
+            this.loadUsers();
+        }
+    }
+
+    async userAction(action, username) {
+        let response;
+        try {
+            if (action === 'password') {
+                const password = window.prompt(`New password for ${username}. Their sessions and API tokens will end.`);
+                if (!password) {
+                    return;
+                }
+                response = await this.api(`/api/users/${encodeURIComponent(username)}/password`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ password })
+                });
+            } else if (action === 'remove') {
+                if (!window.confirm(`Remove ${username}? Their sessions and API tokens end too.`)) {
+                    return;
+                }
+                response = await this.api(`/api/users/${encodeURIComponent(username)}`, { method: 'DELETE' });
+            } else {
+                return;
+            }
+        } catch (error) {
+            this.showToast('Connection error', 'error');
+            return;
+        }
+        if (response.ok) {
+            this.showToast(action === 'remove' ? `Removed ${username}` : `Password set for ${username}`, 'success');
+        } else {
+            this.showToast(await this.errorText(response, 'Failed'), 'error');
+        }
+        this.loadUsers();
+    }
+
     switchTab(tabName) {
         document.querySelectorAll('.tab').forEach(tab => {
             tab.classList.toggle('active', tab.dataset.tab === tabName);
@@ -1633,6 +1912,11 @@ class SmartHubApp {
         document.querySelectorAll('.tab-content').forEach(content => {
             content.classList.toggle('active', content.id === `tab-${tabName}`);
         });
+
+        if (tabName === 'account') {
+            document.getElementById('new-token').classList.add('hidden');
+            this.loadAccount();
+        }
     }
 
     showToast(message, type = 'info') {

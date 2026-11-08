@@ -347,6 +347,25 @@ bool UserManager::changeRole(const std::string& username, const std::string& new
     return true;
 }
 
+std::string UserManager::recoverAdmin(const std::string& username, const std::string& password) {
+    for (const std::string& problem : {validateUsername(username), validatePassword(password)}) {
+        if (!problem.empty()) {
+            return problem;
+        }
+    }
+
+    if (!getUser(username)) {
+        return createUser(username, password, "admin") ? "" : "Failed to create the account";
+    }
+    if (!changePassword(username, password)) {
+        return "Failed to set the password";
+    }
+    if (!changeRole(username, "admin") || !setUserEnabled(username, true)) {
+        return "Failed to make the account an enabled administrator";
+    }
+    return "";
+}
+
 bool UserManager::hasAdminUser() const {
     const char* selectSql = "SELECT COUNT(*) FROM users WHERE role = 'admin' AND enabled = 1";
 

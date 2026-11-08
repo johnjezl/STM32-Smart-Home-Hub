@@ -175,6 +175,24 @@ private:
     void apiGetCurrentUser(struct mg_connection* c, const AuthInfo& auth);
     void apiGetSetupStatus(struct mg_connection* c);
     void apiSetup(struct mg_connection* c, struct mg_http_message* hm);
+    void apiChangeOwnPassword(struct mg_connection* c, struct mg_http_message* hm,
+                              const AuthInfo& auth);
+
+    // Account API handlers, for administrators
+    void apiGetUsers(struct mg_connection* c);
+    void apiCreateUser(struct mg_connection* c, struct mg_http_message* hm);
+    void apiUpdateUser(struct mg_connection* c, const std::string& username,
+                       struct mg_http_message* hm);
+    void apiDeleteUser(struct mg_connection* c, const std::string& username);
+    void apiSetUserPassword(struct mg_connection* c, const std::string& username,
+                            struct mg_http_message* hm, const AuthInfo& auth);
+    // Enabled administrators other than this user, who must leave at least one
+    int otherEnabledAdmins(const std::string& username);
+
+    // API token handlers, each user's own
+    void apiGetTokens(struct mg_connection* c, const AuthInfo& auth);
+    void apiCreateToken(struct mg_connection* c, struct mg_http_message* hm, const AuthInfo& auth);
+    void apiDeleteToken(struct mg_connection* c, const std::string& id, const AuthInfo& auth);
 
     // Room API handlers
     void apiGetRooms(struct mg_connection* c);
@@ -244,10 +262,21 @@ private:
     // Hashing a password takes over a second on the board, so it happens on its own thread, and
     // the connection gets its answer when that's done.
     struct PasswordJob {
+        enum class Kind {
+            Login,
+            Setup,
+            CreateUser,         // By an administrator
+            ChangeOwnPassword,  // Checks the current one first
+            SetPassword,        // An administrator setting someone's
+        };
         unsigned long connectionId = 0;
-        bool isSetup = false;
+        Kind kind = Kind::Login;
         std::string username;
-        std::string password;
+        std::string password;     // For ChangeOwnPassword, the current one
+        std::string newPassword;  // For ChangeOwnPassword
+        std::string role;         // For CreateUser
+        int actorUserId = 0;      // Who asked, for ChangeOwnPassword and SetPassword
+        std::string keepSessionToken;  // The asker's session, which a password change keeps
         std::string clientIp;
         bool closeAfterReply = false;
     };
@@ -255,7 +284,9 @@ private:
         unsigned long connectionId = 0;
         std::string clientIp;
         bool isLogin = false;
-        std::optional<security::User> user;
+        bool countsAsFailedLogin = false;  // A wrong password, which counts towards the lockout
+        std::optional<security::User> user;  // Starts a session
+        std::optional<std::string> reply;    // Or a JSON reply, with status
         int status = 0;  // For a response without a session
         bool closeAfterReply = false;
         std::string error;

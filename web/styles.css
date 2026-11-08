@@ -1295,3 +1295,91 @@ body:not(.is-admin) .admin-only {
         margin-bottom: 8px;
     }
 }
+
+/* Account tab */
+.account-section {
+    background: var(--surface);
+    border-radius: 12px;
+    padding: 16px 20px;
+    margin-bottom: 20px;
+}
+
+.account-section h2 {
+    margin-top: 0;
+}
+
+.account-form {
+    margin-top: 12px;
+    align-items: flex-end;
+}
+
+.account-form select,
+.account-row select,
+.new-token input {
+    background: var(--surface-light);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+}
+
+.account-form select {
+    width: 100%;
+    padding: 10px;
+    border-radius: 8px;
+}
+
+.form-group-button {
+    flex: 0 0 auto;
+}
+
+.account-note {
+    color: var(--text-secondary);
+    font-size: 0.9em;
+}
+
+.account-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.account-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border);
+}
+
+.account-row-main {
+    flex: 1 1 200px;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.account-row-detail {
+    color: var(--text-secondary);
+    font-size: 0.85em;
+}
+
+.account-row select {
+    padding: 6px;
+    border-radius: 6px;
+}
+
+.new-token {
+    margin-top: 12px;
+}
+
+.new-token input {
+    width: 100%;
+    font-family: monospace;
+    padding: 8px;
+}
+
+@media (max-width: 640px) {
+    .account-form.form-row {
+        flex-direction: column;
+        align-items: stretch;
+    }
+}

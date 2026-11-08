@@ -152,6 +152,96 @@ The request must have the `Content-Type: application/json` header, or it gets `4
 
 ---
 
+## Account Endpoints
+
+Accounts are only for administrators, even to list. Each user manages their own password and API tokens. See [Security](security.md#managing-accounts) for what each change does to sessions and tokens.
+
+Every request with a body must have `Content-Type: application/json`.
+
+### POST /api/auth/password
+
+Change your own password. Not with an API token: sign in.
+
+```json
+{ "currentPassword": "Old-Password-1", "newPassword": "New-Password-1" }
+```
+
+Your other sessions end and your API tokens are revoked. This session carries on.
+
+**Response (200 OK):** `{"success": true, "revokedTokens": 1}`
+
+**Response (400):** a field is missing, or the new password breaks the [rules](#post-apisetup). **401:** the current password is wrong, which counts as a failed login. **403:** sent with an API token. **429:** too many failed logins from this IP.
+
+### GET /api/users
+
+All accounts, without their passwords. **Admin only.**
+
+```json
+[{ "id": 1, "username": "owner", "role": "admin", "enabled": true, "createdAt": 1762470000, "lastLogin": 1762480000 }]
+```
+
+### POST /api/users
+
+Add an account. **Admin only.** `role` is `admin` or `user`, and defaults to `user`.
+
+```json
+{ "username": "guest", "password": "Guest-Password-1", "role": "user" }
+```
+
+**Response (201 Created):** the account, as in the list. **400:** a bad username, password or role. **409:** the username is taken.
+
+### PUT /api/users/{username}
+
+Change a role, or disable or enable an account. **Admin only.** Give either or both.
+
+```json
+{ "role": "admin", "enabled": true }
+```
+
+**Response (200 OK):** the account. **400:** neither given, or a bad value. **404:** no such account. **409:** this would leave no enabled administrator.
+
+### PUT /api/users/{username}/password
+
+Set someone's password. **Admin only.** Their sessions end, apart from yours if it's your own account, and their API tokens are revoked.
+
+```json
+{ "password": "New-Password-1" }
+```
+
+**Response (200 OK):** as for `POST /api/auth/password`. **400**, **404** as above.
+
+### DELETE /api/users/{username}
+
+Remove an account, its sessions and its API tokens. **Admin only.**
+
+**Response (200 OK)**. **404:** no such account. **409:** it's the last enabled administrator.
+
+### GET /api/tokens
+
+Your API tokens. The token itself is never shown again after it's made.
+
+```json
+[{ "id": 3, "name": "Home Assistant", "prefix": "a1b2c3d4...", "createdAt": 1762470000, "lastUsed": 0, "expiresAt": 1770246000, "enabled": true }]
+```
+
+### POST /api/tokens
+
+Make an API token. Not with an API token: sign in. `expiryDays` is 0 (never, the default) to 3650.
+
+```json
+{ "name": "Home Assistant", "expiryDays": 90 }
+```
+
+**Response (201 Created):** `{"token": "...", "name": "Home Assistant", "prefix": "a1b2c3d4...", "expiryDays": 90}`, with `Cache-Control: no-store`. Copy the token now. **400:** no name, a name over 64 characters or with control characters, or a bad `expiryDays`. **403:** sent with an API token. **409:** you already have 20.
+
+### DELETE /api/tokens/{id}
+
+Revoke one of your API tokens. Not with an API token.
+
+**Response (200 OK)**. **404:** you have no token with that id. **403:** sent with an API token.
+
+---
+
 ## System Endpoints
 
 ### GET /api/system/status

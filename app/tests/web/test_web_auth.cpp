@@ -974,6 +974,259 @@ TEST_F(WebAuthTest, ApiTokenStopsWorkingWhenItsOwnerIsDisabled) {
     EXPECT_EQ(request("GET", "/api/devices", options).status, 401);
 }
 
+// ---------- Account management (#36)
+
+TEST_F(WebAuthTest, AdminCanAddAnAccountThatCanLogIn) {
+    startApp();
+    RequestOptions admin(R"({"username":"guest","password":"Guest-Pass-1","role":"user"})");
+    admin.cookie = setUpAdmin();
+
+    const Response created = request("POST", "/api/users", admin);
+    ASSERT_EQ(created.status, 201) << created.body;
+    EXPECT_EQ(created.json()["username"], "guest");
+    EXPECT_EQ(created.json()["role"], "user");
+    EXPECT_FALSE(created.json().contains("passwordHash"));
+    EXPECT_EQ(login("guest", "Guest-Pass-1").status, 200);
+
+    const auto users = request("GET", "/api/users", admin).json();
+    ASSERT_TRUE(users.is_array());
+    EXPECT_EQ(users.size(), 2u);
+    for (const auto& user : users) {
+        EXPECT_FALSE(user.contains("passwordHash"));
+    }
+
+    // Taken, weak, malformed or with a role that doesn't exist
+    EXPECT_EQ(request("POST", "/api/users", admin).status, 409);
+    for (const char* body : {R"({"username":"other","password":"short"})",
+                             R"({"username":"bad name!","password":"Guest-Pass-1"})",
+                             R"({"username":"other","password":"Guest-Pass-1","role":"root"})",
+                             R"({"username":"other"})"}) {
+        RequestOptions bad = admin;
+        bad.body = body;
+        EXPECT_EQ(request("POST", "/api/users", bad).status, 400) << body;
+    }
+}
+
+TEST_F(WebAuthTest, OnlyAdministratorsManageAccounts) {
+    startApp();
+    setUpAdmin();
+    addUser("guest", "Guest-Pass-1", "user");
+    RequestOptions guest(R"({"username":"other","password":"Guest-Pass-1","role":"admin"})");
+    guest.cookie = loginCookie("guest", "Guest-Pass-1");
+
+    EXPECT_EQ(request("GET", "/api/users", guest).status, 403);
+    EXPECT_EQ(request("POST", "/api/users", guest).status, 403);
+    guest.body = R"({"role":"admin"})";
+    EXPECT_EQ(request("PUT", "/api/users/guest", guest).status, 403);
+    guest.body = R"({"password":"Guest-Pass-2"})";
+    EXPECT_EQ(request("PUT", std::string("/api/users/") + kAdminName + "/password", guest).status, 403);
+    EXPECT_EQ(request("DELETE", std::string("/api/users/") + kAdminName, guest).status, 403);
+
+    EXPECT_EQ(request("GET", "/api/users").status, 401);
+}
+
+TEST_F(WebAuthTest, TheLastEnabledAdministratorStays) {
+    startApp();
+    RequestOptions admin;
+    admin.cookie = setUpAdmin();
+    const std::string self = std::string("/api/users/") + kAdminName;
+
+    admin.body = R"({"role":"user"})";
+    EXPECT_EQ(request("PUT", self, admin).status, 409);
+    admin.body = R"({"enabled":false})";
+    EXPECT_EQ(request("PUT", self, admin).status, 409);
+    EXPECT_EQ(request("DELETE", self, admin).status, 409);
+
+    // A disabled administrator doesn't count
+    addUser("spare", "Spare-Pass-1", "admin");
+    security::UserManager users(m_app->database());
+    ASSERT_TRUE(users.setUserEnabled("spare", false));
+    admin.body = R"({"role":"user"})";
+    EXPECT_EQ(request("PUT", self, admin).status, 409);
+
+    ASSERT_TRUE(users.setUserEnabled("spare", true));
+    const Response demoted = request("PUT", self, admin);
+    EXPECT_EQ(demoted.status, 200) << demoted.body;
+    EXPECT_EQ(demoted.json()["role"], "user");
+}
+
+TEST_F(WebAuthTest, AdminCanChangeRolesAndDisableAccounts) {
+    startApp();
+    RequestOptions admin;
+    admin.cookie = setUpAdmin();
+    addUser("guest", "Guest-Pass-1", "user");
+    RequestOptions guest(R"({"name":"Den"})");
+    guest.cookie = loginCookie("guest", "Guest-Pass-1");
+    EXPECT_EQ(request("POST", "/api/rooms", guest).status, 403);
+
+    admin.body = R"({"role":"admin"})";
+    EXPECT_EQ(request("PUT", "/api/users/guest", admin).status, 200);
+    EXPECT_EQ(request("POST", "/api/rooms", guest).status, 201);
+
+    admin.body = R"({"enabled":false})";
+    const Response disabled = request("PUT", "/api/users/guest", admin);
+    EXPECT_EQ(disabled.status, 200);
+    EXPECT_EQ(disabled.json()["enabled"], false);
+    EXPECT_EQ(request("GET", "/api/devices", guest).status, 401);
+    EXPECT_EQ(login("guest", "Guest-Pass-1").status, 401);
+
+    for (const char* body : {R"({})", R"({"role":"root"})", R"({"enabled":"no"})"}) {
+        admin.body = body;
+        EXPECT_EQ(request("PUT", "/api/users/guest", admin).status, 400) << body;
+    }
+    admin.body = R"({"role":"user"})";
+    EXPECT_EQ(request("PUT", "/api/users/nobody", admin).status, 404);
+}
+
+TEST_F(WebAuthTest, RemovingAnAccountEndsItsSessionsAndTokens) {
+    startApp();
+    RequestOptions admin;
+    admin.cookie = setUpAdmin();
+    addUser("guest", "Guest-Pass-1", "user");
+    RequestOptions guest;
+    guest.cookie = loginCookie("guest", "Guest-Pass-1");
+    security::UserManager users(m_app->database());
+    security::ApiTokenManager tokens(m_app->database());
+    RequestOptions script;
+    script.bearer = tokens.createToken(users.getUser("guest")->id, "script");
+
+    EXPECT_EQ(request("DELETE", "/api/users/guest", admin).status, 200);
+    EXPECT_EQ(request("GET", "/api/devices", guest).status, 401);
+    EXPECT_EQ(request("GET", "/api/devices", script).status, 401);
+    EXPECT_FALSE(tokens.validateToken(script.bearer));
+    EXPECT_EQ(request("DELETE", "/api/users/guest", admin).status, 404);
+}
+
+TEST_F(WebAuthTest, ChangingYourPasswordEndsYourOtherSessionsAndTokens) {
+    startApp();
+    setUpAdmin();
+    addUser("guest", "Guest-Pass-1", "user");
+    RequestOptions here(R"({"currentPassword":"Guest-Pass-1","newPassword":"Guest-Pass-2"})");
+    here.cookie = loginCookie("guest", "Guest-Pass-1");
+    RequestOptions elsewhere;
+    elsewhere.cookie = loginCookie("guest", "Guest-Pass-1");
+    security::UserManager users(m_app->database());
+    security::ApiTokenManager tokens(m_app->database());
+    RequestOptions script;
+    script.bearer = tokens.createToken(users.getUser("guest")->id, "script");
+
+    const Response changed = request("POST", "/api/auth/password", here);
+    ASSERT_EQ(changed.status, 200) << changed.body;
+    EXPECT_EQ(changed.json()["revokedTokens"], 1);
+
+    EXPECT_EQ(request("GET", "/api/devices", here).status, 200);
+    EXPECT_EQ(request("GET", "/api/devices", elsewhere).status, 401);
+    EXPECT_EQ(request("GET", "/api/devices", script).status, 401);
+    EXPECT_EQ(login("guest", "Guest-Pass-1").status, 401);
+    EXPECT_EQ(login("guest", "Guest-Pass-2").status, 200);
+}
+
+TEST_F(WebAuthTest, ChangingYourPasswordNeedsTheCurrentOne) {
+    startApp();
+    setUpAdmin();
+    addUser("guest", "Guest-Pass-1", "user");
+    RequestOptions guest(R"({"currentPassword":"Wrong-Pass-1","newPassword":"Guest-Pass-2"})");
+    guest.cookie = loginCookie("guest", "Guest-Pass-1");
+
+    EXPECT_EQ(request("POST", "/api/auth/password", guest).status, 401);
+    guest.body = R"({"currentPassword":"Guest-Pass-1","newPassword":"short"})";
+    EXPECT_EQ(request("POST", "/api/auth/password", guest).status, 400);
+    guest.body = R"({"newPassword":"Guest-Pass-2"})";
+    EXPECT_EQ(request("POST", "/api/auth/password", guest).status, 400);
+    EXPECT_EQ(login("guest", "Guest-Pass-1").status, 200);
+
+    // Not with a token: whoever holds one mustn't be able to take the account over
+    security::UserManager users(m_app->database());
+    security::ApiTokenManager tokens(m_app->database());
+    RequestOptions script(R"({"currentPassword":"Guest-Pass-1","newPassword":"Guest-Pass-2"})");
+    script.bearer = tokens.createToken(users.getUser("guest")->id, "script");
+    EXPECT_EQ(request("POST", "/api/auth/password", script).status, 403);
+}
+
+TEST_F(WebAuthTest, WrongCurrentPasswordsCountTowardsTheLockout) {
+    startApp("security:\n  login_max_failures: 2\n  login_failure_window_seconds: 60\n");
+    setUpAdmin();
+    addUser("guest", "Guest-Pass-1", "user");
+    RequestOptions guest(R"({"currentPassword":"Wrong-Pass-1","newPassword":"Guest-Pass-2"})");
+    guest.cookie = loginCookie("guest", "Guest-Pass-1");
+
+    EXPECT_EQ(request("POST", "/api/auth/password", guest).status, 401);
+    EXPECT_EQ(request("POST", "/api/auth/password", guest).status, 401);
+    guest.body = R"({"currentPassword":"Guest-Pass-1","newPassword":"Guest-Pass-2"})";
+    EXPECT_EQ(request("POST", "/api/auth/password", guest).status, 429);
+}
+
+TEST_F(WebAuthTest, AdminCanSetSomeonesPassword) {
+    startApp();
+    RequestOptions admin(R"({"password":"Guest-Pass-2"})");
+    admin.cookie = setUpAdmin();
+    addUser("guest", "Guest-Pass-1", "user");
+    RequestOptions guest;
+    guest.cookie = loginCookie("guest", "Guest-Pass-1");
+
+    EXPECT_EQ(request("PUT", "/api/users/guest/password", admin).status, 200);
+    EXPECT_EQ(request("GET", "/api/devices", guest).status, 401);
+    EXPECT_EQ(login("guest", "Guest-Pass-1").status, 401);
+    EXPECT_EQ(login("guest", "Guest-Pass-2").status, 200);
+
+    // Their own, keeping the session that did it
+    admin.body = R"({"password":"Correct-Horse-2"})";
+    EXPECT_EQ(request("PUT", std::string("/api/users/") + kAdminName + "/password", admin).status, 200);
+    EXPECT_EQ(request("GET", "/api/users", admin).status, 200);
+
+    admin.body = R"({"password":"short"})";
+    EXPECT_EQ(request("PUT", "/api/users/guest/password", admin).status, 400);
+    admin.body = R"({"password":"Guest-Pass-3"})";
+    EXPECT_EQ(request("PUT", "/api/users/nobody/password", admin).status, 404);
+}
+
+TEST_F(WebAuthTest, UsersCreateListAndRevokeTheirOwnTokens) {
+    startApp();
+    setUpAdmin();
+    addUser("guest", "Guest-Pass-1", "user");
+    RequestOptions guest(R"({"name":"Home Assistant","expiryDays":30})");
+    guest.cookie = loginCookie("guest", "Guest-Pass-1");
+
+    const Response created = request("POST", "/api/tokens", guest);
+    ASSERT_EQ(created.status, 201) << created.body;
+    EXPECT_TRUE(created.hasHeader("no-store"));
+    const std::string token = created.json()["token"];
+    ASSERT_FALSE(token.empty());
+
+    RequestOptions script;
+    script.bearer = token;
+    EXPECT_EQ(request("GET", "/api/auth/me", script).json()["username"], "guest");
+
+    const auto listed = request("GET", "/api/tokens", guest).json();
+    ASSERT_EQ(listed.size(), 1u);
+    EXPECT_EQ(listed[0]["name"], "Home Assistant");
+    EXPECT_GT(listed[0]["expiresAt"].get<uint64_t>(), 0u);
+    EXPECT_EQ(listed[0].dump().find(token), std::string::npos);  // Never shown again
+    const std::string tokenPath = "/api/tokens/" + std::to_string(listed[0]["id"].get<int>());
+
+    // A token can't make or revoke tokens, so one that leaks can't make more
+    script.body = R"({"name":"more"})";
+    EXPECT_EQ(request("POST", "/api/tokens", script).status, 403);
+    EXPECT_EQ(request("DELETE", tokenPath, script).status, 403);
+
+    // Nor can anyone else
+    RequestOptions admin;
+    admin.cookie = loginCookie(kAdminName, kAdminPassword);
+    EXPECT_EQ(request("DELETE", tokenPath, admin).status, 404);
+    EXPECT_EQ(request("GET", "/api/tokens", admin).json().size(), 0u);
+
+    EXPECT_EQ(request("DELETE", tokenPath, guest).status, 200);
+    EXPECT_EQ(request("GET", "/api/auth/me", script).status, 401);
+    EXPECT_EQ(request("DELETE", tokenPath, guest).status, 404);
+    EXPECT_EQ(request("DELETE", "/api/tokens/abc", guest).status, 404);
+
+    for (const char* body : {R"({})", R"({"name":""})", R"({"name":"a\nb"})",
+                             R"({"name":"x","expiryDays":-1})", R"({"name":"x","expiryDays":"30"})"}) {
+        guest.body = body;
+        EXPECT_EQ(request("POST", "/api/tokens", guest).status, 400) << body;
+    }
+}
+
 // ---------- Roles
 
 TEST_F(WebAuthTest, RegularUserCanReadAndControlButNotConfigure) {

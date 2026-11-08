@@ -626,6 +626,98 @@ if (typeof window === 'undefined' && typeof require !== 'undefined') {
     });
 }
 
+// The account tab and role refresh, with a stand-in page. Node only, as it reads app.js.
+if (typeof window === 'undefined' && typeof require !== 'undefined') {
+    TestRunner.describe('Account', () => {
+        const loadApp = (responses) => {
+            const fs = require('fs');
+            const path = require('path');
+            const vm = require('vm');
+
+            const elements = {};
+            const element = (id) => {
+                if (!elements[id]) {
+                    const classes = new Set();
+                    elements[id] = {
+                        value: '',
+                        textContent: '',
+                        innerHTML: '',
+                        classList: {
+                            add: (c) => classes.add(c),
+                            remove: (c) => classes.delete(c),
+                            contains: (c) => classes.has(c),
+                            toggle: (c, on) => (on ? classes.add(c) : classes.delete(c)),
+                        },
+                        reset() {},
+                        select() {},
+                    };
+                }
+                return elements[id];
+            };
+            const body = element('body');
+            const context = {
+                console,
+                window: { confirm: () => true, prompt: () => null },
+                document: { getElementById: element, addEventListener() {}, body },
+                setTimeout: () => 0, clearTimeout() {}, setInterval: () => 0, clearInterval() {},
+            };
+            const source = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+            const SmartHubApp = vm.runInNewContext(`${source}\n;SmartHubApp`, context);
+
+            const app = Object.create(SmartHubApp.prototype);
+            app.requests = [];
+            app.api = async (url, options = {}) => {
+                app.requests.push(`${options.method || 'GET'} ${url}`);
+                const reply = responses[url] || { status: 200, body: {} };
+                return { ok: reply.status < 300, status: reply.status, json: async () => reply.body };
+            };
+            app.showToast = () => {};
+            return { app, element, body };
+        };
+
+        TestRunner.it('should drop admin controls when the role is taken away', async () => {
+            const { app, body } = loadApp({ '/api/auth/me': { status: 200, body: { username: 'ann', role: 'user' } } });
+            app.currentUser = { username: 'ann', role: 'admin' };
+            body.classList.add('is-admin');
+
+            await app.refreshCurrentUser();
+            TestRunner.assertEqual(app.currentUser.role, 'user');
+            TestRunner.assertFalse(body.classList.contains('is-admin'));
+        });
+
+        TestRunner.it('should show admin controls when the role is given', async () => {
+            const { app, body } = loadApp({ '/api/auth/me': { status: 200, body: { username: 'ann', role: 'admin' } } });
+            app.currentUser = { username: 'ann', role: 'user' };
+
+            await app.refreshCurrentUser();
+            TestRunner.assertTrue(body.classList.contains('is-admin'));
+        });
+
+        TestRunner.it('should not send a password change whose two new passwords differ', async () => {
+            const { app, element } = loadApp({});
+            app.currentUser = { username: 'ann', role: 'user' };
+            element('current-password').value = 'Old-Pass-1';
+            element('new-password').value = 'New-Pass-1';
+            element('confirm-password').value = 'New-Pass-2';
+
+            await app.changePassword();
+            TestRunner.assertEqual(app.requests.length, 0);
+            TestRunner.assertTrue(element('change-password-error').textContent.length > 0);
+        });
+
+        TestRunner.it('should send the current and new password', async () => {
+            const { app, element } = loadApp({});
+            app.currentUser = { username: 'ann', role: 'user' };
+            element('current-password').value = 'Old-Pass-1';
+            element('new-password').value = 'New-Pass-1';
+            element('confirm-password').value = 'New-Pass-1';
+
+            await app.changePassword();
+            TestRunner.assertContains(app.requests, 'POST /api/auth/password');
+        });
+    });
+}
+
 // Run tests if in browser or Node.js
 if (typeof window !== 'undefined') {
     window.addEventListener('DOMContentLoaded', () => {

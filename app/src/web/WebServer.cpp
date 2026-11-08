@@ -548,7 +548,16 @@ bool WebServer::requiresAdmin(const std::string& method, const std::string& uri)
     if (uri == "/api/zigbee/pending-devices") {
         return true;
     }
+    // Accounts, even to look at
+    if (uri == "/api/users" || uri.rfind("/api/users/", 0) == 0) {
+        return true;
+    }
     if (method == "GET" || method == "HEAD") {
+        return false;
+    }
+    // Every user manages their own password and API tokens
+    if ((method == "POST" && (uri == "/api/auth/password" || uri == "/api/tokens")) ||
+        (method == "DELETE" && uri.rfind("/api/tokens/", 0) == 0)) {
         return false;
     }
     // Controlling a device, PUT /api/devices/{id}, is open to every user.
@@ -680,6 +689,36 @@ void WebServer::handleHttpRequest(struct mg_connection* c, struct mg_http_messag
             apiGetSetupStatus(c);
         } else if (uri == "/api/setup" && mg_strcmp(hm->method, mg_str("POST")) == 0) {
             apiSetup(c, hm);
+        } else if (uri == "/api/auth/password" && mg_strcmp(hm->method, mg_str("POST")) == 0) {
+            apiChangeOwnPassword(c, hm, auth);
+        }
+        // Account API
+        else if (uri == "/api/users" && mg_strcmp(hm->method, mg_str("GET")) == 0) {
+            apiGetUsers(c);
+        } else if (uri == "/api/users" && mg_strcmp(hm->method, mg_str("POST")) == 0) {
+            apiCreateUser(c, hm);
+        } else if (uri.rfind("/api/users/", 0) == 0) {
+            std::string remainder = uri.substr(11);  // Remove "/api/users/"
+            const size_t slashPos = remainder.find('/');
+            const std::string username = remainder.substr(0, slashPos);
+            const std::string action = slashPos == std::string::npos ? "" : remainder.substr(slashPos + 1);
+            if (action.empty() && mg_strcmp(hm->method, mg_str("PUT")) == 0) {
+                apiUpdateUser(c, username, hm);
+            } else if (action.empty() && mg_strcmp(hm->method, mg_str("DELETE")) == 0) {
+                apiDeleteUser(c, username);
+            } else if (action == "password" && mg_strcmp(hm->method, mg_str("PUT")) == 0) {
+                apiSetUserPassword(c, username, hm, auth);
+            } else {
+                sendError(c, action.empty() ? 405 : 404, action.empty() ? "Method not allowed" : "Not found");
+            }
+        }
+        // API token API
+        else if (uri == "/api/tokens" && mg_strcmp(hm->method, mg_str("GET")) == 0) {
+            apiGetTokens(c, auth);
+        } else if (uri == "/api/tokens" && mg_strcmp(hm->method, mg_str("POST")) == 0) {
+            apiCreateToken(c, hm, auth);
+        } else if (uri.rfind("/api/tokens/", 0) == 0 && mg_strcmp(hm->method, mg_str("DELETE")) == 0) {
+            apiDeleteToken(c, uri.substr(12), auth);
         }
         // Room API
         else if (uri == "/api/rooms" && mg_strcmp(hm->method, mg_str("GET")) == 0) {
@@ -791,6 +830,30 @@ namespace {
 // keeps one bad value from failing the whole response.
 std::string toResponse(const nlohmann::json& value) {
     return value.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
+}
+
+nlohmann::json userJson(const security::User& user) {
+    return {
+        {"id", user.id},
+        {"username", user.username},
+        {"role", user.role},
+        {"enabled", user.enabled},
+        {"createdAt", user.createdAt},
+        {"lastLogin", user.lastLogin},
+    };
+}
+
+// A JSON body's object, or nothing if it isn't one
+std::optional<nlohmann::json> jsonObject(struct mg_http_message* hm) {
+    auto body = nlohmann::json::parse(hm->body.buf, hm->body.buf + hm->body.len, nullptr, false);
+    if (!body.is_object()) {
+        return std::nullopt;
+    }
+    return body;
+}
+
+bool isRole(const std::string& role) {
+    return role == "admin" || role == "user";
 }
 
 nlohmann::json deviceJson(const IDevice& device) {
@@ -1039,7 +1102,7 @@ void WebServer::passwordWorkerLoop() {
         }
         result.connectionId = job.connectionId;
         result.clientIp = job.clientIp;
-        result.isLogin = !job.isSetup;
+        result.isLogin = job.kind == PasswordJob::Kind::Login;
         result.closeAfterReply = job.closeAfterReply;
         lock.lock();
 
@@ -1054,7 +1117,65 @@ void WebServer::passwordWorkerLoop() {
 WebServer::PasswordResult WebServer::runPasswordJob(const PasswordJob& job) {
     PasswordResult result;
 
-    if (job.isSetup) {
+    using Kind = PasswordJob::Kind;
+    if (job.kind == Kind::CreateUser) {
+        // Checked again, as another request may have taken the name since
+        if (m_userMgr->getUser(job.username)) {
+            result.status = 409;
+            result.error = "That username is taken";
+        } else if (m_userMgr->createUser(job.username, job.password, job.role)) {
+            LOG_INFO("Account created: %s (%s)", job.username.c_str(), job.role.c_str());
+            if (auto user = m_userMgr->getUser(job.username)) {
+                result.status = 201;
+                result.reply = toResponse(userJson(*user));
+            }
+        }
+        if (!result.reply && result.status == 0) {
+            result.status = 500;
+            result.error = "Failed to create account";
+        }
+        return result;
+    }
+
+    if (job.kind == Kind::ChangeOwnPassword || job.kind == Kind::SetPassword) {
+        const auto user = job.kind == Kind::ChangeOwnPassword ? m_userMgr->getUserById(job.actorUserId)
+                                                              : m_userMgr->getUser(job.username);
+        if (!user) {
+            result.status = 404;
+            result.error = "No such account";
+            return result;
+        }
+        if (job.kind == Kind::ChangeOwnPassword &&
+            !m_userMgr->authenticate(user->username, job.password)) {
+            result.status = 401;
+            result.error = "Current password is incorrect";
+            result.countsAsFailedLogin = true;
+            return result;
+        }
+        const std::string& newPassword =
+            job.kind == Kind::ChangeOwnPassword ? job.newPassword : job.password;
+        if (!m_userMgr->changePassword(user->username, newPassword)) {
+            result.status = 500;
+            result.error = "Failed to change password";
+            return result;
+        }
+
+        // Whoever knew the old password is shut out: their sessions end and their tokens stop
+        // working. The asker's own session carries on, if it's theirs.
+        const bool ownAccount = user->id == job.actorUserId;
+        if (m_sessionMgr) {
+            m_sessionMgr->destroyUserSessionsExcept(user->username,
+                                                    ownAccount ? job.keepSessionToken : "");
+        }
+        const int revoked = m_tokenMgr ? m_tokenMgr->revokeUserTokens(user->id) : 0;
+        LOG_INFO("Password changed for %s; %d API token(s) revoked", user->username.c_str(),
+                 revoked);
+        result.status = 200;
+        result.reply = toResponse({{"success", true}, {"revokedTokens", revoked}});
+        return result;
+    }
+
+    if (job.kind == Kind::Setup) {
         // Checked again here, because this is what puts setups in order. Two at once must not both
         // create an administrator.
         if (m_userMgr->hasAnyUser()) {
@@ -1098,7 +1219,7 @@ void WebServer::sendPasswordResults() {
             // Counted even if the client has gone, or hanging up would make guesses free. Only a
             // wrong password counts, so a fault here can't lock out people with the right one.
             try {
-                if (result.isLogin && result.status == 401) {
+                if ((result.isLogin && result.status == 401) || result.countsAsFailedLogin) {
                     recordLoginFailure(result.clientIp);
                 }
             } catch (...) {
@@ -1121,6 +1242,8 @@ void WebServer::sendPasswordResults() {
 
             if (result.user) {
                 startSession(c, *result.user, result.isLogin ? 200 : 201);
+            } else if (result.reply) {
+                sendJson(c, result.status, *result.reply);
             } else {
                 sendError(c, result.status, result.error);
             }
@@ -1216,12 +1339,373 @@ void WebServer::apiSetup(struct mg_connection* c, struct mg_http_message* hm) {
     }
 
     PasswordJob job;
-    job.isSetup = true;
+    job.kind = PasswordJob::Kind::Setup;
     job.username = std::move(username);
     job.password = std::move(password);
     job.clientIp = getClientIp(c);
     job.closeAfterReply = wantsClose(hm);
     queuePasswordJob(c, std::move(job));
+}
+
+void WebServer::apiChangeOwnPassword(struct mg_connection* c, struct mg_http_message* hm,
+                                     const AuthInfo& auth) {
+    if (!m_userMgr) {
+        sendError(c, 500, "Authentication not configured");
+        return;
+    }
+    // A token is for programs. Someone holding one shouldn't be able to take over the account.
+    if (auth.isApiToken) {
+        sendError(c, 403, "Sign in to change your password");
+        return;
+    }
+    // A wrong current password counts as a failed login, so this can't be used to guess it
+    const std::string clientIp = getClientIp(c);
+    const int retryAfter = loginRetryAfterSeconds(clientIp);
+    if (retryAfter > 0) {
+        sendJsonWithHeaders(c, 429, "{\"error\":\"Too many failed login attempts\"}",
+                            "Retry-After: " + std::to_string(retryAfter) + "\r\n");
+        return;
+    }
+    if (!isJsonRequest(hm)) {
+        sendError(c, 415, "Content-Type must be application/json");
+        return;
+    }
+    const auto body = jsonObject(hm);
+    const auto current = body ? body->find("currentPassword") : nlohmann::json::const_iterator{};
+    const auto next = body ? body->find("newPassword") : nlohmann::json::const_iterator{};
+    if (!body || current == body->end() || next == body->end() || !current->is_string() ||
+        !next->is_string() || current->get<std::string>().empty()) {
+        sendError(c, 400, "currentPassword and newPassword required");
+        return;
+    }
+    const std::string problem = security::UserManager::validatePassword(next->get<std::string>());
+    if (!problem.empty()) {
+        sendError(c, 400, problem);
+        return;
+    }
+
+    PasswordJob job;
+    job.kind = PasswordJob::Kind::ChangeOwnPassword;
+    job.actorUserId = auth.userId;
+    job.password = current->get<std::string>();
+    job.newPassword = next->get<std::string>();
+    job.keepSessionToken = sessionTokenFromCookies(hm);
+    job.clientIp = clientIp;
+    job.closeAfterReply = wantsClose(hm);
+    queuePasswordJob(c, std::move(job));
+}
+
+int WebServer::otherEnabledAdmins(const std::string& username) {
+    int count = 0;
+    for (const auto& user : m_userMgr->getAllUsers()) {
+        if (user.username != username && user.enabled && user.role == "admin") {
+            ++count;
+        }
+    }
+    return count;
+}
+
+void WebServer::apiGetUsers(struct mg_connection* c) {
+    if (!m_userMgr) {
+        sendError(c, 500, "Authentication not configured");
+        return;
+    }
+    nlohmann::json users = nlohmann::json::array();
+    for (const auto& user : m_userMgr->getAllUsers()) {
+        users.push_back(userJson(user));
+    }
+    sendJson(c, 200, toResponse(users));
+}
+
+void WebServer::apiCreateUser(struct mg_connection* c, struct mg_http_message* hm) {
+    if (!m_userMgr) {
+        sendError(c, 500, "Authentication not configured");
+        return;
+    }
+    if (!isJsonRequest(hm)) {
+        sendError(c, 415, "Content-Type must be application/json");
+        return;
+    }
+    std::string username, password;
+    if (!parseCredentials(hm, username, password)) {
+        sendError(c, 400, "Username and password required");
+        return;
+    }
+    const auto body = jsonObject(hm);
+    std::string role = "user";
+    if (body && body->contains("role")) {
+        if (!(*body)["role"].is_string() || !isRole((*body)["role"].get<std::string>())) {
+            sendError(c, 400, "role must be admin or user");
+            return;
+        }
+        role = (*body)["role"].get<std::string>();
+    }
+    for (const std::string& problem : {security::UserManager::validateUsername(username),
+                                       security::UserManager::validatePassword(password)}) {
+        if (!problem.empty()) {
+            sendError(c, 400, problem);
+            return;
+        }
+    }
+    if (m_userMgr->getUser(username)) {
+        sendError(c, 409, "That username is taken");
+        return;
+    }
+
+    PasswordJob job;
+    job.kind = PasswordJob::Kind::CreateUser;
+    job.username = std::move(username);
+    job.password = std::move(password);
+    job.role = role;
+    job.clientIp = getClientIp(c);
+    job.closeAfterReply = wantsClose(hm);
+    queuePasswordJob(c, std::move(job));
+}
+
+void WebServer::apiUpdateUser(struct mg_connection* c, const std::string& username,
+                              struct mg_http_message* hm) {
+    if (!m_userMgr) {
+        sendError(c, 500, "Authentication not configured");
+        return;
+    }
+    if (!isJsonRequest(hm)) {
+        sendError(c, 415, "Content-Type must be application/json");
+        return;
+    }
+    const auto body = jsonObject(hm);
+    if (!body) {
+        sendError(c, 400, "Invalid JSON");
+        return;
+    }
+    std::optional<std::string> role;
+    std::optional<bool> enabled;
+    if (body->contains("role")) {
+        if (!(*body)["role"].is_string() || !isRole((*body)["role"].get<std::string>())) {
+            sendError(c, 400, "role must be admin or user");
+            return;
+        }
+        role = (*body)["role"].get<std::string>();
+    }
+    if (body->contains("enabled")) {
+        if (!(*body)["enabled"].is_boolean()) {
+            sendError(c, 400, "enabled must be true or false");
+            return;
+        }
+        enabled = (*body)["enabled"].get<bool>();
+    }
+    if (!role && !enabled) {
+        sendError(c, 400, "Nothing to change: give role or enabled");
+        return;
+    }
+
+    auto user = m_userMgr->getUser(username);
+    if (!user) {
+        sendError(c, 404, "No such account");
+        return;
+    }
+    const bool staysEnabledAdmin = (enabled ? *enabled : user->enabled) &&
+                                   (role ? *role : user->role) == "admin";
+    if (!staysEnabledAdmin && otherEnabledAdmins(username) == 0) {
+        sendError(c, 409, "There has to be at least one enabled administrator");
+        return;
+    }
+
+    if ((role && *role != user->role && !m_userMgr->changeRole(username, *role)) ||
+        (enabled && *enabled != user->enabled && !m_userMgr->setUserEnabled(username, *enabled))) {
+        sendError(c, 500, "Failed to update account");
+        return;
+    }
+    // A disabled account is refused on every request anyway, but this frees its sessions
+    if (enabled && !*enabled && m_sessionMgr) {
+        m_sessionMgr->destroyUserSessions(username);
+    }
+    LOG_INFO("Account updated: %s", username.c_str());
+
+    user = m_userMgr->getUser(username);
+    if (!user) {
+        sendError(c, 500, "Failed to read account");
+        return;
+    }
+    sendJson(c, 200, toResponse(userJson(*user)));
+}
+
+void WebServer::apiDeleteUser(struct mg_connection* c, const std::string& username) {
+    if (!m_userMgr) {
+        sendError(c, 500, "Authentication not configured");
+        return;
+    }
+    auto user = m_userMgr->getUser(username);
+    if (!user) {
+        sendError(c, 404, "No such account");
+        return;
+    }
+    if (otherEnabledAdmins(username) == 0) {
+        sendError(c, 409, "There has to be at least one enabled administrator");
+        return;
+    }
+    // Its tokens go first, so none outlives it and is matched to a later account with its id
+    if (m_tokenMgr) {
+        m_tokenMgr->revokeUserTokens(user->id);
+    }
+    if (!m_userMgr->deleteUser(username)) {
+        sendError(c, 500, "Failed to remove account");
+        return;
+    }
+    if (m_sessionMgr) {
+        m_sessionMgr->destroyUserSessions(username);
+    }
+    LOG_INFO("Account removed: %s", username.c_str());
+    sendJson(c, 200, "{\"success\":true}");
+}
+
+void WebServer::apiSetUserPassword(struct mg_connection* c, const std::string& username,
+                                   struct mg_http_message* hm, const AuthInfo& auth) {
+    if (!m_userMgr) {
+        sendError(c, 500, "Authentication not configured");
+        return;
+    }
+    if (!isJsonRequest(hm)) {
+        sendError(c, 415, "Content-Type must be application/json");
+        return;
+    }
+    const auto body = jsonObject(hm);
+    const auto password = body ? body->find("password") : nlohmann::json::const_iterator{};
+    if (!body || password == body->end() || !password->is_string()) {
+        sendError(c, 400, "password required");
+        return;
+    }
+    const std::string problem = security::UserManager::validatePassword(password->get<std::string>());
+    if (!problem.empty()) {
+        sendError(c, 400, problem);
+        return;
+    }
+    if (!m_userMgr->getUser(username)) {
+        sendError(c, 404, "No such account");
+        return;
+    }
+
+    PasswordJob job;
+    job.kind = PasswordJob::Kind::SetPassword;
+    job.username = username;
+    job.password = password->get<std::string>();
+    job.actorUserId = auth.userId;
+    job.keepSessionToken = sessionTokenFromCookies(hm);
+    job.clientIp = getClientIp(c);
+    job.closeAfterReply = wantsClose(hm);
+    queuePasswordJob(c, std::move(job));
+}
+
+void WebServer::apiGetTokens(struct mg_connection* c, const AuthInfo& auth) {
+    if (!m_tokenMgr) {
+        sendError(c, 500, "API tokens not configured");
+        return;
+    }
+    nlohmann::json tokens = nlohmann::json::array();
+    for (const auto& token : m_tokenMgr->getUserTokens(auth.userId)) {
+        tokens.push_back({
+            {"id", token.id},
+            {"name", token.name},
+            {"prefix", token.tokenPrefix},
+            {"createdAt", token.createdAt},
+            {"lastUsed", token.lastUsed},
+            {"expiresAt", token.expiresAt},
+            {"enabled", token.enabled},
+        });
+    }
+    sendJson(c, 200, toResponse(tokens));
+}
+
+void WebServer::apiCreateToken(struct mg_connection* c, struct mg_http_message* hm,
+                               const AuthInfo& auth) {
+    constexpr int kMaxTokensPerUser = 20;
+    constexpr size_t kMaxNameLength = 64;
+
+    if (!m_tokenMgr) {
+        sendError(c, 500, "API tokens not configured");
+        return;
+    }
+    // So a token that leaks can't be used to make more
+    if (auth.isApiToken) {
+        sendError(c, 403, "Sign in to create API tokens");
+        return;
+    }
+    if (!isJsonRequest(hm)) {
+        sendError(c, 415, "Content-Type must be application/json");
+        return;
+    }
+    const auto body = jsonObject(hm);
+    const auto name = body ? body->find("name") : nlohmann::json::const_iterator{};
+    if (!body || name == body->end() || !name->is_string() || name->get<std::string>().empty() ||
+        name->get<std::string>().size() > kMaxNameLength) {
+        sendError(c, 400, "name required, up to 64 characters");
+        return;
+    }
+    for (unsigned char ch : name->get<std::string>()) {
+        if (ch < 0x20 || ch == 0x7F) {
+            sendError(c, 400, "name can't contain control characters");
+            return;
+        }
+    }
+    int expiryDays = 0;
+    if (body->contains("expiryDays")) {
+        const auto& days = (*body)["expiryDays"];
+        if (!days.is_number_integer() || days.get<int64_t>() < 0 || days.get<int64_t>() > 3650) {
+            sendError(c, 400, "expiryDays must be 0 (never) to 3650");
+            return;
+        }
+        expiryDays = static_cast<int>(days.get<int64_t>());
+    }
+    if (m_tokenMgr->countUserTokens(auth.userId) >= kMaxTokensPerUser) {
+        sendError(c, 409, "Too many API tokens: revoke one first");
+        return;
+    }
+
+    const std::string token = m_tokenMgr->createToken(auth.userId, name->get<std::string>(), expiryDays);
+    if (token.empty()) {
+        sendError(c, 500, "Failed to create API token");
+        return;
+    }
+    LOG_INFO("API token created for %s", auth.username.c_str());
+    // Shown only this once, so it mustn't be kept by a cache on the way
+    sendJsonWithHeaders(c, 201,
+                        toResponse({{"token", token},
+                                    {"name", name->get<std::string>()},
+                                    {"prefix", security::ApiTokenManager::getTokenPrefix(token)},
+                                    {"expiryDays", expiryDays}}),
+                        "Cache-Control: no-store\r\n");
+}
+
+void WebServer::apiDeleteToken(struct mg_connection* c, const std::string& id,
+                               const AuthInfo& auth) {
+    if (!m_tokenMgr) {
+        sendError(c, 500, "API tokens not configured");
+        return;
+    }
+    if (auth.isApiToken) {
+        sendError(c, 403, "Sign in to revoke API tokens");
+        return;
+    }
+    int tokenId = 0;
+    try {
+        size_t used = 0;
+        tokenId = std::stoi(id, &used);
+        if (used != id.size()) {
+            throw std::invalid_argument("trailing characters");
+        }
+    } catch (...) {
+        sendError(c, 404, "No such API token");
+        return;
+    }
+    // Only your own: someone else's id is answered the same as one that doesn't exist
+    const auto tokens = m_tokenMgr->getUserTokens(auth.userId);
+    const bool owned = std::any_of(tokens.begin(), tokens.end(),
+                                   [tokenId](const security::ApiToken& t) { return t.id == tokenId; });
+    if (!owned || !m_tokenMgr->revokeToken(tokenId)) {
+        sendError(c, 404, "No such API token");
+        return;
+    }
+    LOG_INFO("API token revoked for %s", auth.username.c_str());
+    sendJson(c, 200, "{\"success\":true}");
 }
 
 void WebServer::apiGetRooms(struct mg_connection* c) {
@@ -1787,6 +2271,17 @@ int WebServer::loginRetryAfterSeconds(const std::string&) { return 0; }
 void WebServer::recordLoginFailure(const std::string&) {}
 bool WebServer::requiresAdmin(const std::string&, const std::string&) { return true; }
 void WebServer::apiGetCurrentUser(struct mg_connection*, const AuthInfo&) {}
+void WebServer::apiChangeOwnPassword(struct mg_connection*, struct mg_http_message*, const AuthInfo&) {}
+void WebServer::apiGetUsers(struct mg_connection*) {}
+void WebServer::apiCreateUser(struct mg_connection*, struct mg_http_message*) {}
+void WebServer::apiUpdateUser(struct mg_connection*, const std::string&, struct mg_http_message*) {}
+void WebServer::apiDeleteUser(struct mg_connection*, const std::string&) {}
+void WebServer::apiSetUserPassword(struct mg_connection*, const std::string&, struct mg_http_message*,
+                                   const AuthInfo&) {}
+int WebServer::otherEnabledAdmins(const std::string&) { return 0; }
+void WebServer::apiGetTokens(struct mg_connection*, const AuthInfo&) {}
+void WebServer::apiCreateToken(struct mg_connection*, struct mg_http_message*, const AuthInfo&) {}
+void WebServer::apiDeleteToken(struct mg_connection*, const std::string&, const AuthInfo&) {}
 void WebServer::apiGetRooms(struct mg_connection*) {}
 void WebServer::apiCreateRoom(struct mg_connection*, struct mg_http_message*) {}
 void WebServer::apiUpdateRoom(struct mg_connection*, const std::string&, struct mg_http_message*) {}

@@ -93,6 +93,13 @@ public:
     void destroyUserSessions(const std::string& username);
 
     /**
+     * Destroy a user's sessions except one, as when they change their password
+     * @param username Username
+     * @param keepToken The session to keep, normally the one that made the change
+     */
+    void destroyUserSessionsExcept(const std::string& username, const std::string& keepToken);
+
+    /**
      * Get all sessions for a user
      * @param username Username
      * @return List of sessions (tokens hidden)
