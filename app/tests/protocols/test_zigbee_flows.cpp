@@ -481,7 +481,8 @@ protected:
         return count;
     }
 
-    nlohmann::json handlerConfig = nlohmann::json::object();
+    // Leaves wait less than the 3 s default, so tests that check them are quick
+    nlohmann::json handlerConfig = {{"leaveDelayMs", 200}};
 
     /** Watches for pairing failures. */
     void watchForPairingErrors() {
@@ -2450,6 +2451,69 @@ TEST_F(ZigbeeEndpointListRetryTest, FallsBackToTheEndpointsListedBefore) {
     ASSERT_TRUE(eventually([&] { return discoveredCount() == 1; }, 10s));
     std::lock_guard<std::mutex> lock(mutex);
     EXPECT_EQ(discovered[0]->type(), DeviceType::Dimmer);
+}
+
+class ZigbeeLeaveDelayTest : public ZigbeeHandlerFlowTest {
+protected:
+    void SetUp() override {
+        handlerConfig["leaveDelayMs"] = 1500;
+        ZigbeeHandlerFlowTest::SetUp();
+    }
+};
+
+TEST_F(ZigbeeLeaveDelayTest, ADeviceOfferedAgainAtOnceIsNotSentAway) {
+    // Cancelled, then the wizard is started again straight away and finds it again
+    beginWizardTest();
+    handler->startDiscovery();
+    fake.announceDevice(LIGHT);
+    ASSERT_TRUE(eventually([&] { return pendingCount() == 1; }));
+    handler->stopDiscovery();
+    handler->clearPendingDevice();
+
+    handler->startDiscovery();
+    fake.announceDevice(LIGHT);
+    ASSERT_TRUE(eventually([&] { return pendingCount() == 2; }));
+
+    std::this_thread::sleep_for(2500ms);
+    EXPECT_TRUE(fake.sentFrames(ZnpSubsystem::ZDO, cmd::zdo::MGMT_LEAVE_REQ).empty());
+    EXPECT_NE(handler->getPendingDevice(), nullptr);
+}
+
+TEST_F(ZigbeeLeaveDelayTest, ALeaveWaitsALittle) {
+    beginWizardTest();
+    handler->startDiscovery();
+    fake.announceDevice(LIGHT);
+    ASSERT_TRUE(eventually([&] { return pendingCount() == 1; }));
+    handler->stopDiscovery();
+    handler->clearPendingDevice();
+
+    std::this_thread::sleep_for(700ms);
+    EXPECT_TRUE(fake.sentFrames(ZnpSubsystem::ZDO, cmd::zdo::MGMT_LEAVE_REQ).empty()) << "not yet";
+    EXPECT_TRUE(fake.waitForSent(ZnpSubsystem::ZDO, cmd::zdo::MGMT_LEAVE_REQ, 1, 3s));
+}
+
+class ZigbeePendingHoldTest : public ZigbeeHandlerFlowTest {
+protected:
+    void SetUp() override {
+        handlerConfig["pendingHoldMs"] = 300;
+        ZigbeeHandlerFlowTest::SetUp();
+    }
+};
+
+TEST_F(ZigbeePendingHoldTest, AWizardThatWentAwayLetsItsDeviceGo) {
+    // As when the dashboard's tab is closed while it holds a device
+    beginWizardTest();
+    handler->startDiscovery();
+    fake.announceDevice(LIGHT);
+    ASSERT_TRUE(eventually([&] { return pendingCount() == 1; }));
+    handler->stopDiscovery();
+
+    handler->poll();
+    EXPECT_NE(handler->getPendingDevice(), nullptr) << "not straight away";
+    std::this_thread::sleep_for(400ms);
+    handler->poll();
+    EXPECT_EQ(handler->getPendingDevice(), nullptr);
+    EXPECT_TRUE(fake.waitForSent(ZnpSubsystem::ZDO, cmd::zdo::MGMT_LEAVE_REQ, 1));
 }
 
 class ZigbeePairingTimeoutTest : public ZigbeeHandlerFlowTest {

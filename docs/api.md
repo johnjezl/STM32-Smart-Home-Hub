@@ -627,7 +627,7 @@ Get devices discovered during pairing.
 
 ### DELETE /api/zigbee/pending-devices
 
-Let go of the device the wizard found, when the wizard closes. **Admin only.** If it wasn't added, the hub asks it to leave the network, as only the wizard adds devices. The dashboard calls this whenever its Add Device dialog closes.
+Let go of the device the wizard found, when the wizard closes. **Admin only.** If it wasn't added, the hub asks it to leave the network, as only the wizard adds devices. The dashboard calls this when its Add Device dialog closes after finding a device. If nothing calls it, the hub lets the device go 10 minutes after discovery stops.
 
 **Response (200 OK):** `{"success": true}`
 

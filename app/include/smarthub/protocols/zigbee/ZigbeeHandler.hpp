@@ -191,6 +191,7 @@ private:
     bool m_stopPairing = false;
     int m_pairingTimeoutMs = 30000;
     int m_pairingEndpointTimeoutMs = 5000;
+    int m_pendingHoldMs = 600000;  // How long a wizard's device is held after discovery stops
 
     // Callbacks
     DeviceDiscoveredCallback m_discoveredCb;
@@ -206,6 +207,7 @@ private:
 
     // Pending device during discovery (not auto-added)
     DevicePtr m_pendingDevice;
+    std::chrono::steady_clock::time_point m_pendingSince{};  // When it was found, under m_deviceMutex
 
     // Device mappings
     std::map<uint64_t, std::string> m_ieeeToDeviceId;
@@ -236,8 +238,11 @@ private:
     void queueZoneRead(uint64_t ieeeAddr);
     void requestZoneStatus(uint64_t ieeeAddr);
     std::deque<uint64_t> m_zoneReadQueue;
-    // Devices to ask to leave the network. Also sent by that worker, as it waits for the radio.
-    std::deque<uint64_t> m_leaveQueue;
+    // Devices to ask to leave the network, and when. Also sent by that worker, as it waits for the
+    // radio. Each waits a little first: a wizard started again at once offers the device again,
+    // which takes it off this.
+    std::deque<std::pair<uint64_t, std::chrono::steady_clock::time_point>> m_leaveQueue;
+    int m_leaveDelayMs = 3000;
     bool m_stopEnrolling = false;
     std::deque<uint64_t> m_addressChecks;  // Saved addresses still to confirm
     std::chrono::steady_clock::time_point m_lastAddressCheck{};

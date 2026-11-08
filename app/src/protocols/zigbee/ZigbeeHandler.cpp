@@ -206,6 +206,8 @@ bool ZigbeeHandler::initialize() {
     m_pairingEndpointTimeoutMs = timeoutSetting(m_config, "pairingEndpointTimeoutMs", 5000);
     m_addressLookupIntervalMs = timeoutSetting(m_config, "addressLookupIntervalMs", 30000);
     m_pairingReadTimeoutMs = timeoutSetting(m_config, "pairingReadTimeoutMs", 3000);
+    m_pendingHoldMs = timeoutSetting(m_config, "pendingHoldMs", 600000);
+    m_leaveDelayMs = timeoutSetting(m_config, "leaveDelayMs", 3000);
 
     {
         std::lock_guard<std::mutex> lock(m_pairingMutex);
@@ -333,6 +335,20 @@ void ZigbeeHandler::shutdown() {
 
 void ZigbeeHandler::poll() {
     // The coordinator handles async messages via its reader thread
+
+    // A wizard that went away without saying, as when the dashboard's tab was closed, would hold
+    // its device for good. Long after discovery stopped, it's let go, and asked to leave.
+    if (!m_discovering) {
+        std::lock_guard<std::mutex> lock(m_deviceMutex);
+        if (m_pendingDevice &&
+            std::chrono::steady_clock::now() - m_pendingSince > std::chrono::milliseconds(m_pendingHoldMs)) {
+            LOG_INFO("Letting go of %s, which a wizard found but didn't add", m_pendingDevice->id().c_str());
+            if (const auto ieeeAddr = parseIeeeAddress(m_pendingDevice->id())) {
+                dismissLocked(*ieeeAddr);
+            }
+            m_pendingDevice.reset();
+        }
+    }
 
     // A saved address may be out of date, and a command to it could reach another device. These
     // lookups are broadcasts, so they're spread out.
@@ -587,8 +603,11 @@ void ZigbeeHandler::dismissLocked(uint64_t ieeeAddr) {
     eraseMappingLocked(ieeeAddr);
     {
         std::lock_guard<std::mutex> lock(m_enrollMutex);
-        if (std::find(m_leaveQueue.begin(), m_leaveQueue.end(), ieeeAddr) == m_leaveQueue.end()) {
-            m_leaveQueue.push_back(ieeeAddr);
+        const bool queued = std::any_of(m_leaveQueue.begin(), m_leaveQueue.end(),
+                                        [ieeeAddr](const auto& leave) { return leave.first == ieeeAddr; });
+        if (!queued) {
+            m_leaveQueue.emplace_back(ieeeAddr, std::chrono::steady_clock::now() +
+                                                    std::chrono::milliseconds(m_leaveDelayMs));
         }
     }
     m_enrollCv.notify_all();
@@ -763,6 +782,15 @@ void ZigbeeHandler::onDeviceAnnounced(uint16_t nwkAddr, uint64_t ieeeAddr) {
 }
 
 void ZigbeeHandler::startPairing(uint16_t nwkAddr, uint64_t ieeeAddr) {
+    // Being offered again in a wizard, so a leave queued for it when the last one let it go would
+    // take it off the network while the person is adding it
+    if (m_discovering) {
+        std::lock_guard<std::mutex> leaveLock(m_enrollMutex);
+        m_leaveQueue.erase(std::remove_if(m_leaveQueue.begin(), m_leaveQueue.end(),
+                                          [ieeeAddr](const auto& leave) { return leave.first == ieeeAddr; }),
+                           m_leaveQueue.end());
+    }
+
     std::lock_guard<std::mutex> lock(m_pairingMutex);
     if (m_stopPairing) {
         return;
@@ -1109,12 +1137,28 @@ void ZigbeeHandler::enrollWorker() {
         if (m_stopEnrolling) {
             return;
         }
-        if (m_enrollQueue.empty() && !m_leaveQueue.empty()) {
-            const uint64_t ieeeAddr = m_leaveQueue.front();
+        if (m_enrollQueue.empty() && m_zoneReadQueue.empty() && !m_leaveQueue.empty() &&
+            std::chrono::steady_clock::now() < m_leaveQueue.front().second) {
+            // Not yet: wait for it, or for something else to do, which comes first
+            const auto due = m_leaveQueue.front().second;
+            m_enrollCv.wait_until(lock, due, [this] {
+                return m_stopEnrolling || !m_enrollQueue.empty() || !m_zoneReadQueue.empty() ||
+                       m_leaveQueue.empty();
+            });
+            continue;
+        }
+        if (m_enrollQueue.empty() && !m_leaveQueue.empty() &&
+            std::chrono::steady_clock::now() >= m_leaveQueue.front().second) {
+            const uint64_t ieeeAddr = m_leaveQueue.front().first;
             m_leaveQueue.pop_front();
             lock.unlock();
-            // Unless it's been added since, as by a wizard started again
-            if (!savedDeviceId(ieeeAddr)) {
+            // Unless it's been added since, or a wizard is offering it again
+            bool offered = false;
+            {
+                std::lock_guard<std::mutex> deviceLock(m_deviceMutex);
+                offered = m_pendingDevice && m_pendingDevice->id() == ieeeToDeviceId(ieeeAddr);
+            }
+            if (!savedDeviceId(ieeeAddr) && !offered) {
                 LOG_INFO("Asking 0x%016" PRIX64 " to leave the network, as it wasn't added", ieeeAddr);
                 if (!m_coordinator->leaveRequest(ieeeAddr)) {
                     LOG_WARN("0x%016" PRIX64 " didn't confirm leaving", ieeeAddr);
@@ -1366,6 +1410,7 @@ void ZigbeeHandler::finishPairing(uint64_t ieeeAddr) {
                 }
             }
             m_pendingDevice = device;
+            m_pendingSince = std::chrono::steady_clock::now();
         }
         // Held during the call, so clearing the callback waits for it. Recursive, and a copy, in
         // case the callback clears itself.
