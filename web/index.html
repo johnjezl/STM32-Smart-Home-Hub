@@ -75,6 +75,7 @@
             <button class="tab" data-tab="devices">Devices</button>
             <button class="tab" data-tab="sensors">Sensors</button>
             <button class="tab" data-tab="automations">Automations</button>
+            <button class="tab" data-tab="account">Account</button>
         </nav>
 
         <!-- Dashboard Tab -->
@@ -154,6 +155,87 @@
             <div id="automations-list" class="automations-list">
                 <!-- Automation cards inserted here -->
             </div>
+        </main>
+
+        <!-- Account Tab -->
+        <main id="tab-account" class="tab-content">
+            <section class="account-section">
+                <h2>Password</h2>
+                <form id="change-password-form" class="account-form">
+                    <div class="form-group">
+                        <label for="current-password">Current password</label>
+                        <input type="password" id="current-password" required autocomplete="current-password">
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="new-password">New password</label>
+                            <input type="password" id="new-password" required autocomplete="new-password">
+                        </div>
+                        <div class="form-group">
+                            <label for="confirm-password">New password again</label>
+                            <input type="password" id="confirm-password" required autocomplete="new-password">
+                        </div>
+                    </div>
+                    <p class="account-note">Changing it signs you out everywhere else and revokes your API tokens.</p>
+                    <div id="change-password-error" class="error-message"></div>
+                    <button type="submit" class="btn btn-primary btn-sm">Change password</button>
+                </form>
+            </section>
+
+            <section class="account-section">
+                <h2>API tokens</h2>
+                <p class="account-note">For scripts and other programs. A token acts as you, with your role.</p>
+                <div id="tokens-list" class="account-list"></div>
+                <form id="create-token-form" class="account-form form-row">
+                    <div class="form-group">
+                        <label for="token-name">Name</label>
+                        <input type="text" id="token-name" maxlength="64" required placeholder="e.g., Home Assistant">
+                    </div>
+                    <div class="form-group">
+                        <label for="token-expiry">Expires</label>
+                        <select id="token-expiry">
+                            <option value="0">Never</option>
+                            <option value="30">In 30 days</option>
+                            <option value="90" selected>In 90 days</option>
+                            <option value="365">In a year</option>
+                        </select>
+                    </div>
+                    <div class="form-group form-group-button">
+                        <button type="submit" class="btn btn-primary btn-sm">Create token</button>
+                    </div>
+                </form>
+                <div id="new-token" class="new-token hidden">
+                    <p>Copy this token now. It won't be shown again.</p>
+                    <input type="text" id="new-token-value" readonly>
+                </div>
+            </section>
+
+            <section class="account-section admin-only">
+                <h2>Accounts</h2>
+                <div id="users-list" class="account-list"></div>
+                <form id="add-user-form" class="account-form form-row">
+                    <div class="form-group">
+                        <label for="new-user-name">Username</label>
+                        <input type="text" id="new-user-name" required autocomplete="off">
+                    </div>
+                    <div class="form-group">
+                        <label for="new-user-password">Password</label>
+                        <input type="password" id="new-user-password" required autocomplete="new-password">
+                    </div>
+                    <div class="form-group">
+                        <label for="new-user-role">Role</label>
+                        <select id="new-user-role">
+                            <option value="user" selected>User</option>
+                            <option value="admin">Administrator</option>
+                        </select>
+                    </div>
+                    <div class="form-group form-group-button">
+                        <button type="submit" class="btn btn-primary btn-sm">Add account</button>
+                    </div>
+                </form>
+                <p class="account-note">Lost the administrator password? On the hub, run
+                    <code>smarthub --recover-admin &lt;username&gt;</code>.</p>
+            </section>
         </main>
     </div>
 

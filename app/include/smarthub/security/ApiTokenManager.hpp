@@ -132,6 +132,11 @@ public:
      */
     int cleanupExpired();
 
+    /**
+     * Get token prefix for display
+     */
+    static std::string getTokenPrefix(const std::string& token);
+
 private:
     /**
      * Generate secure random token
@@ -144,10 +149,6 @@ private:
      */
     std::string hashToken(const std::string& token);
 
-    /**
-     * Get token prefix for display
-     */
-    static std::string getTokenPrefix(const std::string& token);
 
     Database& m_db;
 

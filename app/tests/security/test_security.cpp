@@ -287,6 +287,34 @@ protected:
     std::unique_ptr<UserManager> userMgr;
 };
 
+TEST_F(UserManagerTest, RecoverAdminCreatesTheAccountIfNeeded) {
+    EXPECT_EQ(userMgr->recoverAdmin("rescue", "Rescue-Pass-1"), "");
+    auto user = userMgr->getUser("rescue");
+    ASSERT_TRUE(user);
+    EXPECT_EQ(user->role, "admin");
+    EXPECT_TRUE(user->enabled);
+    EXPECT_TRUE(userMgr->authenticate("rescue", "Rescue-Pass-1"));
+}
+
+TEST_F(UserManagerTest, RecoverAdminRestoresAnExistingAccount) {
+    ASSERT_TRUE(userMgr->createUser("owner", "Owner-Pass-1", "user"));
+    ASSERT_TRUE(userMgr->setUserEnabled("owner", false));
+
+    EXPECT_EQ(userMgr->recoverAdmin("owner", "Owner-Pass-2"), "");
+    auto user = userMgr->getUser("owner");
+    ASSERT_TRUE(user);
+    EXPECT_EQ(user->role, "admin");
+    EXPECT_TRUE(user->enabled);
+    EXPECT_FALSE(userMgr->authenticate("owner", "Owner-Pass-1"));
+    EXPECT_TRUE(userMgr->authenticate("owner", "Owner-Pass-2"));
+}
+
+TEST_F(UserManagerTest, RecoverAdminChecksTheNameAndPassword) {
+    EXPECT_NE(userMgr->recoverAdmin("rescue", "short"), "");
+    EXPECT_NE(userMgr->recoverAdmin("bad name!", "Rescue-Pass-1"), "");
+    EXPECT_FALSE(userMgr->getUser("rescue"));
+}
+
 TEST_F(UserManagerTest, CreateUserSucceeds) {
     EXPECT_TRUE(userMgr->createUser("testuser", "Password123", "user"));
     EXPECT_EQ(userMgr->userCount(), 1);

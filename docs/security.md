@@ -180,7 +180,30 @@ Setup and login only accept a request addressed to an IP address, a name with no
 
 ### Managing Accounts
 
-There's no web interface yet for adding accounts, changing passwords or issuing API tokens, and a lost administrator password can only be recovered by removing the accounts from the database on the board. See [#36](https://github.com/johnjezl/STM32-Smart-Home-Hub/issues/36).
+The dashboard's **Account** tab has everything here, and the [API](api.md#account-endpoints) has the same.
+
+- **Everyone** can change their own password and manage their own API tokens.
+  - Changing your password needs the current one. A wrong one counts as a failed login. It ends your other sessions and revokes your API tokens, as whoever knew the old password may have made some.
+  - A token is shown once, when it's made. It acts as you, with your role. Tokens can't be made or revoked with a token, only when signed in, so one that leaks can't be used to make more. You can have up to 20.
+- **Administrators** can also add accounts, change roles, disable and enable accounts, set someone's password and remove accounts.
+  - There's always at least one enabled administrator: the last one can't be demoted, disabled or removed.
+  - Setting someone's password ends their sessions and revokes their tokens.
+  - Disabling an account ends its sessions. Its tokens are refused while it's disabled and work again if it's enabled.
+  - Removing an account revokes its tokens and ends its sessions.
+
+An open dashboard checks your role with each refresh, so a role change shows within a few seconds.
+
+### Recovering a Lost Administrator Password
+
+This needs a shell on the hub, which is what keeps it safe. Run:
+
+```bash
+smarthub --recover-admin <username>
+```
+
+It asks for a new password twice, or reads one line from stdin if that isn't a terminal. The account becomes an enabled administrator with that password, and is created if it doesn't exist. Use `-c` first if the hub uses a configuration file other than `/etc/smarthub/config.yaml`.
+
+The running hub doesn't need restarting, as it reads accounts on every request.
 
 ## Web Server Security
 

@@ -116,17 +116,21 @@ void SessionManager::destroySession(const std::string& token) {
 }
 
 void SessionManager::destroyUserSessions(const std::string& username) {
+    destroyUserSessionsExcept(username, "");
+    LOG_DEBUG("All sessions destroyed for user %s", username.c_str());
+}
+
+void SessionManager::destroyUserSessionsExcept(const std::string& username,
+                                               const std::string& keepToken) {
     std::lock_guard<std::mutex> lock(m_mutex);
 
     for (auto it = m_sessions.begin(); it != m_sessions.end(); ) {
-        if (it->second.username == username) {
+        if (it->second.username == username && (keepToken.empty() || it->first != keepToken)) {
             it = m_sessions.erase(it);
         } else {
             ++it;
         }
     }
-
-    LOG_DEBUG("All sessions destroyed for user %s", username.c_str());
 }
 
 std::vector<Session> SessionManager::getUserSessions(const std::string& username) {
