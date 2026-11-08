@@ -527,9 +527,15 @@ class SmartHubApp {
         });
     }
 
-    // The LCD assigns a device to a room by id and this dashboard by name
+    // Devices store their room's id, so a renamed room keeps them
     devicesInRoom(room) {
-        return [...this.devices, ...this.sensors].filter(d => d.room === room.name || d.room === room.id);
+        return [...this.devices, ...this.sensors].filter(d => d.room === room.id);
+    }
+
+    // A device's room, by name, for showing
+    roomNameOf(roomId) {
+        if (!roomId) return 'No room';
+        return this.rooms.find(r => r.id === roomId)?.name || 'No room';
     }
 
     // Keeps an open room detail current as readings arrive, and closes it if the room was deleted
@@ -655,7 +661,7 @@ class SmartHubApp {
                     </div>
                     <div class="device-details">
                         <h3>${this.escapeHtml(device.name)}</h3>
-                        <div class="device-meta">${this.escapeHtml(device.room || 'No room')} • ${this.escapeHtml(device.type)}</div>
+                        <div class="device-meta">${this.escapeHtml(this.roomNameOf(device.room))} • ${this.escapeHtml(device.type)}</div>
                     </div>
                 </div>
                 <div class="device-controls">
@@ -723,7 +729,7 @@ class SmartHubApp {
                 <div class="sensor-header">
                     <div>
                         <div class="sensor-name">${this.escapeHtml(sensor.name)}</div>
-                        <div class="sensor-room">${this.escapeHtml(sensor.room || 'No room')}</div>
+                        <div class="sensor-room">${this.escapeHtml(this.roomNameOf(sensor.room))}</div>
                     </div>
                     <div>${this.getSensorIcon(sensor.type)}</div>
                 </div>
@@ -743,7 +749,7 @@ class SmartHubApp {
 
         this.rooms.forEach(room => {
             const option = document.createElement('option');
-            option.value = room.name;
+            option.value = room.id;
             option.textContent = room.name;
             select.appendChild(option);
         });
@@ -984,7 +990,7 @@ class SmartHubApp {
 
         this.rooms.forEach(room => {
             const option = document.createElement('option');
-            option.value = room.name;
+            option.value = room.id;
             option.textContent = room.name;
             select.appendChild(option);
         });
@@ -1123,7 +1129,7 @@ class SmartHubApp {
             </div>
             <div class="device-summary-row">
                 <span class="device-summary-label">Room</span>
-                <span>${this.escapeHtml(this.deviceWizard.room || 'None')}</span>
+                <span>${this.escapeHtml(this.deviceWizard.room ? this.roomNameOf(this.deviceWizard.room) : 'None')}</span>
             </div>
         `;
     }

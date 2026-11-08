@@ -1717,8 +1717,7 @@ void WebServer::apiDeleteToken(struct mg_connection* c, const std::string& id,
 void WebServer::apiGetRooms(struct mg_connection* c) {
     nlohmann::json rooms = nlohmann::json::array();
     for (const auto& [id, name] : m_deviceManager.getAllRooms()) {
-        // Count devices in this room (devices store room name, not id)
-        auto devices = m_deviceManager.getDevicesByRoom(name);
+        auto devices = m_deviceManager.getDevicesByRoom(id);
         int activeCount = 0;
         for (const auto& dev : devices) {
             // A device can report anything, or nothing, so don't assume this is a boolean
@@ -1829,6 +1828,14 @@ void WebServer::apiCreateDevice(struct mg_connection* c, struct mg_http_message*
             return;
         }
 
+        // By id, or by name as the dashboard used to send it. Stored by id either way.
+        const auto roomId = m_deviceManager.roomIdFor(room);
+        if (!roomId) {
+            sendError(c, 400, "No such room: " + room);
+            return;
+        }
+        room = *roomId;
+
         // Generate ID from name if not provided
         if (id.empty()) {
             id = "device-";
@@ -1886,14 +1893,25 @@ void WebServer::apiUpdateDeviceSettings(struct mg_connection* c, const std::stri
     try {
         auto data = nlohmann::json::parse(body);
 
+        // Checked before anything changes, so a bad request changes nothing
+        std::optional<std::string> roomId;
+        if (data.contains("room")) {
+            const std::string room = data["room"].get<std::string>();
+            roomId = m_deviceManager.roomIdFor(room);
+            if (!roomId) {
+                sendError(c, 400, "No such room: " + room);
+                return;
+            }
+        }
+
         // Update name if provided
         if (data.contains("name")) {
             device->setName(data["name"].get<std::string>());
         }
 
         // Update room if provided
-        if (data.contains("room")) {
-            device->setRoom(data["room"].get<std::string>());
+        if (roomId) {
+            device->setRoom(*roomId);
         }
 
         // Save device to persist changes
@@ -1994,6 +2012,13 @@ void WebServer::apiAddZigbeeDevice(struct mg_connection* c, struct mg_http_messa
             sendError(c, 400, "ieeeAddress is required");
             return;
         }
+
+        const auto roomId = m_deviceManager.roomIdFor(room);
+        if (!roomId) {
+            sendError(c, 400, "No such room: " + room);
+            return;
+        }
+        room = *roomId;
 
         // Check if there's a pending device with this address
         auto pendingDevice = m_zigbeeHandler->getPendingDevice();

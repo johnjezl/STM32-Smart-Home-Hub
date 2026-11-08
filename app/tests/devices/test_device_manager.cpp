@@ -926,8 +926,53 @@ TEST_F(DeviceManagerTest, StateWithInvalidTextDoesNotThrow) {
     ProtocolFactory::instance().unregisterProtocol("plain_mock");
 }
 
-TEST(DeviceManagerRooms, FindsDevicesAssignedByRoomIdOrName) {
+TEST(DeviceManagerRooms, SavedRoomNamesBecomeIds) {
+    // The dashboard used to save a room's name and the LCD its id (#56)
     const std::string path = "/tmp/test_rooms_" + std::to_string(getpid()) + ".db";
+    std::remove(path.c_str());
+    {
+        EventBus eventBus;
+        Database database(path);
+        ASSERT_TRUE(database.initialize());
+        {
+            DeviceManager manager(eventBus, database);
+            ASSERT_TRUE(manager.initialize());
+            ASSERT_TRUE(manager.addRoom("living-room", "Living Room"));
+            manager.shutdown();
+        }
+        for (const auto& [id, room] : std::vector<std::pair<std::string, std::string>>{
+                 {"lcd", "living-room"}, {"web", "Living Room"}, {"gone", "Old Shed"}, {"none", ""}}) {
+            auto stmt = database.prepare(
+                "INSERT INTO devices (id, name, type, protocol, protocol_address, room, config) "
+                "VALUES (?, ?, 'switch', 'local', '', ?, '{}')");
+            ASSERT_TRUE(stmt && stmt->isValid());
+            stmt->bind(1, id);
+            stmt->bind(2, id);
+            stmt->bind(3, room);
+            ASSERT_TRUE(stmt->execute());
+        }
+
+        DeviceManager manager(eventBus, database);
+        ASSERT_TRUE(manager.initialize());
+        EXPECT_EQ(manager.getDevice("lcd")->room(), "living-room");
+        EXPECT_EQ(manager.getDevice("web")->room(), "living-room");
+        EXPECT_EQ(manager.getDevice("gone")->room(), "Old Shed")
+            << "left alone, as clearing it would lose every room if the rooms couldn't be read";
+        EXPECT_EQ(manager.getDevice("none")->room(), "");
+        EXPECT_EQ(manager.getDevicesByRoom("living-room").size(), 2u);
+        EXPECT_TRUE(manager.getDevicesByRoom("Living Room").empty()) << "only ids match now";
+
+        // And in the database, not just in memory
+        auto stmt = database.prepare("SELECT room FROM devices WHERE id = 'web'");
+        ASSERT_TRUE(stmt && stmt->step());
+        EXPECT_EQ(stmt->getString(0), "living-room");
+        manager.shutdown();
+    }
+    std::remove(path.c_str());
+}
+
+TEST(DeviceManagerRooms, ARoomGivenByNameIsStoredById) {
+    const std::string path = "/tmp/test_rooms_name_" + std::to_string(getpid()) + ".db";
     std::remove(path.c_str());
     {
         EventBus eventBus;
@@ -935,21 +980,40 @@ TEST(DeviceManagerRooms, FindsDevicesAssignedByRoomIdOrName) {
         ASSERT_TRUE(database.initialize());
         DeviceManager manager(eventBus, database);
         ASSERT_TRUE(manager.initialize());
-        ASSERT_TRUE(manager.addRoom("living-room", "Living Room"));
+        ASSERT_TRUE(manager.addRoom("den", "Den"));
 
-        auto fromLcd = std::make_shared<SwitchDevice>("lcd", "LCD");
-        fromLcd->setRoom("living-room");
-        auto fromWeb = std::make_shared<SwitchDevice>("web", "Web");
-        fromWeb->setRoom("Living Room");
-        auto elsewhere = std::make_shared<SwitchDevice>("other", "Other");
-        elsewhere->setRoom("Kitchen");
-        manager.addDevice(fromLcd);
-        manager.addDevice(fromWeb);
-        manager.addDevice(elsewhere);
+        auto device = std::make_shared<SwitchDevice>("lamp", "Lamp");
+        device->setRoom("Den");
+        ASSERT_TRUE(manager.addDevice(device));
+        EXPECT_EQ(device->room(), "den");
 
-        EXPECT_EQ(manager.getDevicesByRoom("living-room").size(), 2u);
-        EXPECT_EQ(manager.getDevicesByRoom("Living Room").size(), 2u);
-        EXPECT_EQ(manager.getDevicesByRoom("Kitchen").size(), 1u) << "a room string with no room row still matches";
+        EXPECT_EQ(manager.roomIdFor("den"), "den");
+        EXPECT_EQ(manager.roomIdFor("Den"), "den");
+        EXPECT_EQ(manager.roomIdFor(""), "");
+        EXPECT_FALSE(manager.roomIdFor("Attic"));
+        manager.shutdown();
+    }
+    std::remove(path.c_str());
+}
+
+TEST(DeviceManagerRooms, RenamingARoomKeepsItsDevices) {
+    const std::string path = "/tmp/test_rooms_rename_" + std::to_string(getpid()) + ".db";
+    std::remove(path.c_str());
+    {
+        EventBus eventBus;
+        Database database(path);
+        ASSERT_TRUE(database.initialize());
+        DeviceManager manager(eventBus, database);
+        ASSERT_TRUE(manager.initialize());
+        ASSERT_TRUE(manager.addRoom("den", "Den"));
+        auto device = std::make_shared<SwitchDevice>("lamp", "Lamp");
+        device->setRoom("Den");
+        ASSERT_TRUE(manager.addDevice(device));
+
+        ASSERT_TRUE(manager.updateRoom("den", "Study"));
+        EXPECT_EQ(manager.getDevicesByRoom("den").size(), 1u);
+        EXPECT_EQ(manager.roomIdFor("Study"), "den");
+        manager.shutdown();
     }
     std::remove(path.c_str());
 }
