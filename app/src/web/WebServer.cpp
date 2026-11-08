@@ -1831,7 +1831,7 @@ void WebServer::apiCreateDevice(struct mg_connection* c, struct mg_http_message*
         // By id, or by name as the dashboard used to send it. Stored by id either way.
         const auto roomId = m_deviceManager.roomIdFor(room);
         if (!roomId) {
-            sendError(c, 400, "No such room: " + room);
+            sendError(c, 400, "No room with that id or name, or a name several rooms have: " + room);
             return;
         }
         room = *roomId;
@@ -1899,7 +1899,7 @@ void WebServer::apiUpdateDeviceSettings(struct mg_connection* c, const std::stri
             const std::string room = data["room"].get<std::string>();
             roomId = m_deviceManager.roomIdFor(room);
             if (!roomId) {
-                sendError(c, 400, "No such room: " + room);
+                sendError(c, 400, "No room with that id or name, or a name several rooms have: " + room);
                 return;
             }
         }
@@ -2015,7 +2015,7 @@ void WebServer::apiAddZigbeeDevice(struct mg_connection* c, struct mg_http_messa
 
         const auto roomId = m_deviceManager.roomIdFor(room);
         if (!roomId) {
-            sendError(c, 400, "No such room: " + room);
+            sendError(c, 400, "No room with that id or name, or a name several rooms have: " + room);
             return;
         }
         room = *roomId;
