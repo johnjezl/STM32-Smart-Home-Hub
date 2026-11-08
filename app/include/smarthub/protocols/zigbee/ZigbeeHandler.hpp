@@ -227,7 +227,8 @@ private:
     std::optional<std::string> gangIdFor(uint64_t ieeeAddr, uint8_t endpoint) const;
     std::vector<std::string> gangIdsOf(uint64_t ieeeAddr) const;
     // Offers a device of its own for each of these endpoints of a device the wizard added
-    void addGangs(const DevicePtr& primary, uint64_t ieeeAddr, const std::vector<uint8_t>& endpoints);
+    void addGangs(const IDevice& primary, uint64_t ieeeAddr, const std::vector<uint8_t>& endpoints);
+    static bool isGangCluster(uint16_t cluster);
     // Devices the hub keeps, IEEE to device id. Announcing again doesn't make one of these new, and
     // this outlives a leave, because the hub still has the device when it rejoins.
     std::map<uint64_t, std::string> m_savedDevices;
