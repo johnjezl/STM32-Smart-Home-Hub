@@ -74,6 +74,12 @@ public:
         m_devices.erase(nwkAddr);
     }
 
+    /** Devices stop answering Active Endpoints requests, as if each answer were lost. */
+    void ignoreEndpointRequests(bool ignore) {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_ignoreEndpointRequests = ignore;
+    }
+
     /** Hold back a device's reply about this endpoint until releaseDescriptors(). */
     void holdDescriptor(uint16_t nwkAddr, uint8_t endpoint) {
         std::lock_guard<std::mutex> lock(m_mutex);
@@ -453,7 +459,7 @@ private:
             }
         } else if (req.command() == cmd::zdo::ACTIVE_EP_REQ) {
             auto device = m_devices.find(req.getWord(0));
-            if (device == m_devices.end()) return;
+            if (device == m_devices.end() || m_ignoreEndpointRequests) return;
 
             ZnpFrame rsp(ZnpType::AREQ, ZnpSubsystem::ZDO, cmd::zdo::ACTIVE_EP_RSP);
             rsp.appendWord(device->second.nwkAddr);
@@ -513,6 +519,7 @@ private:
     std::set<std::pair<uint16_t, uint8_t>> m_failedEndpoints;
     std::vector<std::pair<std::pair<uint16_t, uint8_t>, ZnpFrame>> m_heldFrames;
     bool m_unresponsive = false;
+    bool m_ignoreEndpointRequests = false;
     size_t m_maxReadChunk = SIZE_MAX;
     uint8_t m_zclSeq = 0;
 };

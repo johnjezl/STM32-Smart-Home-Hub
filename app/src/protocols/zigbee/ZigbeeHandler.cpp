@@ -19,6 +19,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <iomanip>
+#include <set>
 #include <sstream>
 #include <thread>
 #include <chrono>
@@ -919,26 +920,38 @@ uint64_t ZigbeeHandler::pairDevice(uint64_t ieeeAddr) {
         if (result == PairingWait::Stopped) return attempt;
         if (result == PairingWait::Restarted) continue;
         if (result == PairingWait::TimedOut) {
-            reportPairingFailure(ieeeAddr, "Device did not report its endpoints. Try re-pairing.");
-            return attempt;
+            // A list from before is better than none, if this one request went astray
+            auto info = m_coordinator->getDevice(ieeeAddr);
+            if (!info || info->endpoints.empty()) {
+                reportPairingFailure(ieeeAddr, "Device did not report its endpoints. Try re-pairing.");
+                return attempt;
+            }
+            LOG_WARN("0x%04X didn't list its endpoints again; using the list it gave before", nwkAddr);
+            endpoints = info->endpoints;
         }
 
-        // What does each one do?
+        // What does each one do? Asked afresh, like the endpoint list, rather than taken from an
+        // earlier answer, which may be from before a firmware update.
         bool restart = false;
         for (uint8_t endpoint : endpoints) {
             if (!isApplicationEndpoint(endpoint)) continue;
 
             auto before = m_coordinator->getDevice(ieeeAddr);
             if (!before) return attempt;
-            if (before->inClusters.count(endpoint) > 0) continue;
+            const auto reportsOf = [endpoint](const ZigbeeDeviceInfo& info) {
+                auto found = info.descriptorReports.find(endpoint);
+                return found == info.descriptorReports.end() ? 0 : found->second;
+            };
+            const int descriptorsBefore = reportsOf(*before);
 
             m_coordinator->requestSimpleDescriptor(nwkAddr, endpoint);
             result = waitForPairing(ieeeAddr, attempt, m_pairingEndpointTimeoutMs, [&] {
                 auto info = m_coordinator->getDevice(ieeeAddr);
                 return !info ||  // It left
-                       info->inClusters.count(endpoint) > 0 ||
+                       reportsOf(*info) > descriptorsBefore ||
                        info->failedDescriptors > before->failedDescriptors + mayStillRefuse;
             });
+
             if (result == PairingWait::Stopped) return attempt;
             if (result == PairingWait::Restarted) {
                 ++mayStillRefuse;
