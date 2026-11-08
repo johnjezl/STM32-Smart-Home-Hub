@@ -705,6 +705,18 @@ if (typeof window === 'undefined' && typeof require !== 'undefined') {
             TestRunner.assertTrue(element('change-password-error').textContent.length > 0);
         });
 
+        TestRunner.it('should not set a password whose two entries differ', async () => {
+            const { app, element } = loadApp({});
+            app.currentUser = { username: 'ann', role: 'admin' };
+            app.passwordUser = 'bob';
+            element('set-password-new').value = 'New-Pass-1';
+            element('set-password-confirm').value = 'New-Pass-2';
+
+            await app.setUserPassword();
+            TestRunner.assertEqual(app.requests.length, 0);
+            TestRunner.assertTrue(element('set-password-error').textContent.length > 0);
+        });
+
         TestRunner.it('should send the current and new password', async () => {
             const { app, element } = loadApp({});
             app.currentUser = { username: 'ann', role: 'user' };

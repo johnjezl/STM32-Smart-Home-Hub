@@ -1128,7 +1128,9 @@ TEST_F(WebAuthTest, ChangingYourPasswordNeedsTheCurrentOne) {
     RequestOptions guest(R"({"currentPassword":"Wrong-Pass-1","newPassword":"Guest-Pass-2"})");
     guest.cookie = loginCookie("guest", "Guest-Pass-1");
 
-    EXPECT_EQ(request("POST", "/api/auth/password", guest).status, 401);
+    // Not 401, which would tell the dashboard the session had ended
+    EXPECT_EQ(request("POST", "/api/auth/password", guest).status, 403);
+    EXPECT_EQ(request("GET", "/api/devices", guest).status, 200);
     guest.body = R"({"currentPassword":"Guest-Pass-1","newPassword":"short"})";
     EXPECT_EQ(request("POST", "/api/auth/password", guest).status, 400);
     guest.body = R"({"newPassword":"Guest-Pass-2"})";
@@ -1150,8 +1152,8 @@ TEST_F(WebAuthTest, WrongCurrentPasswordsCountTowardsTheLockout) {
     RequestOptions guest(R"({"currentPassword":"Wrong-Pass-1","newPassword":"Guest-Pass-2"})");
     guest.cookie = loginCookie("guest", "Guest-Pass-1");
 
-    EXPECT_EQ(request("POST", "/api/auth/password", guest).status, 401);
-    EXPECT_EQ(request("POST", "/api/auth/password", guest).status, 401);
+    EXPECT_EQ(request("POST", "/api/auth/password", guest).status, 403);
+    EXPECT_EQ(request("POST", "/api/auth/password", guest).status, 403);
     guest.body = R"({"currentPassword":"Guest-Pass-1","newPassword":"Guest-Pass-2"})";
     EXPECT_EQ(request("POST", "/api/auth/password", guest).status, 429);
 }
@@ -1173,6 +1175,13 @@ TEST_F(WebAuthTest, AdminCanSetSomeonesPassword) {
     admin.body = R"({"password":"Correct-Horse-2"})";
     EXPECT_EQ(request("PUT", std::string("/api/users/") + kAdminName + "/password", admin).status, 200);
     EXPECT_EQ(request("GET", "/api/users", admin).status, 200);
+
+    // Not with a token, even an administrator's
+    security::UserManager users(m_app->database());
+    security::ApiTokenManager tokens(m_app->database());
+    RequestOptions script(R"({"password":"Taken-Over-1"})");
+    script.bearer = tokens.createToken(users.getUser(kAdminName)->id, "script");
+    EXPECT_EQ(request("PUT", std::string("/api/users/") + kAdminName + "/password", script).status, 403);
 
     admin.body = R"({"password":"short"})";
     EXPECT_EQ(request("PUT", "/api/users/guest/password", admin).status, 400);

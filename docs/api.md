@@ -170,7 +170,7 @@ Your other sessions end and your API tokens are revoked. This session carries on
 
 **Response (200 OK):** `{"success": true, "revokedTokens": 1}`
 
-**Response (400):** a field is missing, or the new password breaks the [rules](#post-apisetup). **401:** the current password is wrong, which counts as a failed login. **403:** sent with an API token. **429:** too many failed logins from this IP.
+**Response (400):** a field is missing, or the new password breaks the [rules](#post-apisetup). **403:** the current password is wrong, which counts as a failed login, or this was sent with an API token. Not 401, which means you aren't signed in. **429:** too many failed logins from this IP.
 
 ### GET /api/users
 
@@ -202,13 +202,13 @@ Change a role, or disable or enable an account. **Admin only.** Give either or b
 
 ### PUT /api/users/{username}/password
 
-Set someone's password. **Admin only.** Their sessions end, apart from yours if it's your own account, and their API tokens are revoked.
+Set someone's password. **Admin only**, and not with an API token. Their sessions end, apart from yours if it's your own account, and their API tokens are revoked.
 
 ```json
 { "password": "New-Password-1" }
 ```
 
-**Response (200 OK):** as for `POST /api/auth/password`. **400**, **404** as above.
+**Response (200 OK):** as for `POST /api/auth/password`. **400**, **404** as above. **403:** sent with an API token.
 
 ### DELETE /api/users/{username}
 

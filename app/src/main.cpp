@@ -60,19 +60,26 @@ void signalHandler(int signum) {
 bool readSecretLine(const char* prompt, std::string& line) {
     const bool terminal = isatty(STDIN_FILENO) != 0;
     termios saved{};
+    bool restore = false;
     if (terminal) {
         std::fprintf(stderr, "%s", prompt);
         std::fflush(stderr);
         if (tcgetattr(STDIN_FILENO, &saved) == 0) {
             termios quiet = saved;
             quiet.c_lflag &= ~static_cast<tcflag_t>(ECHO);
-            tcsetattr(STDIN_FILENO, TCSANOW, &quiet);
+            restore = tcsetattr(STDIN_FILENO, TCSANOW, &quiet) == 0;
         }
     }
     const bool read = static_cast<bool>(std::getline(std::cin, line));
-    if (terminal) {
+    if (restore) {
         tcsetattr(STDIN_FILENO, TCSANOW, &saved);
+    }
+    if (terminal) {
         std::fprintf(stderr, "\n");
+    }
+    // A line piped from a Windows file ends in \r, which would become part of the password
+    if (!line.empty() && line.back() == '\r') {
+        line.pop_back();
     }
     return read;
 }

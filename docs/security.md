@@ -187,7 +187,7 @@ The dashboard's **Account** tab has everything here, and the [API](api.md#accoun
   - A token is shown once, when it's made. It acts as you, with your role. Tokens can't be made or revoked with a token, only when signed in, so one that leaks can't be used to make more. You can have up to 20.
 - **Administrators** can also add accounts, change roles, disable and enable accounts, set someone's password and remove accounts.
   - There's always at least one enabled administrator: the last one can't be demoted, disabled or removed.
-  - Setting someone's password ends their sessions and revokes their tokens.
+  - Setting someone's password ends their sessions and revokes their tokens. Passwords can only be set when signed in, not with a token.
   - Disabling an account ends its sessions. Its tokens are refused while it's disabled and work again if it's enabled.
   - Removing an account revokes its tokens and ends its sessions.
 
@@ -248,7 +248,7 @@ Two limits apply per client IP:
 | All requests | 600 per minute | `rate_limit_per_minute` | `429` |
 | Failed logins | 10 per 5 minutes | `login_max_failures`, `login_failure_window_seconds` | `429` with `Retry-After` |
 
-An open dashboard makes 36 requests a minute, whatever the number of devices. The login limit is what stops password guessing: once it is reached, logins from that IP are refused without checking the password, even a correct one, until the window ends. A successful login doesn't reset the count. Setting either limit to 0 disables it.
+An open dashboard makes 48 requests a minute, whatever the number of devices. The login limit is what stops password guessing: once it is reached, logins from that IP are refused without checking the password, even a correct one, until the window ends. A successful login doesn't reset the count. Setting either limit to 0 disables it.
 
 ### HTTP to HTTPS Redirect
 
