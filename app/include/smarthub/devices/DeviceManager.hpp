@@ -7,6 +7,7 @@
 
 #include <smarthub/devices/IDevice.hpp>
 #include <smarthub/protocols/IProtocolHandler.hpp>
+#include <optional>
 #include <string>
 #include <memory>
 #include <vector>
@@ -105,7 +106,13 @@ public:
     /**
      * Get devices by room
      */
-    std::vector<DevicePtr> getDevicesByRoom(const std::string& room) const;
+    std::vector<DevicePtr> getDevicesByRoom(const std::string& roomId) const;
+
+    /**
+     * The id of the room this names, by its id or its name. An empty string for no room, and
+     * nothing if it names no room. Devices store the id, so renaming a room keeps its devices.
+     */
+    std::optional<std::string> roomIdFor(const std::string& idOrName) const;
 
     // Room management
 
@@ -285,7 +292,9 @@ private:
                           const nlohmann::json& value);
     void stateWriterLoop();
     void stopStateWriter();
-    bool roomExists(const std::string& id);
+    bool roomExists(const std::string& id) const;
+    // Rooms saved by name, as the dashboard used to, become ids
+    void migrateRoomNames();
 
     std::mutex m_stateWriteMutex;  // Guards the queue and the stop flag
     std::map<std::pair<std::string, std::string>, std::string> m_unsavedState;

@@ -665,6 +665,10 @@ TEST_F(WebAuthTest, RoomsSurviveADeviceReportingAnOddState) {
     RequestOptions admin;
     admin.cookie = setUpAdmin();
 
+    RequestOptions kitchen = admin;
+    kitchen.body = R"({"name":"Kitchen"})";
+    ASSERT_EQ(request("POST", "/api/rooms", kitchen).status, 201);
+
     RequestOptions device = admin;
     device.body = R"({"type":"switch","protocol":"local","name":"Odd","id":"odd","room":"Kitchen"})";
     ASSERT_EQ(request("POST", "/api/devices", device).status, 201);
@@ -675,7 +679,7 @@ TEST_F(WebAuthTest, RoomsSurviveADeviceReportingAnOddState) {
     // A device with no state at all
     ASSERT_TRUE(m_app->deviceManager().addDevice(
         std::make_shared<Device>("bare", "Bare", DeviceType::Custom)));
-    m_app->deviceManager().getDevice("bare")->setRoom("Kitchen");
+    m_app->deviceManager().getDevice("bare")->setRoom(*m_app->deviceManager().roomIdFor("Kitchen"));
     EXPECT_EQ(request("GET", "/api/rooms", admin).status, 200);
     EXPECT_EQ(request("GET", "/api/devices", admin).status, 200);
 
@@ -1234,6 +1238,44 @@ TEST_F(WebAuthTest, UsersCreateListAndRevokeTheirOwnTokens) {
         guest.body = body;
         EXPECT_EQ(request("POST", "/api/tokens", guest).status, 400) << body;
     }
+}
+
+// ---------- Rooms (#56)
+
+TEST_F(WebAuthTest, DevicesAreStoredByRoomIdAndUnknownRoomsAreRefused) {
+    startApp();
+    RequestOptions admin(R"({"name":"Den"})");
+    admin.cookie = setUpAdmin();
+    const Response room = request("POST", "/api/rooms", admin);
+    ASSERT_EQ(room.status, 201) << room.body;
+    const std::string roomId = room.json()["id"];
+
+    // By name, as older dashboards send it, or by id
+    admin.body = R"({"type":"switch","name":"Lamp","room":"Den"})";
+    ASSERT_EQ(request("POST", "/api/devices", admin).status, 201);
+    admin.body = nlohmann::json{{"type", "switch"}, {"name", "Fan"}, {"room", roomId}}.dump();
+    ASSERT_EQ(request("POST", "/api/devices", admin).status, 201);
+    for (const auto& device : request("GET", "/api/devices", admin).json()) {
+        EXPECT_EQ(device["room"], roomId) << device["name"];
+    }
+
+    admin.body = R"({"type":"switch","name":"Heater","room":"Attic"})";
+    EXPECT_EQ(request("POST", "/api/devices", admin).status, 400);
+    admin.body = R"({"room":"Attic","name":"Renamed"})";
+    EXPECT_EQ(request("PUT", "/api/devices/device-lamp/settings", admin).status, 400);
+    EXPECT_EQ(request("GET", "/api/devices/device-lamp", admin).json()["name"], "Lamp")
+        << "a refused change changes nothing";
+
+    // Renaming the room keeps its devices
+    admin.body = R"({"name":"Study"})";
+    ASSERT_EQ(request("PUT", "/api/rooms/" + roomId, admin).status, 200);
+    const auto rooms = request("GET", "/api/rooms", admin).json();
+    ASSERT_EQ(rooms.size(), 1u);
+    EXPECT_EQ(rooms[0]["deviceCount"], 2);
+
+    admin.body = R"({"room":""})";
+    EXPECT_EQ(request("PUT", "/api/devices/device-lamp/settings", admin).status, 200);
+    EXPECT_EQ(request("GET", "/api/devices/device-lamp", admin).json()["room"], "");
 }
 
 // ---------- Roles

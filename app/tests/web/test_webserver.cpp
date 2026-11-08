@@ -723,6 +723,8 @@ TEST_F(WebServerDeviceCrudTest, UpdateDeviceSettings_Success) {
     // Add a device
     auto device = std::make_shared<smarthub::Device>("test-update", "Original Name", smarthub::DeviceType::Switch);
     deviceManager->addDevice(device);
+    // A room has to exist to put a device in it
+    curlPost(baseUrl() + "/api/rooms", "{\"name\":\"Living Room\"}");
 
     // Update settings
     std::string response = curlPut(baseUrl() + "/api/devices/test-update/settings",
@@ -734,7 +736,9 @@ TEST_F(WebServerDeviceCrudTest, UpdateDeviceSettings_Success) {
     // Verify update
     auto updatedDevice = deviceManager->getDevice("test-update");
     EXPECT_EQ(updatedDevice->name(), "Updated Name");
-    EXPECT_EQ(updatedDevice->room(), "Living Room");
+    // Stored by the room's id, though the request named it
+    EXPECT_EQ(updatedDevice->room(), deviceManager->roomIdFor("Living Room").value_or("missing"));
+    EXPECT_NE(updatedDevice->room(), "Living Room");
 }
 
 TEST_F(WebServerDeviceCrudTest, UpdateDeviceSettings_InvalidDevice) {

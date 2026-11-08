@@ -315,29 +315,33 @@ std::vector<DevicePtr> DeviceManager::getAllDevices() const {
     return result;
 }
 
-std::vector<DevicePtr> DeviceManager::getDevicesByRoom(const std::string& room) const {
-    // The web dashboard assigns a device to a room by name and the LCD by id, so match either
-    std::string roomId = room;
-    std::string roomName = room;
-    for (const auto& [id, name] : getAllRooms()) {
-        if (id == room || name == room) {
-            roomId = id;
-            roomName = name;
-            break;
-        }
-    }
-
+std::vector<DevicePtr> DeviceManager::getDevicesByRoom(const std::string& roomId) const {
     std::lock_guard<std::mutex> lock(m_mutex);
 
     std::vector<DevicePtr> result;
 
     for (const auto& [id, device] : m_devices) {
-        if (device->room() == roomId || device->room() == roomName) {
+        if (device->room() == roomId) {
             result.push_back(device);
         }
     }
 
     return result;
+}
+
+std::optional<std::string> DeviceManager::roomIdFor(const std::string& idOrName) const {
+    if (idOrName.empty()) {
+        return std::string();
+    }
+    if (roomExists(idOrName)) {
+        return idOrName;
+    }
+    for (const auto& [id, name] : getAllRooms()) {
+        if (name == idOrName) {
+            return id;
+        }
+    }
+    return std::nullopt;
 }
 
 std::vector<DevicePtr> DeviceManager::getDevicesByType(DeviceType type) const {
@@ -645,6 +649,16 @@ bool DeviceManager::saveAllDevices() {
 bool DeviceManager::saveDevice(const DevicePtr& device) {
     if (!device) {
         return false;
+    }
+
+    // Whatever set it, a room is saved by id. A value naming no room is kept, as it may be a room
+    // that's about to be added.
+    const std::string room = device->room();
+    if (!room.empty()) {
+        const auto roomId = roomIdFor(room);
+        if (roomId && *roomId != room) {
+            device->setRoom(*roomId);
+        }
     }
 
     try {
@@ -1055,8 +1069,43 @@ void DeviceManager::loadDevicesFromDatabase() {
 
         LOG_INFO("Loaded %zu devices from database", m_devices.size());
 
+        migrateRoomNames();
+
     } catch (const std::exception& e) {
         LOG_WARN("Failed to load devices from database: %s", e.what());
+    }
+}
+
+void DeviceManager::migrateRoomNames() {
+    const auto rooms = getAllRooms();
+    int changed = 0;
+    for (const auto& [id, device] : m_devices) {
+        const std::string room = device->room();
+        if (room.empty() ||
+            std::any_of(rooms.begin(), rooms.end(), [&](const auto& r) { return r.first == room; })) {
+            continue;
+        }
+        // A value that names no room is left alone: if the rooms couldn't be read, clearing
+        // would lose every device's room
+        const auto named = std::find_if(rooms.begin(), rooms.end(),
+                                        [&](const auto& r) { return r.second == room; });
+        if (named == rooms.end()) {
+            continue;
+        }
+        const std::string roomId = named->first;
+
+        auto stmt = m_database.prepare("UPDATE devices SET room = ? WHERE id = ?");
+        if (stmt && stmt->isValid()) {
+            stmt->bind(1, roomId);
+            stmt->bind(2, id);
+            if (stmt->execute()) {
+                device->setRoom(roomId);
+                ++changed;
+            }
+        }
+    }
+    if (changed > 0) {
+        LOG_INFO("Stored the room of %d device(s) by id", changed);
     }
 }
 
@@ -1103,7 +1152,7 @@ bool DeviceManager::addRoom(const std::string& id, const std::string& name) {
     return false;
 }
 
-bool DeviceManager::roomExists(const std::string& id) {
+bool DeviceManager::roomExists(const std::string& id) const {
     auto stmt = m_database.prepare("SELECT 1 FROM rooms WHERE id = ?");
     if (!stmt || !stmt->isValid()) {
         return false;
