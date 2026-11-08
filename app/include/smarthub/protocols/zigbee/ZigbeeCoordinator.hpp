@@ -44,6 +44,7 @@ struct ZigbeeDeviceInfo {
     // Endpoint to cluster mappings
     std::map<uint8_t, std::vector<uint16_t>> inClusters;
     std::map<uint8_t, std::vector<uint16_t>> outClusters;
+    std::map<uint8_t, int> descriptorReports;  // Simple descriptor answers per endpoint, as above
 };
 
 /**

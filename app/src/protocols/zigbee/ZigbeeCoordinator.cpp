@@ -1143,6 +1143,7 @@ void ZigbeeCoordinator::handleSimpleDescRsp(const ZnpFrame& frame) {
             if (devIt != m_devices.end()) {
                 devIt->second.inClusters[endpoint] = inClusters;
                 devIt->second.outClusters[endpoint] = outClusters;
+                devIt->second.descriptorReports[endpoint]++;
                 described = it->second;
                 LOG_INFO("Updated device %016" PRIX64 " with clusters for endpoint %d",
                          it->second, endpoint);

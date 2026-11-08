@@ -523,6 +523,29 @@ TEST_F(ZigbeeHandlerFlowTest, AnnouncingAgainUsesTheFreshEndpointList) {
     EXPECT_EQ(discovered[0]->type(), DeviceType::Dimmer);
 }
 
+TEST_F(ZigbeeHandlerFlowTest, AnnouncingAgainAsksForFreshDescriptors) {
+    // Endpoint 1 is described as a switch. While endpoint 11 is still being asked about, the
+    // device announces again with dimming on endpoint 1, which has to be asked about again.
+    constexpr uint16_t kNwk = 0x7777;
+    constexpr uint64_t kIeee = 0x00124B0000007777ULL;
+    const FakeZigbeeDevice original{kNwk, kIeee, {{1, {zcl::cluster::ON_OFF}}, {11, {zcl::cluster::BASIC}}}};
+    fake.addDevice(original);
+    fake.holdDescriptor(kNwk, 11);
+    fake.announceDevice(original);
+    ASSERT_TRUE(fake.waitForSent(ZnpSubsystem::ZDO, cmd::zdo::SIMPLE_DESC_REQ, 2));
+
+    const FakeZigbeeDevice updated{
+        kNwk, kIeee, {{1, {zcl::cluster::ON_OFF, zcl::cluster::LEVEL_CONTROL}}, {11, {zcl::cluster::BASIC}}}};
+    fake.addDevice(updated);
+    fake.announceDevice(updated);
+    ASSERT_TRUE(fake.waitForSent(ZnpSubsystem::ZDO, cmd::zdo::ACTIVE_EP_REQ, 2));
+    fake.releaseDescriptors();
+
+    ASSERT_TRUE(eventually([&] { return discoveredCount() == 1; }, 10s));
+    std::lock_guard<std::mutex> lock(mutex);
+    EXPECT_EQ(discovered[0]->type(), DeviceType::Dimmer);
+}
+
 TEST_F(ZigbeeHandlerFlowTest, RejoiningKeepsAnotherDevicesClaimOnTheOldAddress) {
     FakeZigbeeDevice first{0x1111, 0x00124B000000AAAAULL, {{1, {zcl::cluster::ON_OFF}}}};
     FakeZigbeeDevice second{0x1111, 0x00124B000000BBBBULL, {{1, {zcl::cluster::ON_OFF}}}};
@@ -2122,6 +2145,32 @@ TEST_F(ZigbeeHandlerFlowTest, LeavingMarksDeviceOffline) {
 }
 
 // ---- Devices that don't finish answering -----------------------------------
+
+class ZigbeeEndpointListRetryTest : public ZigbeeHandlerFlowTest {
+protected:
+    void SetUp() override {
+        handlerConfig["pairingTimeoutMs"] = 500;
+        ZigbeeHandlerFlowTest::SetUp();
+    }
+};
+
+TEST_F(ZigbeeEndpointListRetryTest, FallsBackToTheEndpointsListedBefore) {
+    FakeZigbeeDevice device{MULTI_ENDPOINT_LIGHT};
+    fake.addDevice(device);
+    fake.holdDescriptor(device.nwkAddr, 1);
+    fake.announceDevice(device);
+    ASSERT_TRUE(fake.waitForSent(ZnpSubsystem::ZDO, cmd::zdo::SIMPLE_DESC_REQ, 1));
+
+    // Its second list never comes, so after the wait it's paired from the first
+    fake.ignoreEndpointRequests(true);
+    fake.announceDevice(device);
+    ASSERT_TRUE(fake.waitForSent(ZnpSubsystem::ZDO, cmd::zdo::ACTIVE_EP_REQ, 2));
+    fake.releaseDescriptors();
+
+    ASSERT_TRUE(eventually([&] { return discoveredCount() == 1; }, 10s));
+    std::lock_guard<std::mutex> lock(mutex);
+    EXPECT_EQ(discovered[0]->type(), DeviceType::Dimmer);
+}
 
 class ZigbeePairingTimeoutTest : public ZigbeeHandlerFlowTest {
 protected:
