@@ -217,8 +217,8 @@ Filesystem      Size  Used Avail Use% Mounted on
 
 | Interface | IP Address | Type |
 |-----------|------------|------|
-| eth0 | 192.168.4.102 | DHCP (Ethernet) |
-| wlan0 | 192.168.4.99 | DHCP (WiFi) |
+| eth0 | DHCP, listed in labctl | Ethernet |
+| wlan0 | DHCP, listed in labctl | WiFi |
 | mDNS | smarthub.local | Avahi |
 
 ### Services

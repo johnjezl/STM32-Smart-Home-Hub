@@ -2,7 +2,9 @@
 
 This document describes how to interact with the STM32MP157F-DK2 lab hardware. It is primarily intended for Claude Code to reference when performing lab operations.
 
-Power control and health checks go through the **labctl MCP tools**, with the SBC name `stm32mp157f-dk2`. Never run the `labctl` CLI. See `CLAUDE.md`.
+Power control and health checks go through the **labctl MCP tools**. Never run the `labctl` CLI. See `CLAUDE.md`.
+
+labctl is the source of truth for the lab: the board's SBC name, its addresses, its power plug and any serial or SDWire assignment are there, in the `lab://sbcs` resource (project `SmartHub`), not in this repo. `<board-ip>` below means an address from there.
 
 ---
 
@@ -10,7 +12,7 @@ Power control and health checks go through the **labctl MCP tools**, with the SB
 
 | Operation | Command |
 |-----------|---------|
-| SSH to board | `ssh root@smarthub.local` or `ssh root@192.168.4.102` |
+| SSH to board | `ssh root@smarthub.local` or `ssh root@<board-ip>` |
 | Power off | `power_off` MCP tool |
 | Power on | `power_on` MCP tool |
 | Power cycle | `power_cycle` MCP tool |
@@ -30,32 +32,21 @@ The SmartHub is accessible via SSH over both Ethernet and WiFi:
 # Via mDNS, if this machine resolves .local names
 ssh root@smarthub.local
 
-# Via WiFi IP
-ssh root@192.168.4.99
-
-# Via Ethernet IP
-ssh root@192.168.4.102
+# Via an address from labctl
+ssh root@<board-ip>
 ```
 
 Authentication is via SSH key (no password).
 
-### IP Addresses
-
-| Interface | IP | Notes |
-|-----------|-----|-------|
-| eth0 (Ethernet) | 192.168.4.102 | DHCP, 1Gbps |
-| wlan0 (WiFi) | 192.168.4.99 | DHCP, 2.4GHz |
-| mDNS | smarthub.local | Works on both interfaces |
+The board has Ethernet and Wi-Fi addresses, both listed in labctl, and answers to `smarthub.local` over mDNS on either.
 
 ---
 
 ## Power Control
 
-### Kasa Smart Plug
+### labctl
 
-The STM32MP157F-DK2 is powered through a Kasa HS300 smart plug strip at `192.168.4.140` (outlet index 5), managed by labctl.
-
-Use the `power_on`, `power_off`, `power_cycle` and `run_health_check` MCP tools with `sbc_name: "stm32mp157f-dk2"`.
+The board's power goes through a smart plug that labctl manages. Use the `power_on`, `power_off`, `power_cycle` and `run_health_check` MCP tools with the board's SBC name from labctl.
 
 ### When to Use Power Control
 
@@ -75,7 +66,7 @@ ssh root@smarthub.local reboot
 
 ### Connection
 
-The ST-Link provides a USB serial port for console access. No serial port is assigned to this board in labctl, so `/dev/ttyACM0` exists only while the ST-Link USB cable is plugged into the machine you're using. Ask the maintainer if it's missing.
+The ST-Link provides a USB serial port for console access. If labctl assigns the board a serial console, use its `serial_capture` and `serial_send` tools. Otherwise `/dev/ttyACM0` exists only while the ST-Link USB cable is plugged into the machine you're using.
 
 ```bash
 # Check for device

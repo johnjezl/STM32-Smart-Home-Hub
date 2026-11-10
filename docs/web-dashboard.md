@@ -21,7 +21,7 @@ https://<device-ip>/
 
 For the STM32MP157F-DK2 development board:
 ```
-https://192.168.4.102/
+https://<board-ip>/
 ```
 
 > **Note**: The dashboard uses a self-signed TLS certificate. You may need to accept a browser security warning on first access.
@@ -94,7 +94,7 @@ The dashboard communicates via REST API:
 These examples use a session cookie from `POST /api/auth/login`. See [Security](security.md#api-authentication) and [API](api.md#authentication).
 
 ```bash
-curl -k -b cookies.txt -X PUT https://192.168.4.102/api/devices/light-living \
+curl -k -b cookies.txt -X PUT https://<board-ip>/api/devices/light-living \
   -H "Content-Type: application/json" \
   -d '{"on": false, "brightness": 50}'
 ```
@@ -152,12 +152,12 @@ web:
 
 1. Copy web files to device:
 ```bash
-scp -O web/* root@192.168.4.102:/opt/smarthub/www/
+scp -O web/* root@<board-ip>:/opt/smarthub/www/
 ```
 
 2. Restart SmartHub:
 ```bash
-ssh root@192.168.4.102 "killall smarthub; /root/smarthub &"
+ssh root@<board-ip> "killall smarthub; /root/smarthub &"
 ```
 
 ### Buildroot Integration
@@ -251,8 +251,8 @@ tail -f /tmp/smarthub.log
 ```bash
 curl -k -c cookies.txt -X POST -H "Content-Type: application/json" \
   -d '{"username":"admin","password":"Your-Password-1"}' \
-  https://192.168.4.102/api/auth/login
-curl -k -b cookies.txt https://192.168.4.102/api/devices
+  https://<board-ip>/api/auth/login
+curl -k -b cookies.txt https://<board-ip>/api/devices
 ```
 
 ### Connection Refused

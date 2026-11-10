@@ -650,7 +650,7 @@ sync
 - ✅ Connect serial console — */dev/ttyACM0 at 115200 baud*
 - ✅ Measure boot time (target: <10 seconds) — *Actual: ~8 seconds*
 - ✅ Verify login works — *Root login via serial, SSH with key auth*
-- ✅ Check networking: — *eth0: 192.168.4.102, wlan0: 192.168.4.99*
+- ✅ Check networking: — *eth0 and wlan0 both get DHCP addresses (labctl lists the current ones)*
 ```bash
 ip addr
 ping -c 3 google.com  # If internet available

@@ -170,7 +170,7 @@ cat /sys/class/remoteproc/remoteproc0/state
 
 ## 6.5 Hardware Testing Results
 
-**Board**: STM32MP157F-DK2 at 192.168.4.99
+**Board**: STM32MP157F-DK2 at <board-ip>
 
 ### Completed Tests
 
@@ -251,7 +251,7 @@ cd tools/rpmsg_poll
 make buildroot
 
 # Deploy to board
-scp -O rpmsg_poll root@192.168.4.99:/root/
+scp -O rpmsg_poll root@<board-ip>:/root/
 
 # On the board - dump current vring state
 ./rpmsg_poll --dump

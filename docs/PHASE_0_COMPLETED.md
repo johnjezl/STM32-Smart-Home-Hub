@@ -159,7 +159,7 @@ Saved `distro_bootpart=8` to U-Boot environment so it scans the correct partitio
 ### Ethernet
 - **Interface**: end0 (not eth0 - new naming convention)
 - **Configuration**: DHCP (automatic)
-- **IP Address**: 192.168.4.102
+- **IP Address**: from DHCP; labctl lists the current one
 
 ### WiFi (Manual Setup Required Each Boot)
 ```bash
@@ -176,7 +176,7 @@ systemctl enable wpa_supplicant@wlan0
 
 ### SSH
 - **Service**: dropbear (lightweight SSH)
-- **Access**: `ssh root@192.168.4.102` (no password)
+- **Access**: `ssh root@<board-ip>` (no password), with an address from labctl
 
 ---
 
