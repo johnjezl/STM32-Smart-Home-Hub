@@ -2,18 +2,15 @@
 """
 STM32 Power Control via Kasa Smart Plug
 
-Don't use this for the lab board. It's powered through labctl (see CLAUDE.md), and
-the default host below is its old plug, so it may no longer switch the board.
+Don't use this for the lab board: it's powered through labctl (see CLAUDE.md), which
+knows its plug. This is for a board on a plug of your own.
 
 Usage:
-    stm32-power.py [on|off|cycle|status] [--host IP]
+    stm32-power.py [on|off|cycle|status] --host IP
 
 Examples:
-    stm32-power.py status
-    stm32-power.py off
-    stm32-power.py on
-    stm32-power.py cycle          # off, wait 3s, on
-    stm32-power.py status --host 192.168.4.100
+    stm32-power.py status --host 192.0.2.20
+    stm32-power.py cycle --host 192.0.2.20    # off, wait 3s, on
 """
 
 import asyncio
@@ -21,7 +18,6 @@ import argparse
 import sys
 from kasa import Device
 
-DEFAULT_HOST = "192.168.4.96"
 CYCLE_DELAY = 3  # seconds between off and on
 
 
@@ -72,8 +68,8 @@ def main():
     parser.add_argument("command", nargs="?", default="status",
                         choices=["on", "off", "cycle", "status"],
                         help="Command to execute (default: status)")
-    parser.add_argument("--host", default=DEFAULT_HOST,
-                        help=f"Kasa plug IP address (default: {DEFAULT_HOST})")
+    parser.add_argument("--host", required=True,
+                        help="Kasa plug IP address")
 
     args = parser.parse_args()
 

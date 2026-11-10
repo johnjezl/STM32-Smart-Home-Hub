@@ -217,15 +217,15 @@ TEST_F(CertManagerIntegrationTest, ServerCertSignedByCA) {
 
 TEST_F(CertManagerIntegrationTest, IpAddressIsInTheCertificate) {
     CertManager mgr(testDir);
-    ASSERT_TRUE(mgr.initialize("test.local", "192.168.4.102"));
+    ASSERT_TRUE(mgr.initialize("test.local", "192.0.2.10"));
 
     FILE* file = fopen(mgr.serverCertPath().c_str(), "r");
     ASSERT_NE(file, nullptr);
     X509* server = PEM_read_X509(file, nullptr, nullptr, nullptr);
     fclose(file);
     ASSERT_NE(server, nullptr);
-    EXPECT_EQ(X509_check_ip_asc(server, "192.168.4.102", 0), 1);
-    EXPECT_EQ(X509_check_ip_asc(server, "192.168.4.103", 0), 0);
+    EXPECT_EQ(X509_check_ip_asc(server, "192.0.2.10", 0), 1);
+    EXPECT_EQ(X509_check_ip_asc(server, "192.0.2.11", 0), 0);
     X509_free(server);
 }
 

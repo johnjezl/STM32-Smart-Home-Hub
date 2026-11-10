@@ -167,7 +167,7 @@ screen /dev/ttyACM0 115200
 
 ### 0.2.5 Network Setup - Ethernet
 - ✅ Connect Ethernet cable
-- ✅ Verify IP address assigned: — *end0 interface, 192.168.4.102*
+- ✅ Verify IP address assigned: — *end0 interface, DHCP (labctl lists the current address)*
 ```bash
 ip addr show eth0
 ```

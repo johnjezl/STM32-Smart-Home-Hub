@@ -350,7 +350,7 @@ For quick iterations, deploy the binary over SSH (CLAUDE.md has the full command
 ```bash
 # Install under a temp name, then rename, so this works while the old binary is running.
 # Sent over ssh stdin because scp may fail against the board's Dropbear.
-ssh root@192.168.4.102 "cat > /usr/bin/smarthub.new && chmod +x /usr/bin/smarthub.new && mv -f /usr/bin/smarthub.new /usr/bin/smarthub" < app/build-arm/smarthub
+ssh root@<board-ip> "cat > /usr/bin/smarthub.new && chmod +x /usr/bin/smarthub.new && mv -f /usr/bin/smarthub.new /usr/bin/smarthub" < app/build-arm/smarthub
 ```
 
 ### NFS Root (Advanced)
@@ -420,17 +420,17 @@ file smarthub
 
 ```bash
 # Copy binary to board (use -O for legacy SCP if sftp not available)
-scp -O build-arm/smarthub root@192.168.4.99:/opt/smarthub/bin/
+scp -O build-arm/smarthub root@<board-ip>:/opt/smarthub/bin/
 
 # Or to /tmp for testing
-scp -O build-arm/smarthub root@192.168.4.99:/tmp/
+scp -O build-arm/smarthub root@<board-ip>:/tmp/
 ```
 
 ### Testing on Target
 
 ```bash
 # SSH to board
-ssh root@192.168.4.99
+ssh root@<board-ip>
 
 # Test help
 /tmp/smarthub --help

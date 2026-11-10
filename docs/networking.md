@@ -207,7 +207,7 @@ SmartHub uses Avahi for multicast DNS:
 │  │ "Who is      │──mDNS───►│ "I am        │                    │
 │  │  smarthub    │  query    │  smarthub    │                    │
 │  │  .local?"    │           │  .local at   │                    │
-│  │              │◄──────────│  192.168.4.99"                    │
+│  │              │◄──────────│  <board-ip>"                      │
 │  └──────────────┘  response └──────────────┘                    │
 │                                                                  │
 └─────────────────────────────────────────────────────────────────┘
